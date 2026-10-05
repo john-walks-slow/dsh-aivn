@@ -17,7 +17,18 @@
 
 包是 DSH 的 bundle（`package.json` 里声明了 `dsh.bundle.patch`）：
 
-- **用插件管理器**：装 `dsh-aivn`，或在 profile 的 `cordis.patch.yml` 里加一行：
+```bash
+dsh plugin --profile web add dsh-aivn
+```
+
+从 GitHub 直装也行——`lib/` 是**跟踪的构建产物**，所以不需要构建脚本、也不会触发
+pnpm 的 `allowBuilds` 拦截：
+
+```bash
+dsh plugin --profile web add github:john-walks-slow/dsh-aivn
+```
+
+- **手工挂**：在 profile 的 `cordis.patch.yml` 里加一行：
 
 ```yaml
 - insert:
@@ -241,7 +252,7 @@ voice: 短句，少用形容词
 | `GET /aivn/play?session=` | 这个会话的剧目：`{ dir, config, voice }`；不是剧目就是 `{ dir: null, voice: false }`。`voice` 说明宿主配没配 TTS，客户端据此决定显不显示语音开关 |
 | `GET /aivn/assets?session=` | `{ index, manifest }`；不是剧目 404 |
 | `GET /aivn/asset?session=&path=` | 剧目内的一件素材。`path` 是**相对剧目根**的路径（如 `assets/backgrounds/x.png`），越界 400 |
-| `GET /aivn/audio?session=&file=` | 一句台词的合成音频。文件名是 `sha1(音色id + 文本)`，内容寻址，所以可以长缓存 |
+| `GET /aivn/audio?session=&file=` | 一句台词的合成音频。文件名是 `sha1(模型 + 音色 id + 文本)`，内容寻址，所以可以长缓存 |
 | `GET /aivn/stream?session=` | SSE，`event: frame`，data 是一帧 `StageFrame` JSON。连上先补推已经播过的帧，15 秒一次 keepalive |
 | `POST /aivn/input { session, text, silent? }` | 玩家的一次输入，投给剧作家。`silent: true` = 不算玩家说的话（舞台的「继续」走这条），仍然会作为一条 user 消息投出去 |
 | `POST /aivn/voice { session, enabled?, paused? }` | 语音总开关与客户端背压。`enabled: false` 让服务端停止分句合成（省额度），`paused` 是播放层积压时的临时背压 |
