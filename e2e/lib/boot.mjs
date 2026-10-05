@@ -22,11 +22,18 @@ export const WORKSPACE = process.env.E2E_WORKSPACE ?? E2E_HOME.replace(/\/\.dsh-
 const CHROMIUM = '/root/.cache/ms-playwright/chromium-1243/chrome-linux-arm64/chrome';
 
 /** 本机 ARM 机器上的共享无头 chromium。 */
-export async function launch() {
+/** 起浏览器。`extraArgs` 给语音那类需要放开自动播放策略的用例用。 */
+export async function launch(extraArgs = []) {
 	return pw.chromium.launch({
 		executablePath: CHROMIUM,
 		headless: true,
-		args: ['--no-sandbox', '--disable-dev-shm-usage', '--enable-unsafe-swiftshader', '--use-angle=swiftshader'],
+		args: [
+			'--no-sandbox',
+			'--disable-dev-shm-usage',
+			'--enable-unsafe-swiftshader',
+			'--use-angle=swiftshader',
+			...extraArgs,
+		],
 	});
 }
 
