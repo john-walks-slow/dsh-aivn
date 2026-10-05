@@ -221,3 +221,15 @@ export const STAGE_CSS = `
 	cursor: default;
 }
 `;
+
+/** 空态：这个会话还没有剧目（工作区里没有 play.json）。 */
+export const EMPTY_CSS = `
+.aivn-empty {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 100%;
+	color: var(--dsh-text-secondary, #8a8f98);
+	font-size: 14px;
+}
+`;

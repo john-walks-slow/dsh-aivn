@@ -1,12 +1,12 @@
 /**
  * 「舞台」会话视图（conversation.view 槽位条目）。
  *
- * Phase 0 的数据来源是宿主半边的写死脚本（`/aivn/stream` 的 SSE），
- * 目的是把「插件包 → DSH 加载 → 浏览器渲染 → 宿主路由」这条链跑通。
- * Phase 1 起换成按会话分频道的真实 IR 流。
+ * 数据来自宿主半边按会话分频的 IR 流（`/aivn/stream?session=`）。这里是一版
+ * 手写的最小渲染，用来把「剧作家 → DSL → IR → 画面」这条链跑通；接着换成
+ * `@aivn/stage` 的 StageTheater（同一个 IR 形状）。
  */
 import { useEffect, useReducer, useState, type FC } from 'react';
-import type { SequencedEvent, StageEvent, StopOption } from '../ir';
+import type { SequencedEvent, StageEvent, StopOption } from '@aivn/core';
 import { STAGE_CSS } from './styles';
 
 export interface StageViewProps {
@@ -107,7 +107,8 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 	const [sending, setSending] = useState(false);
 
 	useEffect(() => {
-		const source = new EventSource('/aivn/stream');
+		if (!sessionId) return;
+		const source = new EventSource(`/aivn/stream?session=${encodeURIComponent(sessionId)}`);
 		source.addEventListener('open', () => dispatch({ type: 'connection', connected: true }));
 		source.addEventListener('error', () => dispatch({ type: 'connection', connected: false }));
 		source.addEventListener('ir', (message) => {
@@ -119,22 +120,20 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 			}
 		});
 		return () => source.close();
-	}, []);
+	}, [sessionId]);
 
 	const submit = async (text: string): Promise<void> => {
-		if (!text.trim() || sending) return;
+		if (!text.trim() || sending || !sessionId) return;
 		setSending(true);
 		try {
-			const response = await fetch('/aivn/input', {
+			await fetch('/aivn/input', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ text }),
+				body: JSON.stringify({ session: sessionId, text }),
 			});
-			const payload = (await response.json()) as { echo?: string };
-			dispatch({ type: 'ir', event: { kind: 'player_input', text: payload.echo ?? text } });
 			setDraft('');
 		} catch {
-			/* Phase 0 不做失败重试；Phase 1 起由引擎给出停止点与错误提示 */
+			/* 输入失败由引擎侧的停止点兜底，这里不重试 */
 		} finally {
 			setSending(false);
 		}
@@ -143,6 +142,10 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 	return (
 		<div className="aivn-stage" data-session={sessionId ?? ''}>
 			<style>{STAGE_CSS}</style>
+
+			{!sessionId ? (
+				<div className="aivn-empty">这个会话还没有剧目。</div>
+			) : null}
 
 			<div className="aivn-scene">
 				{state.sceneBg ? <span className="aivn-scene-label">{state.sceneBg}</span> : null}
