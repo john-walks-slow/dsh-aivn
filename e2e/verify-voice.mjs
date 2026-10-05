@@ -28,8 +28,14 @@ import {
 	waitFor,
 } from './lib/boot.mjs';
 
-/** 最多翻几次页（0 = 不翻，纯等）。 */
-const CLICK_BUDGET = Number(process.env.VOICE_CLICKS ?? 20);
+/**
+ * 起步后最多再点几次舞台。
+ *
+ * 舞台是**手动推进**的：没有当前行就没有音频可播（台词区写着「（点击开始）」），所以测试
+ * 必须先点一下让第一行成为当前行。而此后翻页会 `fastForward` 掐掉正在播的语音——
+ * 所以默认只点这一下，然后等：那才是「玩家开始一轮、慢慢读完第一句」的真实节奏。
+ */
+const CLICK_BUDGET = Number(process.env.VOICE_CLICKS ?? 6);
 
 const results = [];
 const check = (id, ok, note = '') => {
@@ -263,7 +269,32 @@ try {
 		(probe?.decoded ?? 0) > 0 && (probe?.decodeFailed ?? 0) === 0,
 		`浏览器把音频解成了 PCM（成功 ${probe?.decoded ?? 0} / 失败 ${probe?.decodeFailed ?? 0}）`,
 	);
-	check('V11', started > 0, `真有音源起播（${started} 次，翻了 ${clicks} 次页）`);
+	check('V11', started > 0, `自然播放起播（${started} 次，翻了 ${clicks} 次页）`);
+
+	/*
+	 * 判别性的一步：点舞台上的「重听这句」。
+	 *
+	 * 它走 `director.replay(seq)`——按已存下来的 URL 重新拉流解码并起播，**绕开行时序**
+	 * （不依赖「音频回来时这一行还是当前行」）。所以它能分辨两种失败：
+	 * 出声链路本身不通（解码/调度/Web Audio 有问题），还是只是音频追不上播放头。
+	 */
+	const replayClicked = await page.evaluate(() => {
+		const button = [...document.querySelectorAll('button')].find(
+			(el) => (el.getAttribute('title') ?? '') === '重听这句',
+		);
+		if (!button || button.disabled) return false;
+		button.click();
+		return true;
+	});
+	await page.waitForTimeout(3_000);
+	const replayProbe = await page.evaluate(() => window.__voiceProbe ?? null);
+	check(
+		'V16',
+		!replayClicked || (replayProbe?.started ?? 0) > started,
+		replayClicked
+			? `点「重听这句」后音源起播了（${started} → ${replayProbe?.started ?? 0}）`
+			: `舞台上没有可点的「重听这句」（起播仍为 ${started}）`,
+	);
 
 	// 竞速诊断：合成延迟 vs 行时长。不判通过与否，只把数字摆出来。
 	const says = [...new Set(sayFrames.map((frame) => frame.seq))].sort(

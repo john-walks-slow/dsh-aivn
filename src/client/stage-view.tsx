@@ -46,6 +46,15 @@ injectCss('@aivn/stage/stage.css', stageCss);
 /** 语音总开关的持久化键（与 AIVN 同一个 localStorage 键，切换过来时沿用玩家的选择）。 */
 const VOICE_FLAG = SETTING_VOICE;
 
+/**
+ * 为等语音按住这一行的封顶（毫秒）。
+ *
+ * 比 Fish 的常见往返宽一档（实测 2–5s），又不至于在 TTS 挂掉时干等：那种情况下服务端只打
+ * 一行告警、不发任何消息，客户端这枚「合成中」标记自己最长能挂 45 秒（导演的 `PENDING_TTL_MS`），
+ * 拿它当上界等于每行白等 45 秒。
+ */
+const VOICE_WAIT_MS = 8_000;
+
 /** 宿主 `/aivn/stream` 上的一帧，与宿主 `src/hub.ts` 的 `StageFrame` 同构。 */
 type StageFrame =
 	| { seq: number; kind: 'ir'; event: StageEvent }
@@ -346,6 +355,31 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 
 	const transcript = useMemo(() => buildTranscript(null, lines), [lines, revision]);
 
+	/**
+	 * 上一帧渲染时的当前行 seq。
+	 *
+	 * `hold` 要在 `usePlayback` 之前算出来，而这个值只有它返回之后才知道——所以借用上一帧的。
+	 * 舞台每帧都在重渲染（`requestRender`），差一帧不影响判断。
+	 */
+	const currentSeqRef = useRef<number | null>(null);
+	/** 这一行从什么时候开始等语音（等待要封顶，见 `VOICE_WAIT_MS`）。 */
+	const voiceWaitRef = useRef<{ seq: number | null; at: number }>({ seq: null, at: 0 });
+
+	/**
+	 * 该不该为语音按住这一行。
+	 *
+	 * 两半：**正在播**（导演自己判断）与**还在来**。只做前一半会漏掉最常见的那种——
+	 * 文字先上屏、音频后到，播放头在音频回来之前就走过去了，那一句按设计被丢弃
+	 * （`handleAudio` 里 `ready.seq < currentSeq` 直接 return），玩家从头到尾听不到一句。
+	 */
+	const holdForVoice = (): boolean => {
+		if (director.holdsLine()) return true;
+		const seq = currentSeqRef.current;
+		if (seq === null || director.voiceState(seq) !== 'pending') return false;
+		if (voiceWaitRef.current.seq !== seq) voiceWaitRef.current = { seq, at: Date.now() };
+		return Date.now() - voiceWaitRef.current.at < VOICE_WAIT_MS;
+	};
+
 	const playback = usePlayback(builder.cues, lines, {
 		live,
 		resume: true,
@@ -353,11 +387,12 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 		transcript,
 		turbo,
 		resetToken,
-		// 语音在播时别自动翻页：台词读完但声音没完，自动模式会把它掐掉。
-		hold: director.holdsLine(),
+		hold: holdForVoice(),
 		onLineStart: (line) => director.lineStarted(line?.seq, line?.type === 'say'),
 		onFastForward: () => director.fastForward(),
 	});
+	// 交给下一帧的 `holdForVoice()` 用（见上面那个 ref 的说明）。
+	currentSeqRef.current = playback.current?.seq ?? null;
 
 	const busy = live;
 	const lineDone = playback.current === null || playback.shownLength >= playback.current.text.length;
