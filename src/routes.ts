@@ -71,7 +71,7 @@ async function handle(
 			sendJson(res, 404, { error: 'this session has no play' });
 			return;
 		}
-		sendJson(res, 200, { index: await listAssets(play.dir), manifest: await readManifest(play.dir) });
+		sendJson(res, 200, { index: listAssets(play.dir), manifest: readManifest(play.dir) });
 		return;
 	}
 	if (req.method === 'GET' && url.pathname === `${PREFIX}/asset`) {

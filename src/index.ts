@@ -25,7 +25,7 @@ import { installStageTap } from './stage-tap';
 export const name = 'dsh-aivn';
 export { PLAYWRITER_PRESET, STAGEHAND_PRESET } from './session';
 
-export const inject = ['agents', 'sessionController', 'agentPresets', 'commands'];
+export const inject = ['agents', 'sessionController', 'agentPresets', 'commands', 'systemPrompt'];
 
 export async function apply(ctx: Context): Promise<() => void> {
 	const hub = new StageHub();

@@ -7,6 +7,7 @@
 | 路径 | 是什么 |
 | --- | --- |
 | `src/` | 宿主半边（Cordis 插件）：中枢、DSL 管线、路由、剧目脚手架、追收束 |
+| `src/play-context.ts` | A 区注入：把前提 / 角色表 / 素材清单 / 写作参数 / 记忆索引 / 状态区挂进系统提示词 |
 | `src/playwriter/` | 剧作家预设、提示词与它专属的五个工具 |
 | `src/tools/` | 两个预设共用的工具（`create_play`） |
 | `src/client/` | 浏览器半边（React），挂在 `conversation.view` 槽 |
@@ -26,8 +27,13 @@
    那条路只记事件、不改头——只读头会把整条舞台管线丢空。见 `src/session.ts` 的 `sessionPreset`。
 4. **剧作家漏调 `beat_done` 是常态，不是异常。** 快模型时不时把它写成正文里的一行
    `<beat_done …/>`。`src/beat-guard.ts` 在 `agent/turn-stopping` 上追一句把停止点要回来——
-   删掉它，舞台会在半句台词之后停住、玩家没有可点的东西（追收束那一句还要在 `stage-tap`
-   里按正文从玩家输入中摘出去，否则它会变成玩家台词条上的一行）。
+   删掉它，舞台会在半句台词之后停住、玩家没有可点的东西。追收束那一句与舞台的「继续」
+   都会落进 `agent/inbox/inserted`，得在 `src/injected.ts` 里按 `message.id` 登记摘除，
+   否则它们会变成玩家台词条上的一行（**别退回按正文比对**，改一个字就静默失效）。
+5. **提示词分两段**：`PLAYWRITER_PROMPT` 是 persona 的 `prefix`（静态前半），
+   `PLAYWRITER_TAIL` 由 `src/play-context.ts` 注册成 order 200 的段。中间夹着 A 区的动态段——
+   `persona` 那一格只装得下一段静态文本，所以「A 区之后」的几章必须由插件自己挂。
+   改提示词时看清楚一段属于哪半边，别把动态内容写回静态 prefix。
 
 ## 开发
 
@@ -50,6 +56,8 @@ dsh-e2e stop
 - **必须先 `dsh-e2e start`**：`dsh-e2e run` 自己不起实例，实例不在时套件会以
   `missing DSH_E2E_PORT` 直接失败。
 - **改过 `lib/` 之后要 `dsh-e2e stop` 再 `start`**，否则跑的还是旧模块。
+- 套件有两个：`verify-stage.mjs`（演出闭环，14 条）与 `verify-injection.mjs`
+  （A 区注入，11 条）。后者从**会话日志**取系统提示词断言——日志是多帧 zstd，用 `zstd -dc` 解。
 - 两个本地前提在 `.dsh-e2e-home/` 里（不在仓库里）：profile 的 `cordis.patch.yml` 要有可用的
   provider 行（`settings.yaml` 首次启动被 import 后改名，冷启就没 provider 了），
   默认模型挑一个这台机器出得去的（地区受限的条目会直接报

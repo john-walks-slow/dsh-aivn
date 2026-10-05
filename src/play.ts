@@ -5,6 +5,7 @@
  * 是它的身份证，`assets/`、`memory/` 都在它下面。换剧目 = 换个工作目录开会话，
  * 插件不需要另建一套剧目注册表。
  */
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parsePlayConfig, type PlayConfig } from '@aivn/core';
@@ -26,7 +27,6 @@ export interface Play {
  */
 export async function loadPlay(dir: string | undefined | null): Promise<Play | null> {
 	if (!dir) return null;
-
 	let raw: string;
 	try {
 		raw = await readFile(join(dir, PLAY_FILE), 'utf8');
@@ -34,6 +34,26 @@ export async function loadPlay(dir: string | undefined | null): Promise<Play | n
 		if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
 		throw error;
 	}
+	return parsePlay(raw, dir);
+}
+
+/**
+ * 同步版：系统提示词的段 provider 是同步求值的（见 `play-context.ts`），
+ * 每轮要拿 `play.json` 里的写作参数与剧本语言。解析与报错和异步版共用一份。
+ */
+export function loadPlaySync(dir: string | undefined | null): Play | null {
+	if (!dir) return null;
+	let raw: string;
+	try {
+		raw = readFileSync(join(dir, PLAY_FILE), 'utf8');
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+		throw error;
+	}
+	return parsePlay(raw, dir);
+}
+
+function parsePlay(raw: string, dir: string): Play {
 	try {
 		return { dir, config: parsePlayConfig(JSON.parse(raw) as unknown) };
 	} catch (error) {

@@ -78,8 +78,8 @@ export function createListLibraryTool(ctx: PlayContext) {
 
 /** 剧目里现有的全部素材与角色，一行一条。 */
 async function collect(dir: string): Promise<Row[]> {
-	const index = await listAssets(dir);
-	const manifest = await readManifest(dir);
+	const index = listAssets(dir);
+	const manifest = readManifest(dir);
 	const rows: Row[] = [];
 
 	for (const [key, files] of Object.entries(index)) {

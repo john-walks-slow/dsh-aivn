@@ -23,6 +23,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session';
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools';
 import type { BeatGuard } from './beat-guard';
 import type { StageHub } from './hub';
+import { registerPlayContext } from './play-context';
 import { PLAYWRITER_PRESET, STAGEHAND_PRESET, sessionPreset, type LiveAgent } from './session';
 import { createPlayTool } from './tools/create-play';
 import type { PlayContext } from './tools/context';
@@ -75,6 +76,15 @@ export function installPresetTools(ctx: Context, hub: StageHub, guard: BeatGuard
 	};
 }
 
+/** 取剧目根；会话还没有工作目录时给空串——注入读不到东西，但不该让组装炸掉。 */
+function safePlayDir(play: PlayContext): string {
+	try {
+		return play.playDir();
+	} catch {
+		return '';
+	}
+}
+
 /** 把该预设的工具挂到这个 Agent 上，返回一次性卸掉全部的卸载器。 */
 function install(hub: StageHub, agent: ToolAgent, preset: string, guard: BeatGuard): () => void {
 	const sessionId = String(agent.id);
@@ -103,6 +113,12 @@ function install(hub: StageHub, agent: ToolAgent, preset: string, guard: BeatGua
 	}
 
 	const offs = tools.map((tool) => agent.ctx.effect(() => agent.ctx.tools.register(tool), `dsh-aivn:${tool.name}`));
+	if (preset === PLAYWRITER_PRESET) {
+		// A 区注入（前提 / 角色表 / 素材清单 / 写作参数 / 记忆索引 / 状态区 + 静态尾段）。
+		// 只有剧作家的 scope 上有这些段：搭台助手不写剧本，不该看见舞台契约。
+		offs.push(agent.ctx.effect(() => registerPlayContext(agent.ctx, () => safePlayDir(play)), 'dsh-aivn:play-context'));
+	}
+
 	return () => {
 		for (const off of offs.splice(0)) off();
 	};

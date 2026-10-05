@@ -33,7 +33,7 @@ export interface PlayReadiness {
 
 export async function readPlayReadiness(dir: string): Promise<PlayReadiness> {
 	const play = await loadPlay(dir);
-	const index = await listAssets(dir);
+	const index = listAssets(dir);
 	const characters = await countCharacters(dir);
 
 	return {

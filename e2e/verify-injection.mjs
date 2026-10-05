@@ -1,0 +1,121 @@
+#!/usr/bin/env node
+/**
+ * e2e: A 区注入（插件验收）。
+ *
+ * 证明剧作家的系统提示词里真的带上了剧目的上下文——前提、角色表、素材清单、写作参数、
+ * 记忆索引，而不是阶段 1 那句「这些不在这份提示词里，得你自己去读」。
+ *
+ * 判据取自**会话日志**（`system/message` 事件记了完整的系统提示词），不靠模型说什么：
+ * 模型怎么用这些上下文是模型的事，注入有没有发生才是这条链的事。
+ *
+ * 运行：dsh-e2e run e2e/verify-injection.mjs
+ */
+import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { clearPlay, seedPlay, PLAY } from './lib/fixture.mjs';
+import {
+	E2E_HOME,
+	WORKSPACE,
+	dismissOnboarding,
+	gotoGui,
+	launch,
+	newPage,
+	newSession,
+	pickPreset,
+	sendMessage,
+	waitFor,
+} from './lib/boot.mjs';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const SLUG = `--${WORKSPACE.replace(/^\//, '').replace(/[/.]/g, '-')}--`;
+const SESSIONS = join(E2E_HOME, 'sessions', SLUG);
+
+const results = [];
+const check = (id, ok, note = '') => {
+	results.push({ id, ok, note });
+	console.log(`${ok ? '✓' : '✗'} ${id} ${note}`);
+};
+
+/** 最新那个会话目录（刚建的就在最前）。 */
+function newestSession() {
+	const dirs = readdirSync(SESSIONS)
+		.map((name) => join(SESSIONS, name))
+		.filter((path) => statSync(path).isDirectory())
+		.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+	return dirs[0];
+}
+
+/** 会话日志是多帧 zstd，只有 CLI 解得开。 */
+function sessionEvents(sessionDir) {
+	const file = join(sessionDir, 'session.v4.jsonl.zstd');
+	if (!existsSync(file)) return [];
+	const raw = execFileSync('zstd', ['-dc', file], { maxBuffer: 64 * 1024 * 1024 }).toString('utf8');
+	return raw
+		.split('\n')
+		.filter((line) => line.trim() !== '')
+		.flatMap((line) => {
+			try {
+				return [JSON.parse(line)];
+			} catch {
+				return [];
+			}
+		});
+}
+
+function systemPrompt(events) {
+	for (const event of events) {
+		if (event.type !== 'system/message') continue;
+		const content = event.data?.message?.content ?? [];
+		return content.map((block) => block.text ?? '').join('');
+	}
+	return '';
+}
+
+const fixture = seedPlay(WORKSPACE);
+const browser = await launch();
+try {
+	const { page, errors } = await newPage(browser);
+	await gotoGui(page);
+	await dismissOnboarding(page);
+	check('A1', await newSession(page), '已新建会话');
+
+	const preset = await pickPreset(page, '剧作家');
+	check('A2', preset.picked && preset.current === '剧作家', `座位已选为「剧作家」（${preset.current ?? '无'}）`);
+
+	await sendMessage(page, PLAY.opening);
+	const sessionDir = newestSession();
+	// 等到日志里出现系统提示词：那是第一个 step 开头写下的，不用等整轮演完。
+	const got = await waitFor(page, () => true, { timeout: 1_000, label: 'noop' });
+	void got;
+	let prompt = '';
+	for (let i = 0; i < 60; i += 1) {
+		prompt = systemPrompt(sessionEvents(sessionDir));
+		if (prompt !== '') break;
+		await page.waitForTimeout(2_000);
+	}
+
+	const headings = [...prompt.matchAll(/^#{1,2} .+$/gm)].map((m) => m[0]);
+	check('A3', prompt.length > 0, `系统提示词已写出（${prompt.length} 字）`);
+	check('A4', headings.includes('# 剧目设定'), `有《剧目设定》段（${headings.length} 个标题）`);
+	check('A5', headings.includes('# 角色表'), '有《角色表》段');
+	check('A6', headings.includes('# 素材清单'), '有《素材清单》段');
+	check('A7', headings.includes('# 写作参数（本剧目设定，照它写）'), '有《写作参数》段');
+
+	// 内容级：夹具里的前提、角色卡与素材 id 必须真的出现在对应段里
+	check('A8', prompt.includes('梅雨'), '《剧目设定》带的是 premise.md 的正文（不是「去读文件」）');
+	check('A9', prompt.includes('id: lin') && prompt.includes('id: zhou'), '《角色表》带的是两张卡的正文与 id');
+	check('A10', prompt.includes('veranda'), '《素材清单》带的是 assets/ 里真实的素材 id');
+	check('A11', !prompt.includes('不在这份提示词里'), '已经删掉阶段 1 那句「得你自己去读」');
+
+	console.log('\n段序：');
+	for (const heading of headings) console.log(`   ${heading}`);
+	console.log(`\n页面报错：${errors.length}`);
+	console.log(`\n${results.filter((r) => r.ok).length}/${results.length} 通过`);
+} finally {
+	await browser.close();
+	clearPlay(WORKSPACE, fixture);
+}
+
+process.exit(results.every((r) => r.ok) ? 0 : 1);
