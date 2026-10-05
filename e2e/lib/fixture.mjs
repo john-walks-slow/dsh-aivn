@@ -92,6 +92,8 @@ const CRAFT = `# 创作口径
 const CARD_LIN = `---
 name: 林
 sprite: lin
+voice: 少女声
+voiceId: 63bc41e652214372b15d9416a30a60b4
 ---
 
 十七岁，话少，习惯先看窗外再看人。手里那把伞是从别人那儿借来的。

@@ -13,6 +13,7 @@
  * 任何一个 dsh-base 打底的剖面都拿得到。
  */
 import type { Context } from '@deepseek-ai/cordis';
+import z from '@deepseek-ai/schemastery';
 import { BeatGuard, installBeatGuard } from './beat-guard';
 import { installPlayCommands } from './commands';
 import { StageHub } from './hub';
@@ -21,19 +22,74 @@ import { registerPresets } from './playwriter/preset';
 import { installPresetTools } from './preset-tools';
 import { installStageRoutes } from './routes';
 import { installStageTap } from './stage-tap';
+import { createTts } from './tts';
+import { VoiceHost } from './voice-host';
 
 export const name = 'dsh-aivn';
+
+/** 配的 key 优先，环境变量兜底（`DSH_AIVN_TTS_KEYS`，逗号分隔）。 */
+function configuredKeys(config: Config): string[] {
+	const fromConfig = (config.tts?.keys ?? []).map((key) => key.trim()).filter((key) => key !== '');
+	if (fromConfig.length > 0) return fromConfig;
+	return (process.env.DSH_AIVN_TTS_KEYS ?? '')
+		.split(',')
+		.map((key) => key.trim())
+		.filter((key) => key !== '');
+}
 export { PLAYWRITER_PRESET, STAGEHAND_PRESET } from './session';
 
 export const inject = ['agents', 'sessionController', 'agentPresets', 'commands', 'systemPrompt'];
 
-export async function apply(ctx: Context): Promise<() => void> {
+/** Fish Audio 的公开端点与免费开发者模型（AIVN 用的同一个）。 */
+const DEFAULT_TTS_BASE_URL = 'https://api.fish.audio';
+const DEFAULT_TTS_MODEL = 's2.1-pro-free';
+
+export interface Config {
+	tts?: {
+		/** 一把或多把 Fish Audio key（多把轮询分摊额度）。也可以走环境变量。 */
+		keys?: string[];
+		baseUrl?: string;
+		model?: string;
+		/** 同时合成的上限：摊往返，又不把额度一次打空。 */
+		concurrency?: number;
+	};
+}
+
+/**
+ * 配置面。写进 profile 的 `cordis.patch.yml`：
+ *
+ *     - id: aivn
+ *       name: dsh-aivn
+ *       config:
+ *         tts:
+ *           keys: ["<your-fish-key>"]
+ *
+ * 不想把 key 写进配置文件的话留空，走环境变量 `DSH_AIVN_TTS_KEYS`（逗号分隔）。
+ * 两处都没有 = 没有语音：客户端连语音开关都不显示。
+ */
+export const Config = z.object({
+	tts: z
+		.object({
+			keys: z.array(z.string()).default([]),
+			baseUrl: z.string().default(DEFAULT_TTS_BASE_URL),
+			model: z.string().default(DEFAULT_TTS_MODEL),
+			concurrency: z.natural().default(2),
+		})
+		.default({}),
+});
+
+export async function apply(ctx: Context, config: Config = {}): Promise<() => void> {
 	const hub = new StageHub();
 	const guard = new BeatGuard();
 	/** 「引擎自己投的消息」的登记，追收束（`beat-guard`）与静默推进（`routes`）共用一份。 */
 	const injected = new InjectedMessages();
+	const tts = createTts(configuredKeys(config), config.tts?.baseUrl ?? DEFAULT_TTS_BASE_URL, config.tts?.model ?? DEFAULT_TTS_MODEL);
+	const voice = new VoiceHost(tts, hub, ctx.logger);
+	if (tts) ctx.logger.info('[dsh-aivn] 语音已启用（Fish Audio TTS）');
+	else ctx.logger.info('[dsh-aivn] 没配 TTS key，语音停用');
+
 	const disposers: Array<() => void> = [
-		installStageTap(ctx, hub, guard, injected),
+		installStageTap(ctx, hub, guard, injected, voice),
 		installPresetTools(ctx, hub, guard),
 		installBeatGuard(ctx, guard, injected),
 		installPlayCommands(ctx),
@@ -41,7 +97,7 @@ export async function apply(ctx: Context): Promise<() => void> {
 	];
 
 	ctx.inject(['webServer'], (webCtx) => {
-		disposers.push(installStageRoutes(webCtx, hub, injected));
+		disposers.push(installStageRoutes(webCtx, hub, injected, voice));
 		webCtx.logger.info('[dsh-aivn] stage routes mounted on /aivn');
 	});
 
@@ -49,5 +105,6 @@ export async function apply(ctx: Context): Promise<() => void> {
 		for (const dispose of disposers.splice(0)) dispose();
 		// 路由随插件注销，但挂着的 SSE 连接与心跳不会自己走。
 		hub.dispose();
+		voice.dispose();
 	};
 }

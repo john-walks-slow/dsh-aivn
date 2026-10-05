@@ -23,13 +23,16 @@ export type BeatState = 'start' | 'end';
  *   两者完全同构，画面不分出处。
  * - `beat`：剧作家的轮边界。画面据此区分「还在写字」与「写完了，等玩家」——
  *   `no_stop` 的轮（剧作家没给停止点就收笔）没有 IR 可看，边界是它唯一的信号。
+ * - `voice`：语音。`lineSeq` 是**那一行 `say_start` 帧的 seq**（不是本帧的 seq）——
+ *   客户端按它把音频挂回台词行上。
  */
 export type StageFrame = StageFrameBody & { seq: number };
 
 /** 帧的正文部分：还没标号的那一段（`seq` 由中枢统一发）。 */
 type StageFrameBody =
 	| { kind: 'ir'; event: StageEvent }
-	| { kind: 'beat'; state: BeatState };
+	| { kind: 'beat'; state: BeatState }
+	| { kind: 'voice'; lineSeq: number; phrase: number; state: 'started' | 'ready'; url?: string };
 
 /** 一条挂着的 SSE 连接：响应 + 它的心跳。 */
 interface Client {
@@ -50,6 +53,14 @@ export class StageHub {
 	/** 收下一帧轮边界。 */
 	appendBeat(sessionId: string, state: BeatState): StageFrame {
 		return this.push(sessionId, { kind: 'beat', state });
+	}
+
+	/** 收下一帧语音状态（哪一行、第几个短语、合成中还是好了）。 */
+	appendVoice(
+		sessionId: string,
+		voice: { lineSeq: number; phrase: number; state: 'started' | 'ready'; url?: string },
+	): StageFrame {
+		return this.push(sessionId, { kind: 'voice', ...voice });
 	}
 
 	private push(sessionId: string, frame: StageFrameBody): StageFrame {

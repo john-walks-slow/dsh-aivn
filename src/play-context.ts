@@ -373,6 +373,28 @@ function renderState(dir: string, characterIds: readonly string[]): string {
 
 /* ── 角色卡读盘 ─────────────────────────────────────────────────────────── */
 
+/**
+ * 音色表：角色 id → 音色 id。由 `voice-host` 用（一行台词要不要合成、用谁的声音）。
+ *
+ * 按目录缓存一秒：一行的每个短语都会问一次，但卡片本身不会在一行之内改。
+ */
+const voiceMaps = new Map<string, { at: number; map: Map<string, string> }>();
+
+export function readVoiceMap(dir: string): Map<string, string> {
+	const now = Date.now();
+	const cached = voiceMaps.get(dir);
+	if (cached && now - cached.at < TTL_MS) return cached.map;
+
+	const map = new Map<string, string>();
+	for (const card of readCharacterCards(dir)) {
+		// 音色的真相是卡上的 `voiceId`（Fish 的音色 id）；只有口语描述（`voice`）时合成不了，
+		// 不拿描述去猜一个 id——那只会得到 400。
+		if (card.voiceId) map.set(card.id, card.voiceId);
+	}
+	voiceMaps.set(dir, { at: now, map });
+	return map;
+}
+
 function readCharacterCards(dir: string): Array<CharacterDocument & { id: string }> {
 	const root = join(dir, 'characters');
 	if (!existsSync(root)) return [];

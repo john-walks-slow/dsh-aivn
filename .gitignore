@@ -12,3 +12,6 @@ docs/research/
 /assets/
 /characters/
 /memory/
+
+# 语音合成本地缓存（内容寻址、可重建）
+/media-cache/

@@ -22,8 +22,22 @@
 - **客户端半边**（「舞台」tab）挂在 `conversation.view` 槽上，需要 `dsh-web-app`。它在
   `package.json` 的 `dsh.client{platform:"web"}` 里声明，不走 Loader。
 
-本插件目前**没有可配的项**（`config: {}`）：两个预设、六个工具、一条 `/new-play` 命令、
-`/aivn` 路由都是固定的。
+可配的只有**语音**一项（不配就是没有语音，其余照常）：
+
+```yaml
+- id: aivn
+  name: dsh-aivn
+  config:
+    tts:
+      keys: ["<your-fish-audio-key>"]   # 多把可轮询，摊免费额度
+      baseUrl: https://api.fish.audio    # 默认值，一般不用写
+      model: s2.1-pro-free               # 默认值
+      concurrency: 2                     # 同时合成的上限
+```
+
+不想把 key 写进配置文件就留空，改走环境变量 `DSH_AIVN_TTS_KEYS`（逗号分隔）。
+两处都没有 = 舞台连语音开关都不显示。两个预设、六个工具、一条 `/new-play` 命令、
+`/aivn` 路由都是固定的，不可配。
 
 > 开发期 `@aivn/core` 与 `@aivn/stage` 走 `file:` 依赖（指向 stage-ai 仓库）。发布版换成版本号。
 
@@ -220,15 +234,22 @@ voice: 短句，少用形容词
 | `GET /aivn/play?session=` | 这个会话的剧目：`{ dir, config }`；不是剧目就是 `{ dir: null }` |
 | `GET /aivn/assets?session=` | `{ index, manifest }`；不是剧目 404 |
 | `GET /aivn/asset?session=&path=` | 剧目内的一件素材。`path` 是**相对剧目根**的路径（如 `assets/backgrounds/x.png`），越界 400 |
+| `GET /aivn/audio?session=&file=` | 一句台词的合成音频。文件名是 `sha1(音色id + 文本)`，内容寻址，所以可以长缓存 |
 | `GET /aivn/stream?session=` | SSE，`event: frame`，data 是一帧 `StageFrame` JSON。连上先补推已经播过的帧，15 秒一次 keepalive |
 | `POST /aivn/input { session, text, silent? }` | 玩家的一次输入，投给剧作家。`silent: true` = 不算玩家说的话（舞台的「继续」走这条），仍然会作为一条 user 消息投出去 |
+| `POST /aivn/voice { session, enabled?, paused? }` | 语音总开关与客户端背压（播放层积压时暂停预取，省额度） |
 
-`StageFrame` 有两种：
+`StageFrame` 有三种：
 
 ```ts
 { seq, kind: 'ir',   event: StageEvent }   // DSL 解析出的 IR
 { seq, kind: 'beat', state: 'start' | 'end' }  // 剧作家起笔 / 停笔
+{ seq, kind: 'voice', lineSeq, phrase, state: 'started' | 'ready', url? }  // 语音
 ```
+
+`voice` 帧的 `lineSeq` 是**那一行 `say_start` 帧的 seq**（不是本帧的 seq）——音频按它挂回台词行。
+`started` 用来让喇叭亮起来（还在合成），`ready` 带上可播的 URL。台词与音频是并行出的：
+文字先上屏，声音好了接上，接不上就静音演完（合成失败只打一行告警，不阻塞演出）。
 
 **玩家输入不在这条流里由路由写入**：`/aivn/input` 只负责投递，落点只有一处——宿主监听
 `agent/inbox/inserted`，于是 DSH 原生输入框与舞台的选肢卡走同一条路，既不会各写一条，也不会漏写。

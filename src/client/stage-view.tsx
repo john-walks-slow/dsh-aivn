@@ -20,14 +20,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react';
 import {
 	ScriptBuilder,
+	SETTING_VOICE,
 	StageTheater,
 	StopPanel,
 	ToastStack,
+	VoiceDirector,
 	buildAssetIndex,
 	buildTranscript,
+	readFlag,
 	stopAffordance,
 	usePlayback,
 	useToasts,
+	writeFlag,
 	type DirectorTargets,
 } from '@aivn/stage';
 import type { AssetMeta, PlayConfig, StageEvent, StopPayload } from '@aivn/core';
@@ -39,15 +43,22 @@ const CONTINUE = '（继续）';
 
 injectCss('@aivn/stage/stage.css', stageCss);
 
+/** 语音总开关的持久化键（与 AIVN 同一个 localStorage 键，切换过来时沿用玩家的选择）。 */
+const VOICE_FLAG = SETTING_VOICE;
+
 /** 宿主 `/aivn/stream` 上的一帧，与宿主 `src/hub.ts` 的 `StageFrame` 同构。 */
 type StageFrame =
 	| { seq: number; kind: 'ir'; event: StageEvent }
-	| { seq: number; kind: 'beat'; state: 'start' | 'end' };
+	| { seq: number; kind: 'beat'; state: 'start' | 'end' }
+	/** `lineSeq` 是那一行 `say_start` 帧的 seq，不是本帧的 seq。 */
+	| { seq: number; kind: 'voice'; lineSeq: number; phrase: number; state: 'started' | 'ready'; url?: string };
 
 interface PlayPayload {
 	/** 没有剧目时为 null。 */
 	dir: string | null;
 	config?: PlayConfig;
+	/** 宿主配了 TTS 才有语音：没有的时候连语音开关都不显示。 */
+	voice?: boolean;
 }
 
 interface AssetsPayload {
@@ -72,6 +83,9 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 	const [failed, setFailed] = useState<string | null>(null);
 	const [resetToken, setResetToken] = useState(0);
 	const toast = useToasts();
+	const [voiceOn, setVoiceOn] = useState(() =>
+		typeof window === 'undefined' ? true : readFlag(window.localStorage, VOICE_FLAG, true),
+	);
 
 	/**
 	 * 这一轮里剧作家交过停止点没有。
@@ -79,6 +93,16 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 	 * 用 ref 而不是 state：它与渲染无关，只在一个 `beat` 帧到达的那一刻被读一次；
 	 * 放进 state 会多绕一轮渲染，还可能读到上一个「停笔」事件的值。
 	 */
+	/**
+	 * 语音导演：单一 AudioContext、句级 gapless、背压上报。
+	 *
+	 * 它住在 `@aivn/stage` 里（`audio.ts`），插件这边只做三件事：把宿主推来的
+	 * 「这一行在合成 / 好了」喂给它、把它的播放状态告诉舞台、把它要的背压转发回宿主。
+	 */
+	const directorRef = useRef<VoiceDirector | null>(null);
+	if (directorRef.current === null) directorRef.current = new VoiceDirector();
+	const director = directorRef.current;
+
 	const sawStop = useRef(false);
 	/**
 	 * 已经应用到的最大 seq。
@@ -100,6 +124,25 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 			setRevision((n) => n + 1);
 		});
 	}, []);
+
+	/* 语音导演的接口：重渲通知、背压上报、总开关、卸载。 */
+	useEffect(() => {
+		director.onNotify = () => requestRender();
+		director.onControl = (state) => {
+			if (!sessionId) return;
+			// 背压是省配额用的，失败了不值得打扰玩家——下一次积压还会再报一次。
+			void postJson('/aivn/voice', { session: sessionId, ...state }).catch(() => undefined);
+		};
+		return () => {
+			director.onNotify = null;
+			director.onControl = null;
+			director.dispose();
+		};
+	}, [director, sessionId, requestRender]);
+
+	useEffect(() => {
+		director.setEnabled(voiceOn);
+	}, [director, voiceOn]);
 
 	/* 剧目与素材：两者都只在会话变化时取一次。素材表要等剧目确认存在再取——
 	   不是剧目的会话会拿到 404，那是预期内的空态，不该报错。 */
@@ -137,6 +180,7 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 		// 不清，新会话的补推会被当成重复帧丢掉（seq 从 1 起、小于上一部的最大值），
 		// 舞台上留着上一部戏的台词。首挂时这一次结算打在空对象上，无害。
 		builder.reset();
+		director.reset();
 		lastSeq.current = 0;
 		sawStop.current = false;
 		continued.current = false;
@@ -160,6 +204,7 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 				// 断档：断线期间滚出缓冲的帧（上限 4000）已经拿不回来，只能整段重放。
 				// 把 lastSeq 压到 `seq - 1` 而不是 0，否则这一帧自己又会被判成断档，绕不出来。
 				builder.reset();
+				director.reset();
 				setResetToken((n) => n + 1);
 				sawStop.current = false;
 				setStop(null);
@@ -169,8 +214,18 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 			if (frame.seq <= lastSeq.current) return;
 			lastSeq.current = frame.seq;
 
+			if (frame.kind === 'voice') {
+				// `lineSeq` 是那一行 `say_start` 帧的 seq——语音挂在台词行上，不是挂在流的位置上。
+				if (frame.state === 'ready' && frame.url) director.handleAudio({ seq: frame.lineSeq, phrase: frame.phrase, url: frame.url });
+				else if (frame.state === 'started') director.markPending(frame.lineSeq, frame.phrase);
+				requestRender();
+				return;
+			}
+
 			if (frame.kind === 'beat') {
 				if (frame.state === 'start') {
+					// 新的一轮：上一轮迟到的音频一律丢弃（语音导演按这个门槛清台账）。
+					director.beatStarted();
 					sawStop.current = false;
 					setStop(null);
 					setIsNoStop(false);
@@ -246,6 +301,22 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 
 	const lines = builder.lines;
 	const playConfig = play?.dir ? (play.config ?? null) : null;
+	/** 宿主配了 TTS、这一座剧目也确实是剧目，才显示语音相关的一切。 */
+	const voiceAvailable = play?.voice === true && playConfig !== null;
+
+	const toggleVoice = useCallback((): void => {
+		setVoiceOn((on) => {
+			const next = !on;
+			if (typeof window !== 'undefined') writeFlag(window.localStorage, VOICE_FLAG, next);
+			return next;
+		});
+	}, []);
+
+	/** 「点击开始」：移动端 AudioContext 必须在用户手势里 resume，不然一句都放不出来。 */
+	const unlockVoice = useCallback((): void => {
+		director.unlock();
+		requestRender();
+	}, [director, requestRender]);
 
 	const names = useMemo(
 		() => Object.fromEntries((playConfig?.characters ?? []).map((card) => [card.id, card.name ?? card.id])),
@@ -270,6 +341,10 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 		transcript,
 		turbo,
 		resetToken,
+		// 语音在播时别自动翻页：台词读完但声音没完，自动模式会把它掐掉。
+		hold: director.holdsLine(),
+		onLineStart: (line) => director.lineStarted(line?.seq, line?.type === 'say'),
+		onFastForward: () => director.fastForward(),
 	});
 
 	const busy = live;
@@ -313,9 +388,9 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 				fresh={lines.length === 0}
 				names={names}
 				index={index}
-				voiceAvailable={false}
-				voiceOn={false}
-				onToggleVoice={noop}
+				voiceAvailable={voiceAvailable}
+				voiceOn={voiceOn}
+				onToggleVoice={toggleVoice}
 				busy={busy}
 				targets={targets}
 				directorBar={false}
@@ -324,9 +399,9 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 				onEdit={noop}
 				onFork={noop}
 				onGenerateCg={noop}
-				onReplay={noop}
-				voiceState={() => 'none'}
-				onUnlock={noop}
+				onReplay={(seq) => void director.replay(seq)}
+				voiceState={(seq) => director.voiceState(seq)}
+				onUnlock={unlockVoice}
 				onTurbo={setTurbo}
 				canContinue={affordance.clickToContinue}
 				onContinue={continueOn}

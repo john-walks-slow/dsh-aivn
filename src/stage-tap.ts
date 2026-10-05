@@ -10,6 +10,9 @@
  *   `beat_done` 没给停止点的那一轮（no_stop）没有任何 IR 可看，边界就是它全部的信号。
  *   不取消息边界（assistant-stream 的 end）是因为一轮里可以有多次消息收束（中途调工具），
  *   那会把一次演出误报成好几次收笔。
+ * - `say` 那一束（`say_start` / `say_text` / `say_end`）：同一份 IR 顺手喂给语音管线。
+ *   关联键用 **`say_start` 那一帧的 seq**——协议就是这个口径（`ws/protocol.ts`：
+ *   「seq = 所属 say 行 say_start 事件的序号，客户端据此关联行」）。
  * - `agent/inbox/inserted`：玩家的每一次输入。DSH 原生输入框与舞台的选肢/自由输入都经
  *   inbox 进 Agent，于是时间线上只有这一处落点，两条路既不会各写一条、也不会漏写。
  *   引擎自己投的那些（追收束、空「继续」）也走这条路，靠 `InjectedMessages` 按 id 摘出去——
@@ -22,6 +25,9 @@ import type { UserMessage } from '@deepseek-ai/dsh-llm';
 import type { BeatGuard } from './beat-guard';
 import type { StageHub } from './hub';
 import type { InjectedMessages } from './injected';
+import { sessionWorkspace } from './session';
+import type { VoiceHost } from './voice-host';
+import type { VoicePipeline } from './voice';
 import { PLAYWRITER_PRESET, sessionPreset } from './session';
 
 /** 事件载荷都带一层 `{ agent }` 外壳（由 agent 作用域的分发器补上）。 */
@@ -50,19 +56,39 @@ export function installStageTap(
 	hub: StageHub,
 	guard: BeatGuard,
 	injected: InjectedMessages,
+	voice: VoiceHost,
 ): () => void {
 	const parsers = new Map<string, StageDslParser>();
+	/** 每会话的语音管线（懒建：这一行的角色没有音色时它什么都不做）。 */
+	const voices = new Map<string, VoicePipeline | null>();
+
+	const pipelineFor = (sessionId: string): VoicePipeline | null => {
+		if (voices.has(sessionId)) return voices.get(sessionId) ?? null;
+		const dir = sessionWorkspace(ctx, sessionId);
+		const pipeline = dir ? voice.forSession(sessionId, dir) : null;
+		voices.set(sessionId, pipeline);
+		return pipeline;
+	};
 
 	const parserFor = (sessionId: string): StageDslParser => {
 		let parser = parsers.get(sessionId);
 		if (!parser) {
 			parser = new StageDslParser((event) => {
-				hub.append(sessionId, event);
+				const frame = hub.append(sessionId, event);
 				if (hasLines(event)) guard.noteLines(sessionId);
+				feedVoice(sessionId, event, frame.seq);
 			});
 			parsers.set(sessionId, parser);
 		}
 		return parser;
+	};
+
+	/** 一行台词喂给语音管线：起行、喂字、封行。其他 IR 与它无关。 */
+	const feedVoice = (sessionId: string, event: StageEvent, frameSeq: number): void => {
+		if (!voice.available) return;
+		if (event.kind === 'say_start') pipelineFor(sessionId)?.lineStart(frameSeq, event.id);
+		else if (event.kind === 'say_text') pipelineFor(sessionId)?.feedText(event.delta);
+		else if (event.kind === 'say_end') pipelineFor(sessionId)?.lineEnd();
 	};
 
 	/** 这条会话是不是舞台上的那一出。不是就整条管线都不碰。 */
@@ -110,6 +136,7 @@ export function installStageTap(
 		offStatus();
 		offInput();
 		parsers.clear();
+		voices.clear();
 	};
 }
 
