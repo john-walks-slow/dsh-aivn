@@ -127,14 +127,32 @@ export function installStageTap(
 		if (text) hub.append(sessionId, { kind: 'player_input', text });
 	};
 
+	/**
+	 * 会话收摊：解析器、语音管线、轮状态都丢。
+	 *
+	 * 这三样都是**流式过程里的状态**：agent 没了，半行文本、分句器、在飞的合成、这一轮追没追过
+	 * 就都没有意义了；不丢的话每开过一条会话都在进程里留一份，长跑只涨不落。
+	 *
+	 * 中枢的帧缓冲**不丢**：会话关掉再打开时，舞台靠它把已经演过的部分重放出来。
+	 */
+	const onDisposed = (payload: AgentShell): void => {
+		const sessionId = payload.agent.id;
+		parsers.delete(sessionId);
+		voices.delete(sessionId);
+		voice.disposeSession(sessionId);
+		guard.forget(sessionId);
+	};
+
 	const offFrame = ctx.on('agent/assistant-stream', onFrame);
 	const offStatus = ctx.on('agent/status', onStatus);
 	const offInput = ctx.on('agent/inbox/inserted', onInput);
+	const offDisposed = ctx.on('agent/disposed', onDisposed);
 
 	return () => {
 		offFrame();
 		offStatus();
 		offInput();
+		offDisposed();
 		parsers.clear();
 		voices.clear();
 	};

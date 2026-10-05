@@ -58,6 +58,12 @@ export class VoiceHost {
 		return pipeline;
 	}
 
+	/** 一条会话收摊：停掉它的管线（队列、在飞的请求、行内状态一起清）。 */
+	disposeSession(sessionId: string): void {
+		this.pipelines.get(sessionId)?.dispose();
+		this.pipelines.delete(sessionId);
+	}
+
 	/** 语音总开关 / 客户端背压。会话还没建管线时什么都不用做。 */
 	control(sessionId: string, state: { enabled?: boolean; paused?: boolean }): void {
 		const pipeline = this.pipelines.get(sessionId);

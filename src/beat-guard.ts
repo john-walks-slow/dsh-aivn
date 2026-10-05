@@ -63,6 +63,11 @@ export class BeatGuard {
 		if (beat) beat.closed = true;
 	}
 
+	/** 一条会话收摊：它的轮状态不用再留。 */
+	forget(sessionId: string): void {
+		this.beats.delete(sessionId);
+	}
+
 	/** 该不该追这一轮；该追时同时记下「追过了」，所以同一个问题只会问一次。 */
 	claim(sessionId: string): boolean {
 		const beat = this.beats.get(sessionId);
