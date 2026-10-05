@@ -1,0 +1,8 @@
+# dsh-aivn — bundle patch layer.
+#
+# 这里只声明宿主半边。客户端半边不走 Loader，入口写在 package.json：
+#   exports["./client"] + dsh.client{platform:"web"}
+- insert:
+    - id: dsh-aivn
+      name: dsh-aivn
+      config: {}

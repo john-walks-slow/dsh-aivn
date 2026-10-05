@@ -1,0 +1,7 @@
+node_modules/
+*.tsbuildinfo
+.worktrees/
+.dsh-e2e-home/
+e2e-artifacts/
+docs/research/
+*.log
