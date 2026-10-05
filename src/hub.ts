@@ -31,10 +31,16 @@ type StageFrameBody =
 	| { kind: 'ir'; event: StageEvent }
 	| { kind: 'beat'; state: BeatState };
 
+/** 一条挂着的 SSE 连接：响应 + 它的心跳。 */
+interface Client {
+	res: ServerResponse;
+	keepalive: NodeJS.Timeout;
+}
+
 export class StageHub {
 	private readonly buffers = new Map<string, StageFrame[]>();
 	private readonly seqs = new Map<string, number>();
-	private readonly clients = new Map<string, Set<ServerResponse>>();
+	private readonly clients = new Map<string, Set<Client>>();
 
 	/** 收下一帧舞台 IR：标号、入缓冲、广播。 */
 	append(sessionId: string, event: StageEvent): StageFrame {
@@ -56,7 +62,7 @@ export class StageHub {
 		if (buffer.length > BUFFER_LIMIT) buffer.splice(0, buffer.length - BUFFER_LIMIT);
 		this.buffers.set(sessionId, buffer);
 
-		for (const client of this.clients.get(sessionId) ?? []) writeEvent(client, framed);
+		for (const client of this.clients.get(sessionId) ?? []) writeEvent(client.res, framed);
 		return framed;
 	}
 
@@ -79,19 +85,43 @@ export class StageHub {
 		res.write(': open\n\n');
 		for (const frame of this.history(sessionId)) writeEvent(res, frame);
 
-		const clients = this.clients.get(sessionId) ?? new Set<ServerResponse>();
-		clients.add(res);
+		const clients = this.clients.get(sessionId) ?? new Set<Client>();
+		const client: Client = { res, keepalive: setInterval(() => res.write(': keepalive\n\n'), KEEPALIVE_MS) };
+		clients.add(client);
 		this.clients.set(sessionId, clients);
 
-		const keepalive = setInterval(() => res.write(': keepalive\n\n'), KEEPALIVE_MS);
 		return () => {
-			clearInterval(keepalive);
-			clients.delete(res);
+			clearInterval(client.keepalive);
+			clients.delete(client);
 			if (clients.size === 0) this.clients.delete(sessionId);
 		};
 	}
+
+	/**
+	 * 插件卸载：把还挂着的 SSE 连接与心跳全收掉。
+	 *
+	 * 路由是随插件注销的，但连接与 `setInterval` 不会跟着走——不收，卸载之后每 15 秒还有
+	 * 一堆心跳往已注销的路由上的死连接里写，帧缓冲也一直压在内存里。
+	 */
+	dispose(): void {
+		for (const clients of this.clients.values()) {
+			for (const client of clients) {
+				clearInterval(client.keepalive);
+				client.res.end();
+			}
+		}
+		this.clients.clear();
+		this.buffers.clear();
+		this.seqs.clear();
+	}
 }
 
+/**
+ * 一帧 SSE。
+ *
+ * 事件名是 `frame` 而不是 `ir`：`beat` 帧（轮边界）与 `ir` 帧同走这一条流，
+ * 拿其中一类的名字当整条流的名字，读客户端代码的人会以为这里只发 IR。
+ */
 function writeEvent(res: ServerResponse, frame: StageFrame): void {
-	res.write(`event: ir\ndata: ${JSON.stringify(frame)}\n\n`);
+	res.write(`event: frame\ndata: ${JSON.stringify(frame)}\n\n`);
 }

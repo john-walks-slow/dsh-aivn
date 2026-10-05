@@ -53,8 +53,16 @@ export async function scaffoldPlay(dir: string, spec: PlaySpec): Promise<Scaffol
 	const title = spec.title.trim();
 	if (title === '') throw new Error('剧目名不能是空的');
 
-	const id = (spec.id ?? '').trim() || basename(dir);
-	if (!ID_PATTERN.test(id)) throw new Error(`剧目 id 不合法：${id}（字母或数字开头，不含空白与路径分隔符）`);
+	const explicit = (spec.id ?? '').trim();
+	const id = explicit || idFromDir(dir);
+	if (!ID_PATTERN.test(id)) {
+		throw new Error(
+			explicit
+				? `剧目 id 不合法：${explicit}（字母或数字开头，不含空白与路径分隔符）`
+				: `工作目录名「${basename(dir)}」派生不出合法的剧目 id，`
+					+ '请显式给一个（字母或数字开头，不含空白与路径分隔符）',
+		);
+	}
 
 	const characters = (spec.characters ?? []).map(normalizeCharacter);
 	const playPath = join(dir, PLAY_FILE);
@@ -102,6 +110,20 @@ export async function scaffoldPlay(dir: string, spec: PlaySpec): Promise<Scaffol
 	}
 }
 
+/**
+ * 从工作目录名派生一个合法的剧目 id。
+ *
+ * 目录名是用户随手起的：「My Plays」、「我的戏 2026」、「.hidden」都过不了 `ID_PATTERN`。
+ * 直接拿目录名当 id，等于让最常见的用法（在一个空目录里起剧目）当场报错。逐段收敛：
+ * 空白与不友好字符折成 `-`，开头的非字母数字去掉，尾巴上的标点也去掉。
+ */
+function idFromDir(dir: string): string {
+	return basename(dir)
+		.replace(/[^\p{L}\p{N}._-]+/gu, '-')
+		.replace(/^[^\p{L}\p{N}]+/u, '')
+		.replace(/[._-]+$/u, '');
+}
+
 function normalizeCharacter(spec: PlayCharacterSpec): PlayCharacterSpec {
 	const id = spec.id.trim();
 	if (!ID_PATTERN.test(id)) throw new Error(`角色 id 不合法：${spec.id}（字母或数字开头，不含空白与路径分隔符）`);
@@ -110,6 +132,17 @@ function normalizeCharacter(spec: PlayCharacterSpec): PlayCharacterSpec {
 
 /** 角色卡：frontmatter 头部（只有 name）+ 正文。两段都空 = 不落这份文件。 */
 function cardSource(character: PlayCharacterSpec): string {
-	const head = character.name ? `---\nname: ${character.name}\n---\n` : '';
+	const head = character.name ? `---\nname: ${yamlScalar(character.name)}\n---\n` : '';
 	return `${head}${character.persona ? `${character.persona}\n` : ''}`;
+}
+
+/**
+ * frontmatter 里的一个标量。
+ *
+ * 名字是用户写的，什么都可能有：「小樱: 二代目」「- 未知 -」「#1」。直接拼进去，
+ * YAML 解析出来的就不是这个名字——冒号后面当映射、`#` 后面当注释、`-` 当列表项。
+ * 干净的裸标量原样输出（好看），其余交给 JSON 的引号与转义规则（也是合法的 YAML）。
+ */
+function yamlScalar(value: string): string {
+	return /^[\p{L}\p{N}][\p{L}\p{N} ._-]*$/u.test(value) ? value : JSON.stringify(value);
 }

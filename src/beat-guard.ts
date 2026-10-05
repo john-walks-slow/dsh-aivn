@@ -13,10 +13,14 @@
  *
  * 只追一次、只追剧作家、只追「真出了台词」的轮：空轮与纯工具轮（只改状态、只写记忆卡）
  * 本来就没有内容可停，报了错的轮是中断不是忘收束，都不该追。
+ *
+ * 追出去的那句走的是普通 `steer`，会落进 `agent/inbox/inserted`，所以投之前要在
+ * `InjectedMessages` 上登记，免得它被舞台当成玩家说的话摆上时间线。
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-agent';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
+import type { InjectedMessages } from './injected';
 import { PLAYWRITER_PRESET, sessionPreset } from './session';
 
 /**
@@ -28,17 +32,6 @@ const NUDGE = [
 	'给玩家选项就填 options，想给自由回答的口子就填 placeholder，这一段自然演完就空参数调用）。',
 	'不要再写新的剧本内容，不要重写已经演出的部分。',
 ].join('');
-
-/**
- * 这条 user 消息是不是我们自己追收束发的。
- *
- * 追收束走的是普通 `steer`，于是它也落在 `agent/inbox/inserted` 上——而舞台把每一次
- * inbox 插入都当成玩家的输入摆到时间线上。不摘出去，玩家会看到自己的台词条里冒出
- * 一句引擎的内部指令。按正文认是够的：这句话是我们自己写死的，玩家打不出来。
- */
-export function isBeatNudge(text: string): boolean {
-	return text.trim() === NUDGE;
-}
 
 /** 一轮的收束账。`begin` 一开就重置，所以一个会话只需要一条。 */
 interface BeatState {
@@ -79,7 +72,7 @@ export class BeatGuard {
 	}
 }
 
-export function installBeatGuard(ctx: Context, guard: BeatGuard): () => void {
+export function installBeatGuard(ctx: Context, guard: BeatGuard, injected: InjectedMessages): () => void {
 	return ctx.on('agent/turn-stopping', (payload) => {
 		const sessionId = String(payload.agent.id);
 		if (sessionPreset(ctx, sessionId) !== PLAYWRITER_PRESET) return;
@@ -87,6 +80,9 @@ export function installBeatGuard(ctx: Context, guard: BeatGuard): () => void {
 
 		const agent = ctx.agents.get(payload.agent.id);
 		if (!agent) return;
-		agent.steer(createUserMessage({ content: [{ type: 'text', text: NUDGE }], source: { kind: 'user' } }));
+		const message = createUserMessage({ content: [{ type: 'text', text: NUDGE }], source: { kind: 'user' } });
+		// 先登记再投：舞台认 id 把它从玩家时间线上摘掉（见 `injected.ts`）。
+		injected.remember(message.id);
+		agent.steer(message);
 	});
 }

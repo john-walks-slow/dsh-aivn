@@ -20,6 +20,9 @@ export interface Play {
 /**
  * 从工作目录读剧目。目录里没有 `play.json` 就是「这不是一座剧目」，
  * 返回 null 让上层给出空态；文件在那儿但坏了则是真错误，往上抛。
+ *
+ * 抛出去的那条**得是能读的话**：`JSON.parse` 的原生报错里只有位置，没有文件名，
+ * 用户拿着「Unexpected token } in JSON at position 37」找不到是哪个剧目的哪份文件坏了。
  */
 export async function loadPlay(dir: string | undefined | null): Promise<Play | null> {
 	if (!dir) return null;
@@ -31,5 +34,10 @@ export async function loadPlay(dir: string | undefined | null): Promise<Play | n
 		if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
 		throw error;
 	}
-	return { dir, config: parsePlayConfig(JSON.parse(raw) as unknown) };
+	try {
+		return { dir, config: parsePlayConfig(JSON.parse(raw) as unknown) };
+	} catch (error) {
+		const why = error instanceof Error ? error.message : String(error);
+		throw new Error(`${join(dir, PLAY_FILE)} 读不出来：${why}`);
+	}
 }

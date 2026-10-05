@@ -12,14 +12,16 @@
  *   那会把一次演出误报成好几次收笔。
  * - `agent/inbox/inserted`：玩家的每一次输入。DSH 原生输入框与舞台的选肢/自由输入都经
  *   inbox 进 Agent，于是时间线上只有这一处落点，两条路既不会各写一条、也不会漏写。
- *   `beat-guard` 追收束发的那一句也走这条路，得按正文摘出去——它不是玩家说的话。
+ *   引擎自己投的那些（追收束、空「继续」）也走这条路，靠 `InjectedMessages` 按 id 摘出去——
+ *   它们不是玩家说的话，摆上时间线就是替玩家编了一句台词。
  */
 import type { Context } from '@deepseek-ai/cordis';
 import { StageDslParser, type StageEvent } from '@aivn/core';
 import type {} from '@deepseek-ai/dsh-agent';
 import type { UserMessage } from '@deepseek-ai/dsh-llm';
-import { isBeatNudge, type BeatGuard } from './beat-guard';
+import type { BeatGuard } from './beat-guard';
 import type { StageHub } from './hub';
+import type { InjectedMessages } from './injected';
 import { PLAYWRITER_PRESET, sessionPreset } from './session';
 
 /** 事件载荷都带一层 `{ agent }` 外壳（由 agent 作用域的分发器补上）。 */
@@ -43,7 +45,12 @@ interface InboxPayload extends AgentShell {
 	message: UserMessage;
 }
 
-export function installStageTap(ctx: Context, hub: StageHub, guard: BeatGuard): () => void {
+export function installStageTap(
+	ctx: Context,
+	hub: StageHub,
+	guard: BeatGuard,
+	injected: InjectedMessages,
+): () => void {
 	const parsers = new Map<string, StageDslParser>();
 
 	const parserFor = (sessionId: string): StageDslParser => {
@@ -84,11 +91,14 @@ export function installStageTap(ctx: Context, hub: StageHub, guard: BeatGuard): 
 	};
 
 	const onInput = (payload: InboxPayload): void => {
+		// 先认领再判会话：引擎投的那几条不该因为预设判断的顺序而漏摘。
+		if (injected.claim(payload.message.id)) return;
+
 		const sessionId = payload.agent.id;
 		if (!isPlaywriter(sessionId)) return;
 
 		const text = messageText(payload.message);
-		if (text && !isBeatNudge(text)) hub.append(sessionId, { kind: 'player_input', text });
+		if (text) hub.append(sessionId, { kind: 'player_input', text });
 	};
 
 	const offFrame = ctx.on('agent/assistant-stream', onFrame);

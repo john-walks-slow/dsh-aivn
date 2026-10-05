@@ -19,14 +19,12 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react';
 import {
-	SETTING_CONTINUE_CARD,
 	ScriptBuilder,
 	StageTheater,
 	StopPanel,
 	ToastStack,
 	buildAssetIndex,
 	buildTranscript,
-	readFlag,
 	stopAffordance,
 	usePlayback,
 	useToasts,
@@ -34,6 +32,9 @@ import {
 } from '@aivn/stage';
 import type { AssetMeta, PlayConfig, StageEvent, StopPayload } from '@aivn/core';
 import stageCss from '@aivn/stage/stage.css';
+
+/** 「继续」投出去的正文：一句括号里的舞台指示，宿主侧会标 `silent`（不上玩家时间线）。 */
+const CONTINUE = '（继续）';
 
 /** 样式注入的标识：同一个 id 只挂一次，热重载与多视图并存时不会叠出第二份。 */
 const CSS_TAG_ID = '@aivn/stage/stage.css';
@@ -77,10 +78,8 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 	const [play, setPlay] = useState<PlayPayload | null>(null);
 	const [assets, setAssets] = useState<AssetsPayload | null>(null);
 	const [failed, setFailed] = useState<string | null>(null);
+	const [resetToken, setResetToken] = useState(0);
 	const toast = useToasts();
-	const [continueCardOn] = useState(() =>
-		typeof window === 'undefined' ? false : readFlag(window.localStorage, SETTING_CONTINUE_CARD, false),
-	);
 
 	/**
 	 * 这一轮里剧作家交过停止点没有。
@@ -89,6 +88,15 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 	 * 放进 state 会多绕一轮渲染，还可能读到上一个「停笔」事件的值。
 	 */
 	const sawStop = useRef(false);
+	/**
+	 * 已经应用到的最大 seq。
+	 *
+	 * EventSource 自带重连，而重连时中枢会在 `subscribe()` 里把缓冲**整段补推**一遍
+	 * （见宿主 `hub.ts`）——不去重，一次网络抖动就把整部戏从头再演一遍。
+	 */
+	const lastSeq = useRef(0);
+	/** 「继续」的连点闸：见 `continueOn`。 */
+	const continued = useRef(false);
 	/** 重渲按帧合并：SSE 补推历史上千帧时，一帧一次 render 会把首屏拖垮。 */
 	const renderQueued = useRef(false);
 
@@ -132,8 +140,22 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 	   IR 喂给 ScriptBuilder（`beat` 帧不是 IR，只动轮边界）。 */
 	useEffect(() => {
 		if (!sessionId) return;
+
+		// 换会话 = 换一部戏。视图实例若被框架复用，`builder` 与 `lastSeq` 都还是上一部的：
+		// 不清，新会话的补推会被当成重复帧丢掉（seq 从 1 起、小于上一部的最大值），
+		// 舞台上留着上一部戏的台词。首挂时这一次结算打在空对象上，无害。
+		builder.reset();
+		lastSeq.current = 0;
+		sawStop.current = false;
+		continued.current = false;
+		setStop(null);
+		setIsNoStop(false);
+		setLive(false);
+		setResetToken((n) => n + 1);
+		requestRender();
+
 		const source = new EventSource(`/aivn/stream?session=${encodeURIComponent(sessionId)}`);
-		source.addEventListener('ir', (message) => {
+		source.addEventListener('frame', (message) => {
 			let frame: StageFrame;
 			try {
 				frame = JSON.parse((message as MessageEvent<string>).data) as StageFrame;
@@ -141,12 +163,28 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 				return; // 坏帧丢弃：整条流不该因为一条解析不了的数据断掉
 			}
 
+			// 补推去重：已经应用过的帧丢掉。
+			if (frame.seq > lastSeq.current + 1) {
+				// 断档：断线期间滚出缓冲的帧（上限 4000）已经拿不回来，只能整段重放。
+				// 把 lastSeq 压到 `seq - 1` 而不是 0，否则这一帧自己又会被判成断档，绕不出来。
+				builder.reset();
+				setResetToken((n) => n + 1);
+				sawStop.current = false;
+				setStop(null);
+				setIsNoStop(false);
+				lastSeq.current = frame.seq - 1;
+			}
+			if (frame.seq <= lastSeq.current) return;
+			lastSeq.current = frame.seq;
+
 			if (frame.kind === 'beat') {
 				if (frame.state === 'start') {
 					sawStop.current = false;
 					setStop(null);
 					setIsNoStop(false);
 					setLive(true);
+					// 新一轮开跑，放开「继续」的连点闸。
+					continued.current = false;
 				} else {
 					// 停笔了还在演最后一句是常态：面板要不要出由 playback 的 exhausted 决定，
 					// 这里只报「这一轮有没有交出过停止点」。
@@ -170,19 +208,49 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 		return () => source.close();
 	}, [sessionId, builder, requestRender]);
 
-	/** 把一句话投给剧作家。时间线那一笔由宿主的 inbox 监听写下，这里不重复。 */
+	/**
+	 * 把一句话投给剧作家。时间线那一笔由宿主的 inbox 监听写下，这里不重复。
+	 *
+	 * `silent` 标的是「这不是玩家说的话」：宿主照投，但不会把它落成一行台词。
+	 * 返回是否送到，好让调用方在失败时放开自己的闸。
+	 */
 	const send = useCallback(
-		async (text: string): Promise<void> => {
+		async (text: string, opts?: { silent?: boolean }): Promise<boolean> => {
 			const trimmed = text.trim();
-			if (!trimmed || !sessionId) return;
+			if (!trimmed || !sessionId) return false;
 			try {
-				await postJson('/aivn/input', { session: sessionId, text: trimmed });
+				await postJson('/aivn/input', {
+					session: sessionId,
+					text: trimmed,
+					...(opts?.silent ? { silent: true } : {}),
+				});
+				return true;
 			} catch (error) {
 				toast.push(`没能送到剧作家：${describe(error)}`, 'error');
+				return false;
 			}
 		},
 		[sessionId, toast],
 	);
+
+	/**
+	 * 「继续」：不是玩家的表态，是一句没有内容的推进指令。
+	 *
+	 * AIVN 的继续什么都不注入，但 DSH 的一条 user 消息必须有正文，所以给一句括号里的
+	 * 舞台指示，并标成 `silent`——否则它会落成一行玩家台词，玩家会看见自己「说了」
+	 * 一句没说过的话。**开局指令绝不能拿来当继续**：`no_stop` 的轮本来就默认可点击继续，
+	 * 自然演完的每一轮点一下都会把「游戏开始」再投一遍。
+	 *
+	 * 连点只算一次（AIVN 同款 `continued` 闸）：不设闸，一次犹豫的双击就是两条推进。
+	 * 送失败则放开，不然按钮会死在一次网络错误上。
+	 */
+	const continueOn = useCallback((): void => {
+		if (continued.current) return;
+		continued.current = true;
+		void send(CONTINUE, { silent: true }).then((sent) => {
+			if (!sent) continued.current = false;
+		});
+	}, [send]);
 
 	const lines = builder.lines;
 	const playConfig = play?.dir ? (play.config ?? null) : null;
@@ -209,6 +277,7 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 		revision,
 		transcript,
 		turbo,
+		resetToken,
 	});
 
 	const busy = live;
@@ -218,7 +287,9 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 		ready: panelReady,
 		stopType: stop?.stopType ?? null,
 		isNoStop,
-		continueCardOn,
+		// 「继续卡片」是 AIVN 的一个开局设置，插件这边还没有写它的界面，
+		// 读那个 flag 恒为 false（等于一段永远进不去的分支），所以先按关着算。
+		continueCardOn: false,
 	});
 
 	const targets: DirectorTargets = {
@@ -266,7 +337,7 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 				onUnlock={noop}
 				onTurbo={setTurbo}
 				canContinue={affordance.clickToContinue}
-				onContinue={() => void send(playConfig.opening)}
+				onContinue={continueOn}
 				overlay={
 					playback.scrubbed ? null : lines.length === 0 ? (
 						/* 空舞台：摆一个「开演」，等玩家按第一下。开局指令是剧目自己的 opening。 */
@@ -285,7 +356,7 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 							disabled={busy}
 							onChoice={(choice) => void send(stop?.options?.[choice]?.text ?? '')}
 							onFree={(text) => void send(text)}
-							onContinue={() => void send(playConfig.opening)}
+							onContinue={continueOn}
 						/>
 					) : null
 				}

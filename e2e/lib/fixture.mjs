@@ -51,8 +51,11 @@ export function seedPlay(dir) {
 		manifest,
 		`${JSON.stringify(
 			{
-				'backgrounds/veranda.png': { description: '黄昏时分的走廊，木地板反着暖光' },
-				'sprites/lin/normal.png': { description: '林，常服，平静的神色' },
+				// 键是**素材 id**，不是路径：不带目录前缀、不带扩展名。立绘级的键是
+				// `<spriteId>`，差分级是 `<spriteId>/<variant>`，单文件类目就是 `<id>`。
+				// 写成路径键不会报错，只是永远匹配不上——剧作家照样拿到「没有描述」。
+				veranda: { description: '黄昏时分的走廊，木地板反着暖光' },
+				'lin/normal': { description: '林，常服，平静的神色' },
 			},
 			null,
 			2,

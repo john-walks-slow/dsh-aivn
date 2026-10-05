@@ -5,8 +5,9 @@
  * 同一套写法，只是写在代码里。**绝对不要在本预设里再列一行 `dsh-aivn`**：宿主已经装了本插件，
  * 预设里再来一行会重复装一遍路由与事件订阅（它不在行的清单里，靠的是 profile 的 bundle patch）。
  *
- * 本阶段两个预设的行集同构：指令文件发现 + persona + shell + 文件工具。
- * 搭台助手的工具留给下一阶段，所以它的 persona 里不出现任何工具名。
+ * 行集：指令文件发现 + persona + 文件工具。**两个预设都不装 shell**——剧作家的写作面
+ * 按计划只给文件工具；搭台助手留着一行但标 `disabled`（默认关，用户在预设里看得见、
+ * 要开自己开）。搭台助手的素材工具留给下一阶段，所以它的 persona 里不出现任何工具名。
  */
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -24,11 +25,15 @@ const DSH_HOME = process.env.DSH_HOME ?? join(homedir(), '.dsh');
 /**
  * 一个预设的行集。
  *
- * `tool-bash` 的禁用条件在 YAML 里写作 `!!js process.platform === 'win32'`，
- * 代码里直接算成布尔即可——注册时就在本机进程里，没有「稍后在别的机器上求值」这回事。
+ * `bash` 只在 `opts.bash === 'off'` 时作为一行**关着**进清单：注册器跳过 `disabled` 的行
+ * （不装载），但它在预设里看得见，用户想放给搭台助手就自己开。剧作家不给这一项——
+ * 它写戏、读文件，没有要 shell 做的事。
  */
-function rows(prompt: string): PresetDefinition['plugins'] {
-	return [
+/** 行集里的一行（`plugins` 是只读数组，装配时用可变数组攒，最后交出去当只读）。 */
+type PresetPlugin = PresetDefinition['plugins'][number];
+
+function rows(prompt: string, opts: { bash?: 'off' } = {}): PresetDefinition['plugins'] {
+	const plugins: PresetPlugin[] = [
 		{
 			id: 'instructions',
 			name: '@deepseek-ai/dsh-agent-instructions',
@@ -39,7 +44,9 @@ function rows(prompt: string): PresetDefinition['plugins'] {
 			},
 		},
 		{ id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: prompt } },
-		{ id: 'tool-bash', name: '@deepseek-ai/dsh-tool-bash', disabled: process.platform === 'win32' },
+	];
+	if (opts.bash === 'off') plugins.push({ id: 'tool-bash', name: '@deepseek-ai/dsh-tool-bash', disabled: true });
+	plugins.push(
 		{ id: 'tool-fs', name: '@deepseek-ai/dsh-tool-fs' },
 		// 这一项没有默认值，不给就是「invalid config」——与 dev 预设同一个取值。
 		{
@@ -47,7 +54,8 @@ function rows(prompt: string): PresetDefinition['plugins'] {
 			name: '@deepseek-ai/dsh-tool-fs-search',
 			config: { sampleOverCapGlobResults: false },
 		},
-	];
+	);
+	return plugins;
 }
 
 export const PLAYWRITER_DEFINITION: PresetDefinition = {
@@ -61,7 +69,7 @@ export const STAGEHAND_DEFINITION: PresetDefinition = {
 	id: STAGEHAND_PRESET,
 	name: '搭台助手',
 	description: '备料的搭台助手：写设定、角色卡与创作口径，把剧目准备好（素材生成工具在下一阶段）',
-	plugins: rows(STAGEHAND_PROMPT),
+	plugins: rows(STAGEHAND_PROMPT, { bash: 'off' }),
 };
 
 /**

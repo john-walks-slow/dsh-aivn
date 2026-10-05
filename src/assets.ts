@@ -46,19 +46,35 @@ export async function listAssets(dir: string): Promise<AssetIndex> {
 				index[`sprites/${entry.name}`] = files.sort((a, b) => a.localeCompare(b));
 			}
 		} else {
-			index[kind] = (await readdir(kindDir)).filter((name) => MEDIA.test(name));
+			// 同样排序：素材清单要稳定，剧作家两次读到的顺序不该变。
+			index[kind] = (await readdir(kindDir))
+				.filter((name) => MEDIA.test(name))
+				.sort((a, b) => a.localeCompare(b));
 		}
 	}
 	return index;
 }
 
-/** 素材描述表 `assets/manifest.json`；没有就是空的（不是错误）。 */
+/**
+ * 素材描述表 `assets/manifest.json`；没有就是空的（不是错误）。
+ *
+ * 读与解析分成两段：合在一处时 ENOENT 与「JSON 坏了」共用一个 catch，后者会被
+ * 原样抛成一句没有文件名的解析错误。坏掉时给一句能读的，用户才知道去修哪个文件。
+ */
 export async function readManifest(dir: string): Promise<Record<string, AssetMeta>> {
+	const path = join(dir, 'assets', 'manifest.json');
+	let raw: string;
 	try {
-		return JSON.parse(await readFile(join(dir, 'assets', 'manifest.json'), 'utf8')) as Record<string, AssetMeta>;
+		raw = await readFile(path, 'utf8');
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
 		throw error;
+	}
+	try {
+		return JSON.parse(raw) as Record<string, AssetMeta>;
+	} catch (error) {
+		const why = error instanceof Error ? error.message : String(error);
+		throw new Error(`${path} 不是合法 JSON：${why}`);
 	}
 }
 

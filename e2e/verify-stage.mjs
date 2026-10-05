@@ -44,6 +44,18 @@ mkdirSync(ARTIFACTS, { recursive: true });
 const FIRST_BEAT_TIMEOUT = 600_000;
 const BEAT_TIMEOUT = 420_000;
 
+/**
+ * 全部判据的 id。
+ *
+ * `skip()` 要按 id 列表跳过后续判据，而失败分支里挨个手抄 id 迟早会漏（漏掉的那条
+ * 既不通过也不失败，报告看上去还是完整的——2026-10-05 的 `KNOWN_IDS` 干脆是没定义的
+ * 名字，一走进这个分支就 ReferenceError）。写在一处，加判据时只改这里。
+ */
+const KNOWN_IDS = [
+	'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7',
+	'S8', 'S9', 'S10', 'S11', 'S12', 'S13', 'S14',
+];
+
 const results = [];
 const check = (id, ok, note = '') => {
 	results.push({ id, ok, note });
@@ -128,7 +140,8 @@ try {
 
 	if (!mounted) {
 		await shot(page, join(ARTIFACTS, 'stage-not-mounted.png'));
-		skip(KNOWN_IDS.slice(5), '舞台未挂载，跳过');
+		// S5 已经在这里判过了，跳的是它之后的全部。
+		skip(KNOWN_IDS.slice(KNOWN_IDS.indexOf('S5') + 1), '舞台未挂载，跳过');
 	} else {
 		const directorBar = await page.evaluate(() => document.querySelector('.theater-director') !== null);
 		check('S6', !directorBar, '导演工作栏未渲染（directorBar={false}）');
@@ -185,7 +198,7 @@ try {
 		await shot(page, join(ARTIFACTS, 'stage-stop.png'));
 
 		if (options.length === 0) {
-			skip(['S11', 'S12', 'S13'], '没有停止点，跳过');
+			skip(KNOWN_IDS.slice(KNOWN_IDS.indexOf('S11')), '没有停止点，跳过');
 		} else {
 			/* —— 选项 → 宿主 → 剧作家 —— */
 

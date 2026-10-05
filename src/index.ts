@@ -16,6 +16,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import { BeatGuard, installBeatGuard } from './beat-guard';
 import { installPlayCommands } from './commands';
 import { StageHub } from './hub';
+import { InjectedMessages } from './injected';
 import { registerPresets } from './playwriter/preset';
 import { installPresetTools } from './preset-tools';
 import { installStageRoutes } from './routes';
@@ -29,20 +30,24 @@ export const inject = ['agents', 'sessionController', 'agentPresets', 'commands'
 export async function apply(ctx: Context): Promise<() => void> {
 	const hub = new StageHub();
 	const guard = new BeatGuard();
+	/** 「引擎自己投的消息」的登记，追收束（`beat-guard`）与静默推进（`routes`）共用一份。 */
+	const injected = new InjectedMessages();
 	const disposers: Array<() => void> = [
-		installStageTap(ctx, hub, guard),
+		installStageTap(ctx, hub, guard, injected),
 		installPresetTools(ctx, hub, guard),
-		installBeatGuard(ctx, guard),
+		installBeatGuard(ctx, guard, injected),
 		installPlayCommands(ctx),
 		await registerPresets(ctx),
 	];
 
 	ctx.inject(['webServer'], (webCtx) => {
-		disposers.push(installStageRoutes(webCtx, hub));
+		disposers.push(installStageRoutes(webCtx, hub, injected));
 		webCtx.logger.info('[dsh-aivn] stage routes mounted on /aivn');
 	});
 
 	return () => {
 		for (const dispose of disposers.splice(0)) dispose();
+		// 路由随插件注销，但挂着的 SSE 连接与心跳不会自己走。
+		hub.dispose();
 	};
 }

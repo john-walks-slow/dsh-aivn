@@ -111,10 +111,22 @@ voice: 短句，少用形容词
 
 ```json
 {
-  "backgrounds/veranda.png": { "description": "黄昏时分的走廊，木地板反着暖光" },
-  "sprites/lin/normal.png": { "description": "林，常服，平静的神色" }
+  "veranda": { "description": "黄昏时分的走廊，木地板反着暖光" },
+  "lin/normal": { "description": "林，常服，平静的神色" }
 }
 ```
+
+**键是素材 id，不是路径**——不带目录前缀，也不带扩展名。写成 `backgrounds/veranda.png`
+不会报错，只是永远匹配不上，剧作家会以为这件素材没有描述。三种键形：
+
+| 素材 | 键 |
+| --- | --- |
+| 背景 / 插图 / 音效 / 音乐 | 文件名去掉扩展名（`veranda`） |
+| 立绘（整主体） | 立绘目录名（`lin`） |
+| 立绘（单个差分） | `<立绘目录名>/<差分名>`（`lin/normal`） |
+
+值里除了 `description` 还能写 `tags`、`title`、`framing`、`stature`、`anchor`
+（立绘摆位），音乐还能写 `mood`、`scene`、`durationSec`、`loop`、`volume`。
 
 背景、插图、音效、音乐按扩展名白名单收（png/jpg/jpeg/webp/mp3/ogg/wav/m4a）；立绘按
 `sprites/<主体id>/` 分目录，每个目录里的第一个文件是找不到指定差分时的兜底。
@@ -164,7 +176,7 @@ shell + 文件工具 + 文件检索。**预设里不会再列一行 `dsh-aivn`**
 | `beat_done` | 剧作家 | 交出这一轮的停止点：给 `options` = 选项面板；给 `placeholder` = 自由输入框；都不给 = 这一轮不设停止点。调用即是「本轮到此为止」 |
 | `update_state` | 剧作家 | 改剧目的运行状态：`affinity`（角色好感度增量，整数、`\|Δ\|≤5`）、`flags`、`scene`、`threads`。写进 `memory/always/state/` |
 | `get_readiness` | 剧作家 | 开演条件自查：`play.json`、故事前提、角色卡张数、立绘、背景、素材条数。**没有硬门槛**，缺什么都能开演 |
-| `list_library` | 剧作家 | 列本机素材资源库（`~/…/library/`）里的条目，可按类目与关键词过滤 |
+| `list_library` | 剧作家 | 列**这座剧目**的素材（`assets/` + `manifest.json`，外加 `characters/` 里的角色卡），可按类目与关键词过滤。本阶段没有跨剧目资源库，也没有生图 |
 | `set_craft` | 剧作家 | 改写 `play.json` 的 `craft` 段，见上 |
 
 ## 斜杠命令
@@ -172,6 +184,9 @@ shell + 文件工具 + 文件检索。**预设里不会再列一行 `dsh-aivn`**
 | 命令 | 作用 |
 | --- | --- |
 | `/new-play [剧目名]` | 把当前工作目录立成一座剧目。与 `create_play` 工具同一份实现，不花 LLM 往返 |
+
+命令对所有会话可见（DSH 的命令不分预设），在哪个会话里敲就在那个会话的工作目录里落地。
+它**只新建、从不覆盖**：已经有 `play.json` 就报错，其余骨架文件已存在就跳过并列进回执。
 
 ## 宿主 HTTP 面
 
@@ -183,8 +198,8 @@ shell + 文件工具 + 文件检索。**预设里不会再列一行 `dsh-aivn`**
 | `GET /aivn/play?session=` | 这个会话的剧目：`{ dir, config }`；不是剧目就是 `{ dir: null }` |
 | `GET /aivn/assets?session=` | `{ index, manifest }`；不是剧目 404 |
 | `GET /aivn/asset?session=&path=` | 剧目内的一件素材。`path` 是**相对剧目根**的路径（如 `assets/backgrounds/x.png`），越界 400 |
-| `GET /aivn/stream?session=` | SSE，`event: ir`，data 是一帧 `StageFrame` JSON。连上先补推已经播过的帧，15 秒一次 keepalive |
-| `POST /aivn/input { session, text }` | 玩家的一次输入，投给剧作家 |
+| `GET /aivn/stream?session=` | SSE，`event: frame`，data 是一帧 `StageFrame` JSON。连上先补推已经播过的帧，15 秒一次 keepalive |
+| `POST /aivn/input { session, text, silent? }` | 玩家的一次输入，投给剧作家。`silent: true` = 不算玩家说的话（舞台的「继续」走这条），仍然会作为一条 user 消息投出去 |
 
 `StageFrame` 有两种：
 
@@ -195,6 +210,12 @@ shell + 文件工具 + 文件检索。**预设里不会再列一行 `dsh-aivn`**
 
 **玩家输入不在这条流里由路由写入**：`/aivn/input` 只负责投递，落点只有一处——宿主监听
 `agent/inbox/inserted`，于是 DSH 原生输入框与舞台的选肢卡走同一条路，既不会各写一条，也不会漏写。
+引擎自己投的那些（追收束的内部指令、`silent` 的空推进）也走这条路，按 `message.id` 认出来摘掉，
+不会变成一行玩家台词。
+
+`/aivn/*` 是插件自己注册的前缀路由，**在 DSH 的浏览器信任栅栏之外**（那道栅栏只管 `/api`）：
+`POST /aivn/input` 只收同源请求（`Origin` 与 `Host` 对不上就 403）且要求
+`content-type: application/json`，免得跨站页面替玩家投一句输入。
 
 ## 开发
 
