@@ -85,7 +85,7 @@ exactly the same thing:
 Both **only write files that don't exist**: if `play.json` is already there, it errors out (this
 is already a play — start a new one in an empty directory); if `memory/always/premise.md` and the
 character cards are already written, they are skipped and listed as "kept" in the receipt. The
-skeleton it leaves behind is the first few rows of the directory table above — fill in whatever
+skeleton it leaves behind is the first few rows of the directory table below — fill in whatever
 is missing as you go.
 
 ## Anatomy of a play
@@ -220,7 +220,11 @@ says goes on stage.
 
 The playwright's system prompt is assembled from two parts with **per-beat play context**
 injected in between — the playwright doesn't need to `ls` + `read` its way around to know the
-play's setting, who's in it, what assets exist, and where it currently stands:
+play's setting, who's in it, what assets exist, and where it currently stands.
+
+The headers the engine injects are Chinese (`# 剧本语言`, `# 剧目设定`, `# 角色表`, …): the
+playwright reads and writes Chinese, and the section names are part of its prompt, not of this
+document. The names below are translations of those headers.
 
 | Section | Content | Source |
 | --- | --- | --- |
@@ -295,8 +299,8 @@ retroactive audio for a line already turned, so it doesn't overlap the next one)
 layer's "replay this line" is the remedy for that.
 
 Synthesized audio lands in the play's own `media-cache/tts/`: the file name is
-`sha1(model + voice id + text)`, content-addressed, so reconnect replays, rewinds, and replays all
-hit the same file and never hit the upstream a second time. This cache **only grows** (swapping
+`sha1(model + voice id + text)`, content-addressed, so reconnects, rewinds, and replays all land
+on the same file and never call the upstream a second time. This cache **only grows** (swapping
 the model or changing one character makes a new file), and you can delete the whole directory at
 any time — the next performance synthesizes it again.
 

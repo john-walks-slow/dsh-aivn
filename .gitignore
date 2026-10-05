@@ -15,3 +15,6 @@ docs/research/
 
 # 语音合成本地缓存（内容寻址、可重建）
 /media-cache/
+
+# npm pack 的产物（临时）
+*.tgz
