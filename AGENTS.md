@@ -13,6 +13,7 @@
 | `src/client/` | 浏览器半边（React），挂在 `conversation.view` 槽 |
 | `lib/` | **跟踪的构建产物**（`lib/index.js` / `lib/client.js`）——DSH 直接加载它 |
 | `e2e/` | dsh-e2e 套件 |
+| `screenshots/` | README 与市场详情页用的图（`screenshots.json` 指过来，1–8 张） |
 | `docs/` | 开发侧记录（用户手册在 `README.md`） |
 
 ## 动手前必须知道的四件事
@@ -56,12 +57,39 @@ dsh-e2e stop
 - **必须先 `dsh-e2e start`**：`dsh-e2e run` 自己不起实例，实例不在时套件会以
   `missing DSH_E2E_PORT` 直接失败。
 - **改过 `lib/` 之后要 `dsh-e2e stop` 再 `start`**，否则跑的还是旧模块。
-- 套件有两个：`verify-stage.mjs`（演出闭环，14 条）与 `verify-injection.mjs`
-  （A 区注入，11 条）。后者从**会话日志**取系统提示词断言——日志是多帧 zstd，用 `zstd -dc` 解。
+- 套件有三个，都在 `e2e/run.mjs` 的 `MODULES` 里：`stage`（演出闭环，`verify-stage.mjs`）、
+  `injection`（A 区注入，`verify-injection.mjs`，从**会话日志**取系统提示词断言——日志是多帧 zstd，
+  用 `zstd -dc` 解）、`voice`（台词语音，`verify-voice.mjs`，真打 Fish Audio，跑之前要 export
+  `DSH_AIVN_TTS_KEYS`；它在页面里给 `AudioContext` / `decodeAudioData` / `AudioBufferSourceNode.start`
+  挂钩子，断言的是「浏览器真的解出 PCM 并起播」，不是「帧到了」）。
 - 两个本地前提在 `.dsh-e2e-home/` 里（不在仓库里）：profile 的 `cordis.patch.yml` 要有可用的
   provider 行（`settings.yaml` 首次启动被 import 后改名，冷启就没 provider 了），
   默认模型挑一个这台机器出得去的（地区受限的条目会直接报
   `User location is not supported`）。细节见 README 的「开发」一节。
+
+## 发布
+
+- **双语 README**：`README.md`（中文，主体）+ `README.en.md`（英文）+ 顶部居中的语言切换。
+  改中文那份时**同一次提交里改英文那份**，别让两边漂。
+- `screenshots/screenshot-1.png` 是市场详情页的第一张图，`screenshots.json` 指向它。
+  **别把图放进 `assets/`**：那是**剧目的**素材目录（`<剧目>/assets/…`），既会和 e2e 夹具撞名，
+  也会被 `files` 一起打进包里。
+- `@aivn/core` 与 `@aivn/stage` 是**构建期依赖**（`file:` 指向兄弟仓库 `stage-ai`）：esbuild 把
+  它们打进 `lib/`，运行时不依赖——所以**消费者不需要它们**，只有从源码重建才需要（前置见 README
+  的「开发」一节）。发布前若想让新克隆也能直接构建，得先把这两个包发到 npm 再换成版本号。
+- 发布前跑一次隔离验证（**别碰线上 profile**）：
+
+  ```bash
+  npm pack                                              # 真实 tarball
+  dsh plugin --profile scratch-aivn add ./dsh-aivn-<v>.tgz
+  dsh --profile scratch-aivn --dump-config              # 应出现 dsh-aivn 这一层
+  cd ~/.dsh/profiles/scratch-aivn && node --input-type=module \
+    -e "import('dsh-aivn').then(m=>console.log(typeof m.apply, m.name))"
+  rm -rf ~/.dsh/profiles/scratch-aivn
+  ```
+
+  `prepublishOnly`（重建 + 类型检查）保证发出去的和源码一致。npm 发布走 `npm-publish` 技能
+  （指纹认证），流程见 `dev-dsh-plugin` 技能的 `references/publish-and-marketplace.md`。
 
 ## 文档
 

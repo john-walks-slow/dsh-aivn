@@ -1,9 +1,9 @@
 {
 	"name": "dsh-aivn",
-	"version": "0.0.1",
+	"version": "0.1.0",
 	"private": true,
 	"type": "module",
-	"description": "AIVN stage engine as a DSH plugin — 剧作家与搭台助手预设，以及对话页里的 VN 舞台视图",
+	"description": "AIVN's stage engine inside DeepSeek Harness: a workspace is a play, the playwright preset writes Stage DSL, and a Stage tab in the conversation renders it live (backgrounds, sprites, dialog, stop-point choices, line-by-line TTS). dsh-aivn：把 AIVN 的舞台引擎装进 DSH——工作区就是一部剧目，剧作家预设写 Stage DSL，对话页的「舞台」tab 实时演出（背景、立绘、台词条、停止点选项、逐句语音）。",
 	"main": "./lib/index.js",
 	"exports": {
 		".": "./lib/index.js",
@@ -15,13 +15,17 @@
 		"lib",
 		"cordis.patch.yml",
 		"README.md",
-		"LICENSE"
+		"README.en.md",
+		"LICENSE",
+		"screenshots",
+		"screenshots.json"
 	],
 	"scripts": {
 		"build": "node build.mjs",
-		"typecheck": "tsc --noEmit",
+		"e2e": "dsh-e2e run e2e/run.mjs --list",
 		"e2e:stage": "dsh-e2e run e2e/run.mjs stage",
-		"e2e": "dsh-e2e run e2e/run.mjs --list"
+		"prepublishOnly": "npm run build && npm run typecheck",
+		"typecheck": "tsc --noEmit"
 	},
 	"dsh": {
 		"bundle": {
@@ -63,5 +67,34 @@
 	},
 	"peerDependencies": {
 		"@deepseek-ai/cordis": "^4.0.1"
+	},
+	"keywords": [
+		"dsh",
+		"dsh-plugin",
+		"deepseek-harness",
+		"aivn",
+		"visual-novel",
+		"vn",
+		"stage",
+		"stage-dsl",
+		"tts",
+		"voice",
+		"fish-audio",
+		"playwright",
+		"视觉小说",
+		"舞台",
+		"剧作家",
+		"语音",
+		"配音"
+	],
+	"author": "john-walks-slow",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/john-walks-slow/dsh-aivn.git"
+	},
+	"homepage": "https://github.com/john-walks-slow/dsh-aivn#readme",
+	"bugs": {
+		"url": "https://github.com/john-walks-slow/dsh-aivn/issues"
 	}
 }

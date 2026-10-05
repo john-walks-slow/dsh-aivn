@@ -1,10 +1,17 @@
 # dsh-aivn
 
+<p align="center">
+  <a href="./README.md"><strong>简体中文</strong></a> ·
+  <a href="./README.en.md"><strong>English</strong></a>
+</p>
+
 把 AIVN 的舞台引擎装进 DSH。
 
 一个**工作区就是一部剧目**：在里面开会话、选「剧作家」预设，对话页就多一个「舞台」tab，
 剧作家写的 Stage DSL 被实时演出来——背景、立绘、台词条、停止点选项都在这里；玩家点一条选项，
 这句话回到剧作家手上，它接着往下写。
+
+![舞台 tab：背景、立绘、台词条，右下角是语音开关与「重听这句」](screenshots/screenshot-1.png)
 
 ## 装
 
@@ -269,14 +276,45 @@ voice: 短句，少用形容词
 `POST /aivn/input` 只收同源请求（`Origin` 与 `Host` 对不上就 403）且要求
 `content-type: application/json`，免得跨站页面替玩家投一句输入。
 
+## 权限与兼容
+
+- **网络**：只有配了 TTS key 时才出网，出的是 Fish Audio（`api.fish.audio` 或你配的 `baseUrl`）。
+  不配 key 就一个请求都不发，语音整条链路是关的。其余功能全在本地。
+- **文件**：读写在会话的工作目录（也就是那座剧目的目录）内。工具与 `/new-play` 只在你指定的
+  目录里建剧目文件；语音缓存写在 `<剧目>/media-cache/tts/`（内容寻址、可随时整目录删除）。
+  不碰工作目录以外的路径。
+- **HTTP**：往 DSH 的 web server 注册 `/aivn/*`（剧目读写、素材、SSE 事件流、音频）。
+  四个写接口都走同源 + `content-type: application/json` + 字节上限 + JSON 四道闸；
+  `/aivn/audio` 只接受目录内的纯文件名（`basename` 判定 + `.mp3` 白名单），不接受任何路径。
+- **密钥**：TTS key 只从配置或环境变量读，不进日志、不进 URL、不进 git；错误文案里最多带
+  上游返回的前 200 字符。
+- **兼容**：宿主半边对齐 `dsh` `0.1.7-rc.2`，客户端半边对齐 `0.1.1-rc.2`。「舞台」tab 需要
+  `dsh-web-app`（挂在 `conversation.view` 槽上）。
+
 ## 开发
 
+**前置**：`@aivn/core` 与 `@aivn/stage` 现在走 `file:` 依赖，指向兄弟仓库
+`stage-ai`（后者要在 `.worktrees/dsh-vn-stage` 里带 `packages/stage`）：
+
+```
+~/projects/
+├── dsh-aivn/            ← 本仓库
+└── stage-ai/
+    ├── packages/core/                  （@aivn/core）
+    └── .worktrees/dsh-vn-stage/packages/stage/   （@aivn/stage）
+```
+
+这两个包**只在构建期**用得到：esbuild 把它们打进 `lib/`，运行时不依赖。
+所以**装插件的人不需要它们**（`npm i` 只装 `dependencies`），只有想从源码重建才需要。
+
 ```bash
+npm install         # 需要上面那两个兄弟目录在位
 npm run build       # lib/index.js（宿主半边）+ lib/client.js（浏览器半边）
 npm run typecheck
 ```
 
 `lib/` 是**跟踪的构建产物**：DSH 直接加载它，所以改完 `src/` 必须重建再提交。
+`npm publish` 前会跑 `prepublishOnly`（重建 + 类型检查），保证发出去的和源码一致。
 
 ### e2e
 
@@ -294,6 +332,14 @@ dsh-e2e stop
 - **默认模型挑一个这台机器出得去的**：地区受限的条目会直接
   `User location is not supported`。用 `medium` 之类。
 
-套件做的事：在工作区根落一份临时剧目夹具 → 新建会话并选「剧作家」预设 → 发一句 →
-断言「舞台」tab 挂载、导演工作栏不渲染、台词逐字上屏、停止点出来、点选项后原文被投给剧作家
-并在时间线上落成一行回执、剧作家接着写完第二轮。截图落在 `e2e-artifacts/`。
+套件：
+
+- `stage`（`npm run e2e:stage`）——在工作区根落一份临时剧目夹具 → 新建会话并选「剧作家」预设 →
+  发一句 → 断言「舞台」tab 挂载、导演工作栏不渲染、台词逐字上屏、停止点出来、点选项后原文被投给
+  剧作家并在时间线上落成一行回执、剧作家接着写完第二轮。
+- `voice`（`dsh-e2e run e2e/verify-voice.mjs`）——真打 Fish Audio：断言 voice 帧到达、音频能取回
+  且是真 MP3、**浏览器把它解成了 PCM 并真的有音源起播**（在页面里给 `AudioContext` /
+  `decodeAudioData` / `AudioBufferSourceNode.start` 挂钩子，不是看帧猜的），以及语音总开关
+  确实传到了宿主。跑之前要 export `DSH_AIVN_TTS_KEYS`。
+
+截图落在 `e2e-artifacts/`（不进 git）。
