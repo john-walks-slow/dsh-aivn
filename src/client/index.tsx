@@ -7,11 +7,16 @@
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client';
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client';
+import hostCss from './host.css';
+import { injectCss } from './inject-css';
 import { StageView } from './stage-view';
 
 export const inject = ['slots'];
 
 export function apply(ctx: ClientContext): void {
+	// 与 DSH 宿主界面的接缝样式（藏掉舞台页签下的原生输入框），见 host.css。
+	injectCss('dsh-aivn/host.css', hostCss);
+
 	ctx.slots.inject('conversation.view', () =>
 		ctx.slots.register(
 			{

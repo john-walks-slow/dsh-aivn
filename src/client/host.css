@@ -1,0 +1,20 @@
+/**
+ * 插件与 DSH 宿主界面的接缝样式。
+ *
+ * 这几条**不属于舞台自己**——`@aivn/stage` 要能嵌进任何宿主，不该知道 DSH 的 DOM 结构。
+ * 所以它们留在这里，按 DSH 暴露的稳定 `data-*` 钩子写（`data-conversation-content`、
+ * `data-composer-seat`），不碰哈希过的 CSS-module 类名。
+ *
+ * 舞台页签下藏掉原生输入框：那是给聊天用的——舞台自己有出口（选肢卡、停止点的自由输入），
+ * 留着只会白占下面 128px（`.wSkVaW_scrollBody` 是 flex 列，输入框 `flex: none` 占多少，
+ * 舞台就少多少），手机上那一块尤其贵。藏掉之后舞台自己撑满整栏。
+ *
+ * 锚在 `[data-conversation-content]` 上而不是 `body`：同一页可能挂着别的会话区域，
+ * 只收拾舞台所在的那一块。切回 Chat 页签时 `.aivn-stage-view` 不在 DOM 里，
+ * 规则自动失效，输入框照常回来。
+ *
+ * 钩子改名（DSH 升级）只会让这条规则静默失效、输入框重新出现，不会弄坏别的。
+ */
+[data-conversation-content]:has(.aivn-stage-view) [data-composer-seat] {
+	display: none;
+}

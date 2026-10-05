@@ -32,20 +32,12 @@ import {
 } from '@aivn/stage';
 import type { AssetMeta, PlayConfig, StageEvent, StopPayload } from '@aivn/core';
 import stageCss from '@aivn/stage/stage.css';
+import { injectCss } from './inject-css';
 
 /** 「继续」投出去的正文：一句括号里的舞台指示，宿主侧会标 `silent`（不上玩家时间线）。 */
 const CONTINUE = '（继续）';
 
-/** 样式注入的标识：同一个 id 只挂一次，热重载与多视图并存时不会叠出第二份。 */
-const CSS_TAG_ID = '@aivn/stage/stage.css';
-
-if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin-css="${CSS_TAG_ID}"]`) === null) {
-	const tag = document.createElement('style');
-	tag.dataset.plugin = 'dsh-aivn';
-	tag.dataset.pluginCss = CSS_TAG_ID;
-	tag.textContent = stageCss;
-	document.head.appendChild(tag);
-}
+injectCss('@aivn/stage/stage.css', stageCss);
 
 /** 宿主 `/aivn/stream` 上的一帧，与宿主 `src/hub.ts` 的 `StageFrame` 同构。 */
 type StageFrame =
