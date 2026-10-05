@@ -16,6 +16,9 @@ if (!E2E_URL || !E2E_HOME) {
 	throw new Error('missing DSH_E2E_PORT/DSH_E2E_HOME — 请通过 `dsh-e2e run` 执行');
 }
 
+/** 工作区就是 e2e 实例播种的那个目录（插件仓库根）。 */
+export const WORKSPACE = process.env.E2E_WORKSPACE ?? E2E_HOME.replace(/\/\.dsh-e2e-home\/?$/, '');
+
 const CHROMIUM = '/root/.cache/ms-playwright/chromium-1243/chrome-linux-arm64/chrome';
 
 /** 本机 ARM 机器上的共享无头 chromium。 */
@@ -61,21 +64,13 @@ export async function dismissOnboarding(page) {
 	return clicked;
 }
 
-/** 点一个已存在的会话行；没有就点 New Session。返回 'reused' | 'created' | 'none'。 */
-export async function ensureSession(page) {
-	const reused = await page.evaluate(() => {
-		const rows = [...document.querySelectorAll('[role="treeitem"]')].filter(
-			(row) => String(row.className).includes('sessionRow') && (row.textContent ?? '').trim() !== 'New Session',
-		);
-		if (rows.length === 0) return false;
-		rows[0].click();
-		return true;
-	});
-	if (reused) {
-		await page.waitForTimeout(2_500);
-		return 'reused';
-	}
-
+/**
+ * 新建一个会话（**不复用旧会话**）。
+ *
+ * 复用是 e2e 的陷阱：会话的 Agent 预设在它开始那一刻就定死了，头部的标签只是只读
+ * 回显；只有新会话界面上的座位 chip 能选。要演舞台就必须从新会话起步。
+ */
+export async function newSession(page) {
 	const created = await page.evaluate(() => {
 		const buttons = [...document.querySelectorAll('button, [role="button"], [role="treeitem"]')];
 		const target = buttons.find((el) => (el.textContent ?? '').trim() === 'New Session');
@@ -83,16 +78,61 @@ export async function ensureSession(page) {
 		target.click();
 		return true;
 	});
-	await page.waitForTimeout(3_000);
-	return created ? 'created' : 'none';
+	if (created) await page.waitForTimeout(2_500);
+	return created;
 }
 
-/** 在输入框里发一条消息（走真实一轮；只在必须让会话离开空白态时用）。 */
+/** 座位 chip 上的预设名（新会话界面；老会话里这个 chip 不存在）。 */
+export function seatLabel(page) {
+	return page.evaluate(() => {
+		const seat = [...document.querySelectorAll('button[aria-haspopup="menu"]')].find((el) =>
+			/preset|预设/i.test(el.getAttribute('title') ?? ''),
+		);
+		return seat ? (seat.textContent ?? '').trim() : null;
+	});
+}
+
+/**
+ * 在新会话界面上选 Agent 预设：点开座位 chip，选第一项以 `name` 开头的菜单项。
+ *
+ * 菜单项的可及名是「预设名 + 描述」拼起来的，所以只用前缀匹配。
+ */
+export async function pickPreset(page, name) {
+	await page.evaluate(() => {
+		const seat = [...document.querySelectorAll('button[aria-haspopup="menu"]')].find((el) =>
+			/preset|预设/i.test(el.getAttribute('title') ?? ''),
+		);
+		if (seat && seat.getAttribute('aria-expanded') !== 'true') seat.click();
+	});
+	const opened = await waitFor(page, () => document.querySelectorAll('[role="menuitem"]').length > 0, {
+		timeout: 10_000,
+		label: '预设菜单展开',
+	});
+	const picked = await page.evaluate((wanted) => {
+		const item = [...document.querySelectorAll('[role="menuitem"]')].find((el) =>
+			(el.textContent ?? '').trim().startsWith(wanted),
+		);
+		if (!item) return false;
+		item.click();
+		return true;
+	}, name);
+	await page.waitForTimeout(1_500);
+	return { opened, picked, current: await seatLabel(page) };
+}
+
+/** 在输入框里发一条消息（走真实一轮）。 */
 export async function sendMessage(page, text) {
 	const editor = page.locator('[contenteditable="true"]').first();
 	await editor.click();
 	await page.keyboard.type(text, { delay: 12 });
 	await page.keyboard.press('Enter');
+}
+
+/** 列出当前可见的 tab 文本，便于断言。 */
+export function listTabs(page) {
+	return page.evaluate(() =>
+		[...document.querySelectorAll('[role="tab"]')].map((tab) => (tab.textContent ?? '').trim()).filter(Boolean),
+	);
 }
 
 /** 点击会话头部的视图 tab（按可见文本匹配，向上找到 role=tab/button）。 */
@@ -104,24 +144,46 @@ export async function openViewTab(page, label) {
 		for (const leaf of leaves) {
 			let node = leaf;
 			while (node && node.getAttribute('role') !== 'tab' && node.tagName !== 'BUTTON') node = node.parentElement;
-			if (node && node.getAttribute('role') === 'tab') {
-				node.click();
-				return true;
-			}
-			if (node) {
-				node.click();
-				return true;
-			}
+			if (!node) continue;
+			node.click();
+			return true;
 		}
 		return false;
 	}, label);
 }
 
-/** 列出当前可见的 tab 文本，便于断言。 */
-export function listTabs(page) {
-	return page.evaluate(() =>
-		[...document.querySelectorAll('[role="tab"]')].map((tab) => (tab.textContent ?? '').trim()).filter(Boolean),
+/** 等某个 tab 出现并切过去（会话离开空白态之后才会声明 conversation.view）。 */
+export async function openViewTabWhenReady(page, label, timeout = 60_000) {
+	const appeared = await waitFor(
+		page,
+		(wanted) =>
+			[...document.querySelectorAll('[role="tab"]')].some((tab) => (tab.textContent ?? '').trim() === wanted),
+		{ timeout, label: `tab ${label}`, arg: label },
 	);
+	if (!appeared) return false;
+	const switched = await openViewTab(page, label);
+	await page.waitForTimeout(1_500);
+	return switched;
+}
+
+/**
+ * 轮询一个页面内条件，返回它第一次为真的值（超时返回最后一次的假值）。
+ *
+ * 页面里断言用 evaluate 的原生轮询（Playwright 的 locator 断言会因为舞台元素
+ * 在重播时被卸载而反复重试），这里只做「在 Node 侧等到发生」这一件事。
+ */
+export async function waitFor(page, probe, { timeout = 60_000, interval = 300, label = 'condition', arg } = {}) {
+	const deadline = Date.now() + timeout;
+	let last = false;
+	for (;;) {
+		last = await page.evaluate(probe, arg);
+		if (last) return last;
+		if (Date.now() >= deadline) {
+			console.log(`    … 等待超时：${label}（${timeout}ms）`);
+			return last;
+		}
+		await page.waitForTimeout(interval);
+	}
 }
 
 export async function shot(page, file) {

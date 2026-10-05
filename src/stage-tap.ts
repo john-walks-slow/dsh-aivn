@@ -1,42 +1,70 @@
 /**
- * 剧作家的输出即舞台脚本。
+ * 剧作家的输出即舞台脚本，剧作家的轮边界即舞台节奏。
  *
- * 助手流的文本增量喂进 `@aivn/core` 的 DSL 解析器，解析出的事件带序号进中枢；
- * 消息收束（attempt end）时封口，未闭合的包裹标签自动闭合，所以一轮写到一半断了
- * 也不会把已经流出来的台词丢掉。
+ * 三条都只认**剧作家预设**的会话，普通对话与搭台助手说什么都不上台：
  *
- * 只接剧作家预设的会话：普通对话、搭台助手说什么都不上台。
+ * - `agent/assistant-stream`：文本增量喂进 `@aivn/core` 的 DSL 解析器，解析出的 IR 进中枢。
+ *   消息收束（attempt end）时封口，未闭合的包裹标签自动闭合，所以一轮写到一半断了
+ *   也不会把已经流出来的台词丢掉。
+ * - `agent/status`：轮边界。剧作家起笔/停笔是画面「还在写字 / 写完了，等玩家」的唯一依据——
+ *   `beat_done` 没给停止点的那一轮（no_stop）没有任何 IR 可看，边界就是它全部的信号。
+ *   不取消息边界（assistant-stream 的 end）是因为一轮里可以有多次消息收束（中途调工具），
+ *   那会把一次演出误报成好几次收笔。
+ * - `agent/inbox/inserted`：玩家的每一次输入。DSH 原生输入框与舞台的选肢/自由输入都经
+ *   inbox 进 Agent，于是时间线上只有这一处落点，两条路既不会各写一条、也不会漏写。
+ *   `beat-guard` 追收束发的那一句也走这条路，得按正文摘出去——它不是玩家说的话。
  */
 import type { Context } from '@deepseek-ai/cordis';
-import { StageDslParser } from '@aivn/core';
+import { StageDslParser, type StageEvent } from '@aivn/core';
 import type {} from '@deepseek-ai/dsh-agent';
+import type { UserMessage } from '@deepseek-ai/dsh-llm';
+import { isBeatNudge, type BeatGuard } from './beat-guard';
 import type { StageHub } from './hub';
 import { PLAYWRITER_PRESET, sessionPreset } from './session';
 
-/** `agent/assistant-stream` 的载荷；只需用到其中三个字段。 */
-interface AssistantStreamPayload {
+/** 事件载荷都带一层 `{ agent }` 外壳（由 agent 作用域的分发器补上）。 */
+interface AgentShell {
 	agent: { id: string };
+}
+
+/** `agent/assistant-stream` 的载荷；只需用到其中三个字段。 */
+interface AssistantStreamPayload extends AgentShell {
 	frame:
 		| { type: 'start' }
 		| { type: 'end' }
 		| { type: 'chunk'; chunk: { type: string; text?: string } };
 }
 
-export function installStageTap(ctx: Context, hub: StageHub): () => void {
+interface StatusPayload extends AgentShell {
+	status: 'idle' | 'running';
+}
+
+interface InboxPayload extends AgentShell {
+	message: UserMessage;
+}
+
+export function installStageTap(ctx: Context, hub: StageHub, guard: BeatGuard): () => void {
 	const parsers = new Map<string, StageDslParser>();
 
 	const parserFor = (sessionId: string): StageDslParser => {
 		let parser = parsers.get(sessionId);
 		if (!parser) {
-			parser = new StageDslParser((event) => hub.append(sessionId, event));
+			parser = new StageDslParser((event) => {
+				hub.append(sessionId, event);
+				if (hasLines(event)) guard.noteLines(sessionId);
+			});
 			parsers.set(sessionId, parser);
 		}
 		return parser;
 	};
 
+	/** 这条会话是不是舞台上的那一出。不是就整条管线都不碰。 */
+	const isPlaywriter = (sessionId: string): boolean =>
+		sessionPreset(ctx, sessionId) === PLAYWRITER_PRESET;
+
 	const onFrame = (payload: AssistantStreamPayload): void => {
 		const sessionId = payload.agent.id;
-		if (sessionPreset(ctx, sessionId) !== PLAYWRITER_PRESET) return;
+		if (!isPlaywriter(sessionId)) return;
 
 		const { frame } = payload;
 		if (frame.type === 'end') {
@@ -48,9 +76,58 @@ export function installStageTap(ctx: Context, hub: StageHub): () => void {
 		}
 	};
 
-	const dispose = ctx.on('agent/assistant-stream', onFrame) as () => void;
+	const onStatus = (payload: StatusPayload): void => {
+		const sessionId = payload.agent.id;
+		if (!isPlaywriter(sessionId)) return;
+		if (payload.status === 'running') guard.begin(sessionId);
+		hub.appendBeat(sessionId, payload.status === 'running' ? 'start' : 'end');
+	};
+
+	const onInput = (payload: InboxPayload): void => {
+		const sessionId = payload.agent.id;
+		if (!isPlaywriter(sessionId)) return;
+
+		const text = messageText(payload.message);
+		if (text && !isBeatNudge(text)) hub.append(sessionId, { kind: 'player_input', text });
+	};
+
+	const offFrame = ctx.on('agent/assistant-stream', onFrame);
+	const offStatus = ctx.on('agent/status', onStatus);
+	const offInput = ctx.on('agent/inbox/inserted', onInput);
+
 	return () => {
-		dispose();
+		offFrame();
+		offStatus();
+		offInput();
 		parsers.clear();
 	};
+}
+
+/**
+ * 这一帧算不算「台上真说了话」。
+ *
+ * 认文本增量（say / narrate / thought）而**不认控制指令**（scene / actor / sfx / cg）：
+ * 只换了个背景、只调了一次立绘，舞台上仍然什么都没有，追收束去要一个停止点没有意义。
+ * 与 AIVN `orchestrator.ts` 的 `beatHasLines` 同一个口径。
+ */
+function hasLines(event: StageEvent): boolean {
+	if (event.kind === 'say_text' || event.kind === 'narrate_text' || event.kind === 'thought_text') {
+		return event.delta.trim() !== '';
+	}
+	return false;
+}
+
+/**
+ * 一条 user 消息里的纯文本。
+ *
+ * 玩家的输入按定义是文本（舞台的输入框、选肢卡都只给得出文本），消息里若混进图片等
+ * 非文本块就跳过——舞台没地方摆它，硬塞成一行等于替玩家说了一句他没说的话。
+ * 多个文本块（正常只有一块）按空行拼起来，不丢玩家的字。
+ */
+function messageText(message: UserMessage): string {
+	return message.content
+		.filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+		.map((block) => block.text)
+		.join('\n\n')
+		.trim();
 }

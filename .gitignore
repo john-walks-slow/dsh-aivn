@@ -5,3 +5,8 @@ node_modules/
 e2e-artifacts/
 docs/research/
 *.log
+
+# e2e 的剧目夹具：落在工作区根（插件仓库根就是 e2e 会话的工作区），跑完即删，
+# 这两行只是万一中断时别把它提交进去——工作区 = 剧目的直接后果。
+/play.json
+/assets/

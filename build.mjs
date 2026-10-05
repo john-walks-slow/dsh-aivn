@@ -37,6 +37,8 @@ const client = await build({
 	minify: true,
 	sourcemap: false,
 	external: ['react', 'react-dom/*', 'react/jsx-runtime', '@deepseek-ai/*'],
+	// 样式进 bundle 当字符串（客户端半边没有样式管道，见 src/types/assets.d.ts）
+	loader: { '.css': 'text' },
 	logLevel: 'info',
 });
 

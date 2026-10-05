@@ -5,8 +5,8 @@
  *   GET  /aivn/play?session=     这个会话的剧目（工作区里有 play.json 才算）
  *   GET  /aivn/assets?session=   剧目里的素材清单与描述
  *   GET  /aivn/asset?session=&path=  剧目内的一件素材
- *   GET  /aivn/stream?session=   IR 事件的 SSE 流，连上先补推已播出的事件
- *   POST /aivn/input             玩家输入：进时间线，同时投给剧作家
+ *   GET  /aivn/stream?session=   IR 帧的 SSE 流，连上先补推已播出的帧
+ *   POST /aivn/input             玩家输入：投给剧作家（时间线由 tap 接管）
  */
 import { readFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -63,7 +63,7 @@ async function handle(ctx: Context, hub: StageHub, req: IncomingMessage, res: Se
 		return;
 	}
 	if (req.method === 'POST' && url.pathname === `${PREFIX}/input`) {
-		await acceptInput(ctx, hub, req, res);
+		await acceptInput(ctx, req, res);
 		return;
 	}
 	sendJson(res, 404, { error: `no such route: ${req.method} ${url.pathname}` });
@@ -109,8 +109,14 @@ async function sendAsset(ctx: Context, res: ServerResponse, sessionId: string, r
 	res.end(body);
 }
 
-/** 玩家的一次输入：先作为时间线上的一帧广播（回执、回看都靠它），再投给剧作家。 */
-async function acceptInput(ctx: Context, hub: StageHub, req: IncomingMessage, res: ServerResponse): Promise<void> {
+/**
+ * 玩家的一次输入：投给剧作家。
+ *
+ * 这里**不往中枢写 player_input**——落点只有一个（`stage-tap` 的 inbox 监听），
+ * 否则 DSH 原生输入框那条路会漏、这条路会重复。followup 是同步入队，
+ * 舞台收到的那一帧必然排在本轮新内容之前。
+ */
+async function acceptInput(ctx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> {
 	let raw = '';
 	for await (const chunk of req) {
 		raw += chunk;
@@ -141,7 +147,6 @@ async function acceptInput(ctx: Context, hub: StageHub, req: IncomingMessage, re
 		return;
 	}
 
-	hub.append(sessionId, { kind: 'player_input', text });
 	agent.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }));
 	sendJson(res, 200, { ok: true });
 }

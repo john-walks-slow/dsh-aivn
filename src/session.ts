@@ -8,6 +8,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { SessionId } from '@deepseek-ai/dsh-session';
 import type { UserMessage } from '@deepseek-ai/dsh-llm';
 import type {} from '@deepseek-ai/dsh-agent';
+import type {} from '@deepseek-ai/dsh-agent-preset-registry';
 import type {} from '@deepseek-ai/dsh-api-session-controller';
 
 /** 剧作家：写字的那位。 */
@@ -23,6 +24,8 @@ export const STAGEHAND_PRESET = 'aivn-stagehand';
  */
 export interface LiveAgent {
 	readonly id: string;
+	/** Agent 自己的 scope ctx：预设内的工具与服务注册在它上面。 */
+	readonly ctx: Context;
 	readonly session?: {
 		readonly header?: {
 			readonly cwd?: string;
@@ -45,9 +48,19 @@ export function sessionWorkspace(ctx: Context, sessionId: string): string | unde
 	return attachedAgent(ctx, sessionId)?.session?.header?.cwd;
 }
 
-/** 会话跑的是哪个预设。 */
+/**
+ * 会话**当前**跑的预设。
+ *
+ * 权威是活的预设组合（`agentPresets.composedPreset`），会话头里的 `agentPreset` 只是
+ * **创建那一刻**的事实。两者会在新会话界面上分叉：新建会话默认落在 `standard`，玩家接着
+ * 在座位 chip 上选「剧作家」，头里仍然写着 `standard`（2026-10-05 e2e 实测）。
+ * 只读头会把所有「先建会话、再选预设」的会话整条丢掉——舞台一帧都收不到。
+ * 头留作兜底：冷会话或组合还没落定时，至少有个值。
+ */
 export function sessionPreset(ctx: Context, sessionId: string): string | undefined {
-	return attachedAgent(ctx, sessionId)?.session?.header?.agentPreset;
+	const agent = attachedAgent(ctx, sessionId);
+	if (!agent) return undefined;
+	return ctx.agentPresets.composedPreset(agent.ctx) ?? agent.session?.header?.agentPreset;
 }
 
 /**
