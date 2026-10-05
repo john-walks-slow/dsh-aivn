@@ -25,6 +25,8 @@ export class VoiceHost {
 		private readonly tts: FishTts | null,
 		private readonly hub: StageHub,
 		private readonly log: { warn(message: string): void },
+		/** 同时合成的上限（配置项，默认 2）。 */
+		private readonly concurrency: number = 2,
 	) {}
 
 	/** 配了 Key 才有语音：没有的时候客户端连语音开关都不显示。 */
@@ -46,6 +48,7 @@ export class VoiceHost {
 		const tts = this.tts;
 		const outDir = join(playDir, TTS_CACHE_DIR);
 		const pipeline = new VoicePipeline({
+			concurrency: this.concurrency,
 			voiceOf: (charId) => readVoiceMap(playDir).get(charId),
 			synth: async (text, voiceId) => {
 				const { file } = await tts.synthesize(text, voiceId, outDir);

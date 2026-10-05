@@ -89,6 +89,9 @@ const CRAFT = `# 创作口径
 短句，克制，不写心理活动，只写看得见的东西。称呼用姓氏。
 `;
 
+// 卡上的 `voiceId` 是一个公开音色 id（不是密钥），换一个照抄这个格式即可。
+// 别在 frontmatter 里写行内注释：卡解析器会把 `# …` 当成值的一部分，Fish 随后一律 400，
+// 而表现是「有 started 帧、永远没有 ready 帧」——查起来很绕。
 const CARD_LIN = `---
 name: 林
 sprite: lin

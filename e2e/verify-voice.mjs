@@ -74,7 +74,9 @@ const PROBE = () => {
 	};
 	const start = AudioBufferSourceNode.prototype.start;
 	AudioBufferSourceNode.prototype.start = function (...args) {
-		probe.started += 1;
+		// 只认真音频：解码失败时导演会拿 1 样本的静音缓冲顶替（audio.ts 的「静音墓碑」），
+		// 它也走这条 `start()`——不按长度筛，一段全失败的空壳也能把「出声」凑出来。
+		if ((this.buffer?.length ?? 0) > 1) probe.started += 1;
 		return start.apply(this, args);
 	};
 };
@@ -132,6 +134,22 @@ const browser = await launch(['--autoplay-policy=no-user-gesture-required']);
 try {
 	const { page, errors } = await newPage(browser);
 	await page.addInitScript(PROBE);
+
+	/**
+	 * 客户端发给宿主的语音控制（B1 的回归面）。
+	 *
+	 * 「语音总开关」有两半：本地那半让导演闭嘴，宿主那半让服务端别再分句、别再打额度。
+	 * 只做前一半，玩家关掉语音也照样在烧钱——而这件事从界面上完全看不出来。
+	 */
+	const voicePosts = [];
+	page.on('request', (request) => {
+		if (request.method() !== 'POST' || !request.url().includes('/aivn/voice')) return;
+		try {
+			voicePosts.push(JSON.parse(request.postData() ?? '{}'));
+		} catch {
+			voicePosts.push({ unparsable: true });
+		}
+	});
 	await gotoGui(page);
 	await dismissOnboarding(page);
 
@@ -258,6 +276,28 @@ try {
 		const life = next ? ((seenAt.get(next) - seenAt.get(seq)) / 1000).toFixed(1) : '行尾';
 		console.log(`  （行 seq=${seq}：合成回来用了 ${latency}s，这一行撑了 ${life}s）`);
 	}
+
+	// B1 回归：挂载后同步一次总开关，点一下开关再同步一次。
+	check(
+		'V14',
+		voicePosts.some((post) => post.enabled === true),
+		`挂载时把总开关同步给了宿主（收到 ${voicePosts.length} 条：${JSON.stringify(voicePosts.slice(-2))}）`,
+	);
+	const flipped = await page.evaluate(() => {
+		// 自家组件用 DOM click：元素会随重渲染重建，Playwright 的 locator 会一直重试到超时。
+		const buttons = [...document.querySelectorAll('button')];
+		const toggle = buttons.find((el) => (el.getAttribute('title') ?? '').startsWith('Voice:'));
+		if (!toggle) return null;
+		const before = toggle.getAttribute('title');
+		toggle.click();
+		return before;
+	});
+	await page.waitForTimeout(800);
+	check(
+		'V15',
+		Boolean(flipped) && voicePosts.some((post) => post.enabled === false),
+		flipped ? `关掉语音后宿主也收到了 enabled:false（${JSON.stringify(voicePosts.slice(-1))}）` : '找不到语音开关',
+	);
 
 	check('V9', errors.length === 0, `页面无报错（${errors.length}）`);
 	console.log(`\n${results.filter((r) => r.ok).length}/${results.length} 通过`);

@@ -231,13 +231,13 @@ voice: 短句，少用形容词
 | 路由 | 说明 |
 | --- | --- |
 | `GET /aivn/health` | `{ ok: true, plugin: "dsh-aivn" }` |
-| `GET /aivn/play?session=` | 这个会话的剧目：`{ dir, config }`；不是剧目就是 `{ dir: null }` |
+| `GET /aivn/play?session=` | 这个会话的剧目：`{ dir, config, voice }`；不是剧目就是 `{ dir: null, voice: false }`。`voice` 说明宿主配没配 TTS，客户端据此决定显不显示语音开关 |
 | `GET /aivn/assets?session=` | `{ index, manifest }`；不是剧目 404 |
 | `GET /aivn/asset?session=&path=` | 剧目内的一件素材。`path` 是**相对剧目根**的路径（如 `assets/backgrounds/x.png`），越界 400 |
 | `GET /aivn/audio?session=&file=` | 一句台词的合成音频。文件名是 `sha1(音色id + 文本)`，内容寻址，所以可以长缓存 |
 | `GET /aivn/stream?session=` | SSE，`event: frame`，data 是一帧 `StageFrame` JSON。连上先补推已经播过的帧，15 秒一次 keepalive |
 | `POST /aivn/input { session, text, silent? }` | 玩家的一次输入，投给剧作家。`silent: true` = 不算玩家说的话（舞台的「继续」走这条），仍然会作为一条 user 消息投出去 |
-| `POST /aivn/voice { session, enabled?, paused? }` | 语音总开关与客户端背压（播放层积压时暂停预取，省额度） |
+| `POST /aivn/voice { session, enabled?, paused? }` | 语音总开关与客户端背压。`enabled: false` 让服务端停止分句合成（省额度），`paused` 是播放层积压时的临时背压 |
 
 `StageFrame` 有三种：
 
@@ -246,6 +246,10 @@ voice: 短句，少用形容词
 { seq, kind: 'beat', state: 'start' | 'end' }  // 剧作家起笔 / 停笔
 { seq, kind: 'voice', lineSeq, phrase, state: 'started' | 'ready', url? }  // 语音
 ```
+
+合成的音频落在剧目自己的 `media-cache/tts/`：文件名是 `sha1(模型 + 音色 id + 文本)`，内容寻址，
+所以重连补推、快进回看、重听都命中同一份、不会再打一次上游。这份缓存**只增不减**（换了模型或改了
+一个字就是新文件），随时可以整个目录删掉，下次演出会重新合成。
 
 `voice` 帧的 `lineSeq` 是**那一行 `say_start` 帧的 seq**（不是本帧的 seq）——音频按它挂回台词行。
 `started` 用来让喇叭亮起来（还在合成），`ready` 带上可播的 URL。台词与音频是并行出的：

@@ -84,7 +84,7 @@ export async function apply(ctx: Context, config: Config = {}): Promise<() => vo
 	/** 「引擎自己投的消息」的登记，追收束（`beat-guard`）与静默推进（`routes`）共用一份。 */
 	const injected = new InjectedMessages();
 	const tts = createTts(configuredKeys(config), config.tts?.baseUrl ?? DEFAULT_TTS_BASE_URL, config.tts?.model ?? DEFAULT_TTS_MODEL);
-	const voice = new VoiceHost(tts, hub, ctx.logger);
+	const voice = new VoiceHost(tts, hub, ctx.logger, config.tts?.concurrency ?? 2);
 	if (tts) ctx.logger.info('[dsh-aivn] 语音已启用（Fish Audio TTS）');
 	else ctx.logger.info('[dsh-aivn] 没配 TTS key，语音停用');
 

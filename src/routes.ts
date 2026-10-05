@@ -5,6 +5,7 @@
  *   GET  /aivn/play?session=     这个会话的剧目（工作区里有 play.json 才算）
  *   GET  /aivn/assets?session=   剧目里的素材清单与描述
  *   GET  /aivn/asset?session=&path=  剧目内的一件素材
+ *   GET  /aivn/play?session=          剧目的目录与配置（`voice` 说明宿主是否配了 TTS）
  *   GET  /aivn/audio?session=&file=   一句台词的合成音频（内容寻址，可长缓存）
  *   GET  /aivn/stream?session=   IR 帧的 SSE 流，连上先补推已播出的帧
  *   POST /aivn/input             玩家输入：`{session, text, silent?}`，投给剧作家
@@ -71,6 +72,9 @@ async function handle(
 	if (req.method === 'GET' && url.pathname === `${PREFIX}/play`) {
 		const sessionId = url.searchParams.get('session') ?? '';
 		const play = await loadPlay(sessionWorkspace(ctx, sessionId));
+		// 客户端来问「有没有剧目」= 它（重新）接上了这条会话。顺手解掉背压的暂停：
+		// 上一个页面可能是被直接关掉的，没人补发 `{paused:false}`，那个泵会一直停着。
+		voice.control(sessionId, { paused: false });
 		// `voice` 决定舞台显不显示语音开关：没配 TTS Key 时整条语音链路都是关的。
 		sendJson(res, 200, play ? { dir: play.dir, config: play.config, voice: voice.available } : { dir: null, voice: false });
 		return;
@@ -274,26 +278,29 @@ async function sendAudio(ctx: Context, res: ServerResponse, sessionId: string, f
 	try {
 		body = await readFile(target);
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-			sendJson(res, 404, { error: `no such audio: ${file}` });
-			return;
+		// 与 `sendAsset` 一个口径：`ENOENT` 是「没有这段」，`EISDIR` 是「这个文件名叫到了目录上」。
+		switch ((error as NodeJS.ErrnoException).code) {
+			case 'ENOENT':
+				sendJson(res, 404, { error: `no such audio: ${file}` });
+				return;
+			case 'EISDIR':
+				sendJson(res, 400, { error: `${file} is a directory` });
+				return;
+			default:
+				throw error;
 		}
-		throw error;
 	}
 	res.writeHead(200, {
 		'content-type': 'audio/mpeg',
 		'content-length': body.length,
-		'cache-control': 'public, max-age=31536000, immutable',
+		// URL 里带着会话标识，别让中间层当公开资源缓存。
+		'cache-control': 'private, max-age=31536000, immutable',
 	});
 	res.end(body);
 }
 
 /** 语音控制：总开关与客户端背压。两者都只影响预取，不影响已经合成好的音频。 */
 async function acceptVoice(voice: VoiceHost, req: IncomingMessage, res: ServerResponse): Promise<void> {
-	if (!sameOrigin(req)) {
-		sendJson(res, 403, { error: 'cross-origin request rejected' });
-		return;
-	}
 	const body = await readJsonBody(req, res);
 	if (body === null) return;
 

@@ -17,8 +17,8 @@ import { existsSync } from 'node:fs';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-/** 换下一把 key 重试的状态码。 */
-const RETRYABLE_STATUS = new Set([401, 402, 429]);
+/** 换下一把 key 重试的状态码：额度类（401/402/429）与上游瞬时故障（5xx）。 */
+const RETRYABLE_STATUS = new Set([401, 402, 429, 500, 502, 503, 504]);
 
 /** 非轮换错误：持久性 4xx/5xx 换 key 也没用。 */
 class NonRetryableTtsError extends Error {}
@@ -43,7 +43,15 @@ export class FishTts {
 	 * 命中缓存直接复用；失败按上面的规矩换 key，全挂才抛。
 	 */
 	synthesize(text: string, voiceId: string, outDir: string): Promise<{ file: string; cached: boolean }> {
-		const file = `${createHash('sha1').update(voiceId).update('\0').update(text).digest('hex')}.mp3`;
+		// 键里带上 model：换了模型（音色库/口音会变）之后，同一句话不该再命中旧音频。
+		const digest = createHash('sha1')
+			.update(this.opts.model)
+			.update('\0')
+			.update(voiceId)
+			.update('\0')
+			.update(text)
+			.digest('hex');
+		const file = `${digest}.mp3`;
 		return this.cacheFile(file, outDir, () => this.request(text, voiceId));
 	}
 

@@ -15,6 +15,10 @@ export const MODULES = {
 		description: '舞台视图：加载、tab 切换、IR 流渲染、输入回执',
 		suites: ['verify-stage'],
 	},
+	voice: {
+		description: '台词语音：分句合成、voice 帧、音频取回、浏览器出声（要真 Fish key）',
+		suites: ['verify-voice'],
+	},
 };
 
 const rawArg = process.argv[2];

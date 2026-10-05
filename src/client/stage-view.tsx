@@ -134,9 +134,12 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 			void postJson('/aivn/voice', { session: sessionId, ...state }).catch(() => undefined);
 		};
 		return () => {
+			// 先 dispose 再摘回调：dispose 会把欠着的那条 `{paused:false}` 补发出去
+			// （`clearBackpressure`）。顺序反了这条消息就丢了，而客户端此后认为自己
+			// 不欠背压、不会再补发——宿主那条管线的泵就一直停着，这条会话永久静默。
+			director.dispose();
 			director.onNotify = null;
 			director.onControl = null;
-			director.dispose();
 		};
 	}, [director, sessionId, requestRender]);
 
@@ -303,6 +306,15 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 	const playConfig = play?.dir ? (play.config ?? null) : null;
 	/** 宿主配了 TTS、这一座剧目也确实是剧目，才显示语音相关的一切。 */
 	const voiceAvailable = play?.voice === true && playConfig !== null;
+
+	/** 只改本地状态与玩家的选择；「告诉宿主」由下面那条同步 effect 统一负责。 */
+	// 总开关对宿主也要说一声：只在本地关掉的话，服务端照样分句、照样打 Fish 额度。
+	// 这一条同时覆盖「切会话」与「刷新后恢复上次的选择」（voiceOn 是从 localStorage 读的）；
+	// 它必须排在上面那个 `voiceAvailable` 之后，所以没跟导演那两条 effect 放在一起。
+	useEffect(() => {
+		if (!sessionId || !voiceAvailable) return;
+		void postJson('/aivn/voice', { session: sessionId, enabled: voiceOn }).catch(() => undefined);
+	}, [sessionId, voiceAvailable, voiceOn]);
 
 	const toggleVoice = useCallback((): void => {
 		setVoiceOn((on) => {
