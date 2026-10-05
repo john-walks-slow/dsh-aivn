@@ -14,7 +14,6 @@
 | `lib/` | **跟踪的构建产物**（`lib/index.js` / `lib/client.js`）——DSH 直接加载它 |
 | `e2e/` | dsh-e2e 套件 |
 | `screenshots/` | README 与市场详情页用的图（`screenshots.json` 指过来，1–8 张） |
-| `docs/` | 开发侧记录（用户手册在 `README.md`） |
 
 ## 动手前必须知道的四件事
 
@@ -64,7 +63,7 @@ dsh-e2e stop
   挂钩子，断言的是「浏览器真的解出 PCM 并起播」，不是「帧到了」）。
 - 两个本地前提在 `.dsh-e2e-home/` 里（不在仓库里）：profile 的 `cordis.patch.yml` 要有可用的
   provider 行（`settings.yaml` 首次启动被 import 后改名，冷启就没 provider 了），
-  默认模型挑一个这台机器出得去的（地区受限的条目会直接报
+  默认模型挑一个这台机器出得去的（列表里可能有地区受限的条目，会报
   `User location is not supported`）。细节见 README 的「开发」一节。
 
 ## 发布
@@ -93,7 +92,9 @@ dsh-e2e stop
 
 ## 文档
 
-- `README.md` —— **用户手册**。凡是用户碰得到的配置面都必须在这里：`play.json` 字段、
-  `craft` 取值、剧目目录约定、预设、工具、斜杠命令、HTTP 路由。发布前逐项核对。
-- `docs/features/yymmdd-{feature}/` —— 开发侧记录；跨仓库的需求记录在主仓库
-  `stage-ai/docs/features/` 下。
+- `README.md` / `README.en.md` —— **用户手册**（中文主体 + 英文，改动要同步）。凡是用户碰得到的
+  配置面都必须在这里：`play.json` 字段、`craft` 取值、剧目目录约定、预设、工具、斜杠命令、
+  HTTP 路由、权限与兼容声明。发布前逐项核对。
+- **本仓库不放开发侧记录**：需求、计划、检视、验证一律记在主仓库
+  `stage-ai/docs/features/261005-dsh-vn-plugin/` 下。这个仓库是公开的，施工单里那些绝对路径与
+  私有仓库引用不该出现在这里（曾有一份 `preset-and-prompt.spec.md`，发布前迁走了）。

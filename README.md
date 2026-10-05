@@ -337,11 +337,12 @@ dsh-e2e stop
 
 实例 home 在 `<worktree>/.dsh-e2e-home`，不进 git。两个本地前提（都在那个 home 里，不在仓库里）：
 
-- **要有可用的 LLM provider**：home 的 `settings.yaml` 首次启动会被 import 后改名，
-  此后冷启没有 provider。把 profile 的 `llm-*` 行补进
-  `.dsh-e2e-home/profiles/web/cordis.patch.yml`。
-- **默认模型挑一个这台机器出得去的**：地区受限的条目会直接
-  `User location is not supported`。用 `medium` 之类。
+- **要有可用的 LLM provider**：home 的 `settings.yaml` 首次启动会被 import 后改名，此后冷启就
+  没有 provider 了。把你线上 profile 里那条 provider（`llm-*`）补进
+  `.dsh-e2e-home/profiles/web/cordis.patch.yml`，并 export 它用的 API key 环境变量——
+  否则 GUI 会被「Add an API key to get started」挡住，会话也发不出消息。
+- **默认模型挑一个你这台机器出得去的**：这份模型列表里可能有地区受限的条目（报
+  `User location is not supported` 那种）。e2e 不挑具体模型，能通就行。
 
 套件：
 

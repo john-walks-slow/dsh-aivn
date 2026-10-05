@@ -378,11 +378,13 @@ The instance home is `<worktree>/.dsh-e2e-home` and is not tracked by git. Two l
 (both live in that home, not in the repo):
 
 - **A working LLM provider is required**: the home's `settings.yaml` is imported and renamed on
-  first start, so later cold starts have no provider. Add the profile's `llm-*` entry to
-  `.dsh-e2e-home/profiles/web/cordis.patch.yml`.
-- **Pick a default model your machine can actually reach**: a
-  region-restricted model gives you a flat `User location is not supported`. Use something
-  like `medium`.
+  first start, so later cold starts have no provider. Copy your own profile's provider entry
+  (`llm-*`) into `.dsh-e2e-home/profiles/web/cordis.patch.yml` and export whatever API key
+  environment variable it uses — otherwise the GUI is blocked by "Add an API key to get started"
+  and sessions can't send anything.
+- **Pick a default model your machine can actually reach**: the list may contain region-restricted
+  entries (the ones that fail with `User location is not supported`). The e2e suites don't care
+  which one you use, only that it works.
 
 Suites:
 
