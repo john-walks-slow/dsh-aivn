@@ -3,7 +3,7 @@
 // 约定（见 dsh-e2e 技能）：连接地址与 sessions 目录一律从 DSH_E2E_PORT /
 // DSH_E2E_HOME 拼，禁止硬编码端口与 home 路径；不用 networkidle
 // （/plugins/events 是 SSE 长连接，永远不 idle）。
-import pw from '~/projects/camoufox-mcp/node_modules/playwright-core/index.js';
+import pw from 'playwright-core';
 
 export const E2E_URL =
 	process.env.E2E_URL ??
@@ -19,9 +19,14 @@ if (!E2E_URL || !E2E_HOME) {
 /** 工作区就是 e2e 实例播种的那个目录（插件仓库根）。 */
 export const WORKSPACE = process.env.E2E_WORKSPACE ?? E2E_HOME.replace(/\/\.dsh-e2e-home\/?$/, '');
 
-const CHROMIUM = '/root/.cache/ms-playwright/chromium-1243/chrome-linux-arm64/chrome';
-
-/** 本机 ARM 机器上的共享无头 chromium。 */
+/**
+ * 用哪个 chromium。
+ *
+ * 默认交给 playwright 自己找（`npx playwright install chromium` 装到缓存里的那份）；
+ * 想指定一份已有的就设 `E2E_CHROMIUM=/path/to/chrome`。不写死路径——写死了这份套件
+ * 就只能在装它的那台机器上跑。
+ */
+const CHROMIUM = process.env.E2E_CHROMIUM;
 /** 起浏览器。`extraArgs` 给语音那类需要放开自动播放策略的用例用。 */
 export async function launch(extraArgs = []) {
 	return pw.chromium.launch({
