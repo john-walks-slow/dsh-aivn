@@ -3,13 +3,17 @@
  *
  *   GET  /aivn/health            存活探针
  *   GET  /aivn/play?session=     这个会话的剧目（工作区里有 play.json 才算）
+ *   GET  /aivn/assets?session=   剧目里的素材清单与描述
+ *   GET  /aivn/asset?session=&path=  剧目内的一件素材
  *   GET  /aivn/stream?session=   IR 事件的 SSE 流，连上先补推已播出的事件
  *   POST /aivn/input             玩家输入：进时间线，同时投给剧作家
  */
+import { readFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Context } from '@deepseek-ai/cordis';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import type {} from '@deepseek-ai/dsh-host-webserver';
+import { contentTypeOf, listAssets, readManifest, resolveInPlay } from './assets';
 import type { StageHub } from './hub';
 import { loadPlay } from './play';
 import { resolveAgent, sessionWorkspace } from './session';
@@ -38,6 +42,22 @@ async function handle(ctx: Context, hub: StageHub, req: IncomingMessage, res: Se
 		sendJson(res, 200, play ? { dir: play.dir, config: play.config } : { dir: null });
 		return;
 	}
+	if (req.method === 'GET' && url.pathname === `${PREFIX}/assets`) {
+		const sessionId = url.searchParams.get('session') ?? '';
+		const play = await loadPlay(sessionWorkspace(ctx, sessionId));
+		if (!play) {
+			sendJson(res, 404, { error: 'this session has no play' });
+			return;
+		}
+		sendJson(res, 200, { index: await listAssets(play.dir), manifest: await readManifest(play.dir) });
+		return;
+	}
+	if (req.method === 'GET' && url.pathname === `${PREFIX}/asset`) {
+		const sessionId = url.searchParams.get('session') ?? '';
+		const relative = url.searchParams.get('path') ?? '';
+		await sendAsset(ctx, res, sessionId, relative);
+		return;
+	}
 	if (req.method === 'GET' && url.pathname === `${PREFIX}/stream`) {
 		openStream(hub, url, req, res);
 		return;
@@ -60,6 +80,33 @@ function openStream(hub: StageHub, url: URL, req: IncomingMessage, res: ServerRe
 	const stop = () => unsubscribe();
 	req.on('close', stop);
 	res.on('close', stop);
+}
+
+/** 剧目内的一件素材。路径必须是剧目内的相对路径，越界一律 400。 */
+async function sendAsset(ctx: Context, res: ServerResponse, sessionId: string, relative: string): Promise<void> {
+	const play = await loadPlay(sessionWorkspace(ctx, sessionId));
+	if (!play) {
+		sendJson(res, 404, { error: 'this session has no play' });
+		return;
+	}
+	const target = resolveInPlay(play.dir, relative);
+	if (!target) {
+		sendJson(res, 400, { error: 'path must stay inside the play' });
+		return;
+	}
+
+	let body: Buffer;
+	try {
+		body = await readFile(target);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+			sendJson(res, 404, { error: `no such asset: ${relative}` });
+			return;
+		}
+		throw error;
+	}
+	res.writeHead(200, { 'content-type': contentTypeOf(target), 'content-length': body.length });
+	res.end(body);
 }
 
 /** 玩家的一次输入：先作为时间线上的一帧广播（回执、回看都靠它），再投给剧作家。 */

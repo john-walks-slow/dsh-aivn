@@ -13,7 +13,7 @@ import { installStageTap } from './stage-tap';
 export const name = 'dsh-aivn';
 export { PLAYWRITER_PRESET, STAGEHAND_PRESET } from './session';
 
-export const inject = ['agents', 'sessions', 'sessionController'];
+export const inject = ['agents', 'sessionController'];
 
 export function apply(ctx: Context): () => void {
 	const hub = new StageHub();
