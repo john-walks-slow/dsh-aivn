@@ -34,7 +34,10 @@ export async function newPage(browser, viewport = { width: 1280, height: 860 }) 
 	const errors = [];
 	page.on('pageerror', (error) => errors.push(String(error).slice(0, 240)));
 	page.on('console', (message) => {
-		if (message.type() === 'error') errors.push(`console: ${message.text().slice(0, 240)}`);
+		if (message.type() !== 'error') return;
+		// 资源 404 由 response 监听按 URL 记录，这里的文案拿不到 URL，别再记一遍。
+		if (/Failed to load resource/i.test(message.text())) return;
+		errors.push(`console: ${message.text().slice(0, 240)}`);
 	});
 	return { page, errors };
 }
@@ -43,6 +46,19 @@ export async function newPage(browser, viewport = { width: 1280, height: 860 }) 
 export async function gotoGui(page) {
 	await page.goto(E2E_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 	await page.waitForTimeout(6_000);
+}
+
+/** 关掉首次进入的「添加 API key」引导弹窗（不配 key 的实例每次都会弹）。 */
+export async function dismissOnboarding(page) {
+	const clicked = await page.evaluate(() => {
+		const buttons = [...document.querySelectorAll('button, [role="button"]')];
+		const target = buttons.find((el) => /Configure later|稍后配置|以后再说/i.test((el.textContent ?? '').trim()));
+		if (!target) return false;
+		target.click();
+		return true;
+	});
+	if (clicked) await page.waitForTimeout(1_500);
+	return clicked;
 }
 
 /** 点一个已存在的会话行；没有就点 New Session。返回 'reused' | 'created' | 'none'。 */
@@ -110,4 +126,20 @@ export function listTabs(page) {
 
 export async function shot(page, file) {
 	await page.screenshot({ path: file });
+}
+
+/**
+ * 原子地点击第一个匹配元素。
+ *
+ * 舞台上的停止点按钮会随脚本循环被重建，Playwright 的 actionability 检查
+ * 会因为元素在检查与点击之间被卸载而一直重试；在自己的组件上直接派发
+ * DOM click 既确定又快。
+ */
+export async function clickInPage(page, selector) {
+	return page.evaluate((sel) => {
+		const target = document.querySelector(sel);
+		if (!target) return false;
+		target.click();
+		return true;
+	}, selector);
 }

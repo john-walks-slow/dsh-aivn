@@ -6,6 +6,8 @@ import { phaseZeroScript } from './script';
 const PREFIX = '/aivn';
 const KEEPALIVE_MS = 15_000;
 const BODY_MAX_BYTES = 8 * 1024;
+/** 一段脚本放完之后停一会儿再重播，好让停止点与回执有个稳定的观察窗口。 */
+const LOOP_PAUSE_MS = 8_000;
 
 /**
  * 舞台的宿主侧路由。Phase 0 只有三个口：
@@ -73,6 +75,8 @@ function openStream(req: IncomingMessage, res: ServerResponse): void {
 		if (index >= frames.length) {
 			index = 0;
 			seq = 0;
+			timer = setTimeout(step, LOOP_PAUSE_MS);
+			return;
 		}
 		const frame = frames[index++];
 		seq += 1;

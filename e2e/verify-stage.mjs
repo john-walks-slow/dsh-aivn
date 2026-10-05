@@ -12,7 +12,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { E2E_URL, ensureSession, gotoGui, launch, listTabs, newPage, openViewTab, sendMessage, shot } from './lib/boot.mjs';
+import { E2E_URL, clickInPage, dismissOnboarding, ensureSession, gotoGui, launch, listTabs, newPage, openViewTab, sendMessage, shot } from './lib/boot.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ARTIFACTS = join(ROOT, 'e2e-artifacts');
@@ -29,13 +29,24 @@ let probeSent = false;
 try {
 	const { page, errors } = await newPage(browser);
 	const streamHits = [];
+	const aivnResponses = [];
 	page.on('request', (request) => {
 		const url = request.url();
 		if (url.includes('/aivn/stream')) streamHits.push('stream');
 		if (url.includes('/aivn/input')) streamHits.push('input');
 	});
+	// /open-in-app/icon/* 的 404 是本机部署缺图标，与本插件无关。
+	page.on('response', (response) => {
+		const url = response.url();
+		if (url.includes('/aivn/')) aivnResponses.push(`${response.status()} ${url}`);
+		if (response.status() >= 400 && !url.includes('/open-in-app/')) console.log(`    ← ${response.status()} ${url}`);
+	});
+	page.on('requestfailed', (request) => {
+		if (request.url().includes('/aivn/')) aivnResponses.push(`FAILED ${request.url()} ${request.failure()?.errorText ?? ''}`);
+	});
 
 	await gotoGui(page);
+	await dismissOnboarding(page);
 	check('S1', errors.length === 0, `首屏无报错（${errors.length}）`);
 
 	const session = await ensureSession(page);
@@ -65,12 +76,21 @@ try {
 		first = await readText();
 		if (!first) await page.waitForTimeout(300);
 	}
-	await page.waitForTimeout(1_200);
-	const second = await readText();
-	check('S6', first.length > 0 && second.length > first.length, `台词在逐字增长（${first.length} → ${second.length}）`);
+	// 脚本是循环的，采样跨到重播会看到长度归零；只要在窗口内出现过增长就算过。
+	let grew = false;
+	let previous = first;
+	for (let i = 0; i < 24 && !grew; i++) {
+		await page.waitForTimeout(250);
+		const current = await readText();
+		if (current.length > previous.length) grew = true;
+		previous = current;
+	}
+	const peak = Math.max(first.length, previous.length);
+	check('S6', first.length > 0 && grew, `台词在逐字增长（峰值 ${peak}）`);
 
 	const actorCount = await page.evaluate(() => document.querySelectorAll('.aivn-actor').length);
 	check('S7', actorCount > 0, `立绘位已上（${actorCount}）`);
+	await shot(page, join(ARTIFACTS, 'stage-dialogue.png'));
 
 	// 等停止点（脚本里是最后一帧），点第一条选项，验证浏览器 → 宿主 → 回执。
 	let choiceCount = 0;
@@ -79,12 +99,21 @@ try {
 		if (choiceCount === 0) await page.waitForTimeout(400);
 	}
 	check('S8', choiceCount > 0, `停止点选项已出现（${choiceCount}）`);
+	await shot(page, join(ARTIFACTS, 'stage-stop.png'));
 
 	if (choiceCount > 0) {
-		await page.locator('.aivn-choice').first().click();
-		await page.waitForTimeout(1_500);
-		const echoed = await page.evaluate(() => document.querySelector('.aivn-text[data-kind="input"]')?.textContent ?? '');
-		check('S9', echoed.includes('Phase 0 回执'), `输入回执已回到画面（${echoed.slice(0, 28)}…）`);
+		await clickInPage(page, '.aivn-choice');
+		let echoed = '';
+		for (let i = 0; i < 16 && !echoed; i++) {
+			await page.waitForTimeout(250);
+			echoed = await page.evaluate(() => document.querySelector('.aivn-text[data-kind="input"]')?.textContent ?? '');
+		}
+		check('S9', echoed.includes('Phase 0 回执'), `输入回执已回到画面（${echoed.slice(0, 28) || '空'}）`);
+		if (!echoed) {
+			const bottom = await page.evaluate(() => document.querySelector('.aivn-bottom')?.textContent ?? '');
+			console.log(`    ! 点击后画面文字: ${bottom.slice(0, 120) || '空'}`);
+			await shot(page, join(ARTIFACTS, 'stage-after-click.png'));
+		}
 	} else {
 		check('S9', false, '未出现停止点，跳过输入回执');
 	}
@@ -92,6 +121,8 @@ try {
 	check('S10', streamHits.includes('stream'), '宿主 /aivn/stream 被请求');
 	check('S11', streamHits.includes('input'), '宿主 /aivn/input 被请求');
 	check('S12', errors.length === 0, `全程无页面报错（${errors.length}）`);
+	if (errors.length) for (const line of errors.slice(0, 6)) console.log(`    ! ${line}`);
+	console.log(`    aivn 响应: ${aivnResponses.join(' | ') || '无'}`);
 
 	await shot(page, join(ARTIFACTS, 'stage.png'));
 	console.log(`\n截图：${join(ARTIFACTS, 'stage.png')}`);
