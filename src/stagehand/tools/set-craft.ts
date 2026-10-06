@@ -15,7 +15,7 @@ import { parsePlayConfig } from '@aivn/core';
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { PLAY_FILE } from '../../play';
-import { CRAFT_ENUMS, describeCraftParams, mergeCraftParams, resolveCraft, type CraftPatch } from '../craft';
+import { CRAFT_ENUMS, describeCraftParams, mergeCraftParams, resolveCraft, type CraftPatch } from '../../craft';
 import type { PlayContext } from '../../tools/context';
 
 const RESET = '省略 = 保持现状；给 null = 恢复引擎默认值（该字段从 play.json 移除）。';

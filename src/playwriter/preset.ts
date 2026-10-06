@@ -5,16 +5,19 @@
  * 同一套写法，只是写在代码里。**绝对不要在本预设里再列一行 `dsh-aivn`**：宿主已经装了本插件，
  * 预设里再来一行会重复装一遍路由与事件订阅（它不在行的清单里，靠的是 profile 的 bundle patch）。
  *
- * 行集：指令文件发现 + persona + 文件工具。**两个预设都不装 shell**——剧作家的写作面
- * 按计划只给文件工具；搭台助手留着一行但标 `disabled`（默认关，用户在预设里看得见、
- * 要开自己开）。搭台助手的素材工具留给下一阶段，所以它的 persona 里不出现任何工具名。
+ * 行集：指令文件发现 + persona + 文件工具；搭台助手另加技能库（自带的 `skills/`）与一行
+ * 默认关的 shell。**剧作家不给技能库也不给 shell**——写戏、读文件用不上；AIVN 的 `read_skill`
+ * 同样只给工坊。
  */
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Context } from '@deepseek-ai/cordis';
 import type { PresetDefinition } from '@deepseek-ai/dsh-agent-preset-registry';
 import { PLAYWRITER_PRESET, STAGEHAND_PRESET } from '../session';
-import { PLAYWRITER_PROMPT, STAGEHAND_PROMPT } from './prompt';
+import type { Capabilities } from '../stagehand/capabilities';
+import { stagehandPrompt } from '../stagehand/prompt';
+import { PLAYWRITER_PROMPT } from './prompt';
 
 /** 与 dev 预设同一个预算：一次注入的指令文本上限。 */
 const INSTRUCTION_BYTES = 65_536;
@@ -23,16 +26,27 @@ const INSTRUCTION_BYTES = 65_536;
 const DSH_HOME = process.env.DSH_HOME ?? join(homedir(), '.dsh');
 
 /**
+ * 插件自带的技能库目录（`<package>/skills`）。
+ *
+ * 宿主半边是构建产物 `lib/index.js`，所以从它往上退一层就是包根。`includeDefaultRoots: false`
+ * 是刻意的：技能清单直接进 system prompt，把宿主上那几十个本机运维技能一起塞给搭台助手
+ * 只会淹掉这两份剧目做法（AIVN 的工坊 likewise 只看得到随包的这几份）。
+ */
+const SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'skills');
+
+/**
  * 一个预设的行集。
  *
- * `bash` 只在 `opts.bash === 'off'` 时作为一行**关着**进清单：注册器跳过 `disabled` 的行
- * （不装载），但它在预设里看得见，用户想放给搭台助手就自己开。剧作家不给这一项——
- * 它写戏、读文件，没有要 shell 做的事。
+ * `bash` 给搭台助手留一行：`opts.bash === false` 时关着（注册器跳过 `disabled` 的行），
+ * `true` 时真装——开与关都由插件配置 `shell` 决定（AIVN 那边这个能力也是 `defaultOff`，
+ * 只是开关长在 Agent 设置页上）。剧作家不给这一项：它写戏、读文件，没有要 shell 做的事。
+ *
+ * `skills` 同理只给搭台助手：技能库是它备课时的做法速查。
  */
 /** 行集里的一行（`plugins` 是只读数组，装配时用可变数组攒，最后交出去当只读）。 */
 type PresetPlugin = PresetDefinition['plugins'][number];
 
-function rows(prompt: string, opts: { bash?: 'off' } = {}): PresetDefinition['plugins'] {
+function rows(prompt: string, opts: { bash?: boolean; skills?: boolean } = {}): PresetDefinition['plugins'] {
 	const plugins: PresetPlugin[] = [
 		{
 			id: 'instructions',
@@ -45,7 +59,8 @@ function rows(prompt: string, opts: { bash?: 'off' } = {}): PresetDefinition['pl
 		},
 		{ id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: prompt } },
 	];
-	if (opts.bash === 'off') plugins.push({ id: 'tool-bash', name: '@deepseek-ai/dsh-tool-bash', disabled: true });
+	if (opts.bash === true) plugins.push({ id: 'tool-bash', name: '@deepseek-ai/dsh-tool-bash' });
+	else if (opts.bash === false) plugins.push({ id: 'tool-bash', name: '@deepseek-ai/dsh-tool-bash', disabled: true });
 	plugins.push(
 		{ id: 'tool-fs', name: '@deepseek-ai/dsh-tool-fs' },
 		// 这一项没有默认值，不给就是「invalid config」——与 dev 预设同一个取值。
@@ -55,6 +70,17 @@ function rows(prompt: string, opts: { bash?: 'off' } = {}): PresetDefinition['pl
 			config: { sampleOverCapGlobResults: false },
 		},
 	);
+	if (opts.skills === true) {
+		plugins.push(
+			// 提供者在前、工具行在后：工具要往已知的技能源里查。
+			{
+				id: 'skill-filesystem',
+				name: '@deepseek-ai/dsh-skill-filesystem',
+				config: { includeDefaultRoots: false, customSkillDirs: [SKILLS_DIR] },
+			},
+			{ id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
+		);
+	}
 	return plugins;
 }
 
@@ -65,23 +91,28 @@ export const PLAYWRITER_DEFINITION: PresetDefinition = {
 	plugins: rows(PLAYWRITER_PROMPT),
 };
 
-export const STAGEHAND_DEFINITION: PresetDefinition = {
-	id: STAGEHAND_PRESET,
-	name: '搭台助手',
-	description: '备料的搭台助手：写设定、角色卡与创作口径，把剧目准备好（素材生成工具在下一阶段）',
-	plugins: rows(STAGEHAND_PROMPT, { bash: 'off' }),
-};
-
 /**
  * 注册两个预设，返回一次性卸载器。
+ *
+ * 搭台助手的行集按 `shell` 现拼：开着就真装 `tool-bash`，关着留一行 `disabled`（用户在预设列表里
+ * 看得见这回事，但状态由插件配置说了算——预设是代码注册的，GUI 改不动它）。
  *
  * `register` 是**急切装载**：它在这里就把行集挂起来，激活失败不抛异常，而是记在名册的可读诊断里
  * （GUI 的预设列表看得到哪一行不可用）。所以这一步 await 得到的是「已经挂好或已经知道坏在哪」。
  */
-export async function registerPresets(ctx: Context): Promise<() => void> {
+export async function registerPresets(
+	ctx: Context,
+	opts: { shell: boolean; capabilities: Capabilities },
+): Promise<() => void> {
+	const stagehand: PresetDefinition = {
+		id: STAGEHAND_PRESET,
+		name: '搭台助手',
+		description: '备料的搭台助手：写设定、角色卡与创作口径，出素材，把剧目准备好（素材生成工具在下一阶段）',
+		plugins: rows(stagehandPrompt(opts.capabilities), { bash: opts.shell, skills: true }),
+	};
 	const disposers = [
 		await ctx.agentPresets.register(PLAYWRITER_DEFINITION),
-		await ctx.agentPresets.register(STAGEHAND_DEFINITION),
+		await ctx.agentPresets.register(stagehand),
 	];
 	ctx.logger.info(`[dsh-aivn] presets registered: ${PLAYWRITER_PRESET}, ${STAGEHAND_PRESET}`);
 	return () => {

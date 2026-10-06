@@ -40,7 +40,7 @@ dsh plugin --profile web add github:john-walks-slow/dsh-aivn
 - **客户端半边**（「舞台」tab）挂在 `conversation.view` 槽上，需要 `dsh-web-app`。它在
   `package.json` 的 `dsh.client{platform:"web"}` 里声明，不走 Loader。
 
-可配的只有**语音**一项（不配就是没有语音，其余照常）：
+可配的有三处——**语音**、**搭台助手的命令行**、**联网检索**；都不配也能照常跑（只是那项能力没有）：
 
 ```yaml
 - id: aivn
@@ -51,11 +51,21 @@ dsh plugin --profile web add github:john-walks-slow/dsh-aivn
       baseUrl: https://api.fish.audio    # 默认值，一般不用写
       model: s2.1-pro-free               # 默认值
       concurrency: 2                     # 同时合成的上限
+    search:
+      keys: ["<your-exa-key>"]           # 多把可轮询；给了它搭台助手才有 web_search
+      baseUrl: https://api.exa.ai        # 默认值
+    shell: false                         # true = 给搭台助手放开 bash
 ```
 
-不想把 key 写进配置文件就留空，改走环境变量 `DSH_AIVN_TTS_KEYS`（逗号分隔）。
-两处都没有 = 舞台连语音开关都不显示。两个预设、六个工具、一条 `/new-play` 命令、
-`/aivn` 路由都是固定的，不可配。
+| 配置项 | 默认 | 给了会怎样 | 环境变量兜底 |
+|---|---|---|---|
+| `tts.keys` | 空 | 舞台有语音开关，搭台助手多一个 `list_voices`（音色库与合成共用这池 key） | `DSH_AIVN_TTS_KEYS` |
+| `tts.baseUrl` / `tts.model` / `tts.concurrency` | Fish 官方 / `s2.1-pro-free` / `2` | — | — |
+| `search.keys` | 空 | 搭台助手多一个 `web_search`（一次调用同时拿回结果与正文） | `DSH_AIVN_EXA_KEYS` |
+| `shell` | `false` | 搭台助手的预设里那一行 `tool-bash` 真装上（默认关，与 AIVN 的 `defaultOff` 同口径） | — |
+
+key 两处都没有 = 那项能力停用：工具**不注册**、提示词里也不提。两个预设、一条 `/new-play` 命令、
+`/aivn` 路由都是固定的，不可配。**改配置要重启 dsh**：能力面在装载时定值（预设与工具行都按它拼）。
 
 > 开发期 `@aivn/core` 与 `@aivn/stage` 走 `file:` 依赖（指向 stage-ai 仓库）。发布版换成版本号。
 
@@ -189,14 +199,26 @@ voice: 短句，少用形容词
 | id | 名字 | 干什么 |
 | --- | --- | --- |
 | `aivn-playwriter` | 剧作家 | 实时写 Stage DSL 的那位；它的输出被接进舞台 |
-| `aivn-stagehand` | 搭台助手 | 备料：写设定、角色卡、创作口径（生图工具在下一阶段） |
+| `aivn-stagehand` | 搭台助手 | 备料：写设定、角色卡、创作口径、挑音色、查资料（生图工具在下一阶段） |
 
 两个预设的行集同构：指令文件发现（`AGENTS.md`）+ persona（就是那份提示词）+ 文件工具 +
-文件检索。**两边都不装 shell**：剧作家写戏、读文件，没有要用 shell 做的事；搭台助手留着一行
-但标 `disabled`（默认关，要放给自己在预设里开）。**预设里不会再列一行 `dsh-aivn`**——
-宿主已经装了本插件，再来一行会把路由与事件订阅重复装一遍。
+文件检索。**搭台助手另加两样**：技能库（自带的 `skills/`，见下）与一行默认关的 `tool-bash`
+（`shell: true` 才真装上）。剧作家两样都没有——写戏、读文件用不上。**预设里不会再列一行
+`dsh-aivn`**——宿主已经装了本插件，再来一行会把路由与事件订阅重复装一遍。
 
 只有剧作家预设的会话会进舞台管线。搭台助手说什么都不上台。
+
+### 技能库（搭台助手）
+
+插件自带两份做法速查，随包发布（`skills/`），装进搭台助手的会话：
+
+| 技能 | 讲什么 |
+| --- | --- |
+| `galgame-audio` | 免费 BGM / 音效去哪里找、哪档授权能商用、六大场景与常见音效类别的选源、再分发与 AI 训练红线 |
+| `galgame-visual-craft` | 画风锚点写在哪、角色外形怎么锁（头身比 / 五官 / 服装）、差分布局与命名、图单怎么写、可直接粘贴的生图提示词写法 |
+
+清单进 system prompt（只列名字与一句话），模型觉得对上了才加载全文——两份都是长篇，不该每轮全读。
+`includeDefaultRoots: false` 是刻意的：宿主上那几十个本机运维技能不该挤进搭台助手的清单。
 
 ## 上下文注入
 
@@ -219,19 +241,34 @@ voice: 短句，少用形容词
 快照按秒级 TTL 缓存：一个 turn 里的多个 step 读到同一份，跨轮自然重读。
 改完文件不用做别的，下一轮就生效。
 
+**搭台助手的注入是另一套**（同样注册在它自己的 scope 上）：
+
+| 段 | 内容 | 来源 |
+| --- | --- | --- |
+| 《剧本语言》 | 给演出看的内容用哪种语言写（与用户对话仍是中文） | `play.json` 的 `scriptLanguage` |
+| 《当前状态》 | 剧目文件清单（路径 + 大小，三层深）+ 开演条件报告 | 工作目录 + `readiness` |
+
+它不需要舞台契约（不写剧本），也不需要角色表那种逐条展开——它要的是「现在盘上有什么、
+还缺什么」，刚写完文件下一轮就看得见。
+
 ## Agent 工具
 
-工具跟着预设装、跟着预设卸。剧作家的会话里装着这六个；搭台助手只装 `create_play`
-（后面那五个是上台写字用的，搭台助手不上台）：
+工具跟着预设装、跟着预设卸。`create_play` 与 `list_assets` 两个预设都有；其余按角色分：
 
 | 工具 | 谁有 | 作用 |
 | --- | --- | --- |
 | `create_play` | 两个预设 | 把工作区立成一座新剧目：写 `play.json`（`id`/`title`/`opening`/`characters`）、`memory/always/premise.md` 与 `characters/<id>.md`。已经有 `play.json` 就报错 |
+| `list_assets` | 两个预设 | 列**这座剧目**的素材（`assets/` + `manifest.json`，外加 `characters/` 里的角色卡），可按类目与关键词过滤。**没有跨剧目的素材资源库**，也没有生图——列的就是这座剧目的全部家当 |
 | `beat_done` | 剧作家 | 交出这一轮的停止点：给 `options` = 选项面板；给 `placeholder` = 自由输入框；都不给 = 这一轮不设停止点。调用即是「本轮到此为止」 |
 | `update_state` | 剧作家 | 改剧目的运行状态：`affinity`（角色好感度增量，整数、`\|Δ\|≤5`）、`flags`、`scene`、`threads`。写进 `memory/always/state/` |
-| `get_readiness` | 剧作家 | 开演条件自查：`play.json`、故事前提、角色卡张数、立绘、背景、素材条数。**没有硬门槛**，缺什么都能开演 |
-| `list_library` | 剧作家 | 列**这座剧目**的素材（`assets/` + `manifest.json`，外加 `characters/` 里的角色卡），可按类目与关键词过滤。本阶段没有跨剧目资源库，也没有生图 |
-| `set_craft` | 剧作家 | 改写 `play.json` 的 `craft` 段，见上 |
+| `get_readiness` | 搭台助手 | 开演条件自查：`play.json`、故事前提、角色卡张数、立绘、背景、素材条数。**没有硬门槛**，缺什么都能开演 |
+| `set_craft` | 搭台助手 | 改写 `play.json` 的 `craft` 段（每轮篇幅、停止点选项数、素材来源），见上 |
+| `list_voices` | 搭台助手（配了 `tts.keys` 才有） | 查 Fish 音色库挑音色：按语言 / 标签 / 标题关键词取窗口，本地按 `gender` 筛，按热度排序出前 25 条。挑好的 id 填进角色卡的 `voice` |
+| `web_search` | 搭台助手（配了 `search.keys` 才有） | 联网检索：一次调用同时拿回结果与正文。只查剧目之外的事实——设定、角色、剧情都在工作区文件里 |
+
+`list_voices` / `web_search` 在没配 key 时**不注册**，提示词里也不提它们——不会教模型去调一个
+不存在的工具。文件工具（`read` / `write` / `edit` / `glob` / `grep` / `read_image`）由预设的行集提供，
+两个预设都有：搭台助手用 `read_image` 看画、看用户放进来的图。
 
 ## 斜杠命令
 
@@ -289,16 +326,19 @@ voice: 短句，少用形容词
 
 ## 权限与兼容
 
-- **网络**：只有配了 TTS key 时才出网，出的是 Fish Audio（`api.fish.audio` 或你配的 `baseUrl`）。
-  不配 key 就一个请求都不发，语音整条链路是关的。其余功能全在本地。
+- **网络**：出网只有两处——配了 TTS key 时打 Fish Audio（`api.fish.audio` 或你配的 `baseUrl`，
+  音色库查询与语音合成共用），配了 `search.keys` 时打 Exa（`api.exa.ai` 或你配的 `baseUrl`）。
+  两项都没配就一个请求都不发。其余功能全在本地。
 - **文件**：读写在会话的工作目录（也就是那座剧目的目录）内。工具与 `/new-play` 只在你指定的
   目录里建剧目文件；语音缓存写在 `<剧目>/media-cache/tts/`（内容寻址、可随时整目录删除）。
   不碰工作目录以外的路径。
+- **命令行**：`shell: false`（默认）时搭台助手那一行 `tool-bash` 是关的，它没有命令行；
+  开成 `true` 才有——那时它能跑的东西不再受文件工具的路径约束，自己权衡。
 - **HTTP**：往 DSH 的 web server 注册 `/aivn/*`（剧目读写、素材、SSE 事件流、音频）。
   四个写接口都走同源 + `content-type: application/json` + 字节上限 + JSON 四道闸；
   `/aivn/audio` 只接受目录内的纯文件名（`basename` 判定 + `.mp3` 白名单），不接受任何路径。
-- **密钥**：TTS key 只从配置或环境变量读，不进日志、不进 URL、不进 git；错误文案里最多带
-  上游返回的前 200 字符。
+- **密钥**：TTS 与 Exa 的 key 只从配置或环境变量读，不进日志、不进 URL、不进 git；错误文案里
+  最多带上游返回的前 200 字符。
 - **兼容**：宿主半边对齐 `dsh` `0.1.7-rc.2`，客户端半边对齐 `0.1.1-rc.2`。「舞台」tab 需要
   `dsh-web-app`（挂在 `conversation.view` 槽上）。
 
@@ -349,6 +389,12 @@ dsh-e2e stop
 - `stage`（`npm run e2e:stage`）——在工作区根落一份临时剧目夹具 → 新建会话并选「剧作家」预设 →
   发一句 → 断言「舞台」tab 挂载、导演工作栏不渲染、台词逐字上屏、停止点出来、点选项后原文被投给
   剧作家并在时间线上落成一行回执、剧作家接着写完第二轮。
+- `injection`（`dsh-e2e run e2e/verify-injection.mjs`）——剧作家的上下文注入：从会话日志断言
+  A 区六段与【状态】都进了系统提示词、内容取自夹具文件而不是「自己去读」，并核对工具面
+  （备料工具归搭台助手、素材清单叫 `list_assets`）。
+- `stagehand`（`npm run e2e:stagehand`）——搭台助手：断言 persona 章节、《当前状态》注入
+  （文件清单 + 就绪报告）、随包技能库两份都在技能清单里、工具面是搭台助手那一套
+  （且没有剧作家的收束口）。
 - `voice`（`dsh-e2e run e2e/verify-voice.mjs`）——真打 Fish Audio：断言 voice 帧到达、音频能取回
   且是真 MP3、**浏览器把它解成了 PCM 并真的有音源起播**（在页面里给 `AudioContext` /
   `decodeAudioData` / `AudioBufferSourceNode.start` 挂钩子，不是看帧猜的），以及语音总开关

@@ -31,7 +31,7 @@ import {
 } from '@aivn/core';
 import { listAssets, readManifest } from './assets';
 import { loadPlaySync } from './play';
-import { PHASE1_CAPABILITIES, renderCraftParams, resolveCraft } from './playwriter/craft';
+import { PHASE1_CAPABILITIES, renderCraftParams, resolveCraft } from './craft';
 import { PLAYWRITER_TAIL } from './playwriter/prompt';
 
 /** 一次快照的存活时间：够覆盖一个 turn 的多个 step，又保证跨轮必重读。 */
@@ -228,7 +228,7 @@ function renderCast(
 /**
  * 素材清单：按类目列 id，每一项带上描述表里的说明。
  *
- * 描述是这里的重点（`list_library` 的理由也是它）：差分名未必与画面相符，
+ * 描述是这里的重点（`list_assets` 的理由也是它）：差分名未必与画面相符，
  * 剧作家挑素材靠的是「这一张画的是什么」。
  */
 function renderAssets(index: Record<string, string[]>, notes: (id: string, charId?: string) => AssetMeta): string {

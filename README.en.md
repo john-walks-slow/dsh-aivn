@@ -39,8 +39,8 @@ dsh plugin --profile web add github:john-walks-slow/dsh-aivn
   `dsh-web-app`. It is declared under `dsh.client{platform:"web"}` in `package.json` and
   does not go through the Loader.
 
-Voice is the only configurable piece (leave it out and you simply have no voice; everything
-else works as usual):
+Three things are configurable — **voice**, the **stagehand's shell**, and **web search**; leave them
+all out and everything still runs (those capabilities are simply absent):
 
 ```yaml
 - id: aivn
@@ -51,12 +51,23 @@ else works as usual):
       baseUrl: https://api.fish.audio    # default; usually you don't need to set it
       model: s2.1-pro-free               # default
       concurrency: 2                     # cap on concurrent synthesis
+    search:
+      keys: ["<your-exa-key>"]           # with keys the stagehand also gets web_search
+      baseUrl: https://api.exa.ai        # default
+    shell: false                         # true = give the stagehand bash
 ```
 
-If you'd rather not put keys in a config file, leave that empty and use the
-`DSH_AIVN_TTS_KEYS` environment variable instead (comma-separated). Neither one present = the
-stage doesn't even show the voice toggle. The two presets, six tools, one `/new-play` command,
-and the `/aivn` routes are fixed and not configurable.
+| Option | Default | What it enables | Env fallback |
+|---|---|---|---|
+| `tts.keys` | empty | Voice toggle on the stage, plus `list_voices` for the stagehand (the voice catalog shares the synthesis key pool) | `DSH_AIVN_TTS_KEYS` |
+| `tts.baseUrl` / `tts.model` / `tts.concurrency` | Fish official / `s2.1-pro-free` / `2` | — | — |
+| `search.keys` | empty | `web_search` for the stagehand (one call returns results and page text together) | `DSH_AIVN_EXA_KEYS` |
+| `shell` | `false` | The stagehand preset's `tool-bash` row actually mounts (off by default, same as AIVN's `defaultOff`) | — |
+
+Keys in neither place = that capability is off: the tool is **not registered** and the prompt never
+mentions it. The two presets, the `/new-play` command and the `/aivn` routes are fixed and not
+configurable. **Changing config requires a dsh restart**: the capability set is resolved at load time
+(the preset rows and the tool list are both built from it).
 
 > During development `@aivn/core` and `@aivn/stage` are `file:` dependencies (pointing at the stage-ai repo). Release builds switch to version numbers.
 
@@ -204,17 +215,32 @@ and not one byte of the rest of the file).
 | id | Name | What it does |
 | --- | --- | --- |
 | `aivn-playwriter` | playwright | The one that writes Stage DSL live; its output is piped into the stage |
-| `aivn-stagehand` | stage-hand assistant | Preps material: premise, character cards, creative guidelines (image tools come in the next stage) |
+| `aivn-stagehand` | stage-hand assistant | Preps material: premise, character cards, creative guidelines, voice picking, research (image tools come in the next stage) |
 
 Both presets have the same set of entries: instruction-file discovery (`AGENTS.md`) + persona
-(that prompt file) + file tools + file search. **Neither ships a shell**: the playwright writes
-and reads files and has nothing to do with a shell; the stage-hand assistant keeps the entry but
-marks it `disabled` (off by default — turn it on in the preset if you want to give it one).
-**Neither preset lists a `dsh-aivn` entry** — the host already loads the plugin, and another
-entry would install the routes and event subscriptions twice.
+(that prompt file) + file tools + file search. **The stage-hand assistant gets two more**: the skill
+library (its bundled `skills/`, see below) and a `tool-bash` row that stays off unless you set
+`shell: true`. The playwright gets neither — it writes and reads files, nothing more. **Neither
+preset lists a `dsh-aivn` entry** — the host already loads the plugin, and another entry would
+install the routes and event subscriptions twice.
 
 Only sessions on the playwright preset enter the stage pipeline. Nothing the stage-hand assistant
 says goes on stage.
+
+### Skill library (stage-hand assistant)
+
+The plugin ships two how-to references inside the package (`skills/`), mounted into stage-hand
+sessions:
+
+| Skill | What it covers |
+| --- | --- |
+| `galgame-audio` | Where to find free BGM / SFX, which licences allow commercial use, source picks for six BGM moods and common SFX categories, redistribution and AI-training red lines |
+| `galgame-visual-craft` | Where the art-style anchor goes, how to pin a character's looks (head-to-body ratio / face / outfit), variant layout and naming, how to write an art order, and ready-to-paste image prompts |
+
+Only names and one-line descriptions go into the system prompt; the model loads the full text when
+one looks relevant — both are long and should not be read every beat. `includeDefaultRoots: false`
+is deliberate: the dozens of host-ops skills installed on the machine have no business crowding
+the stage-hand assistant's catalog.
 
 ## Context injection
 
@@ -243,20 +269,38 @@ stage-hand assistant never sees the performance contract. Snapshots are cached w
 second-scale TTL: several steps in one turn read the same copy, and a new beat re-reads
 naturally. Change a file and there is nothing else to do — it takes effect on the next beat.
 
+**The stage-hand assistant gets its own injection** (also registered on its own scope):
+
+| Section | Content | Source |
+| --- | --- | --- |
+| "Script language" | Which language the on-stage material is written in (the conversation stays Chinese) | `scriptLanguage` in `play.json` |
+| "Current state" | Play file listing (path + size, three levels deep) + the readiness report | the workspace + `readiness` |
+
+It has no use for the performance contract (it does not write the script) or for the cast laid out
+card by card — what it needs is "what is on disk right now, what is still missing", and it sees a
+file it just wrote on the next beat.
+
 ## Agent tools
 
-Tools are installed and removed with the preset. A playwright session ships these six; the
-stage-hand assistant ships only `create_play` (the other five are for writing on stage, and the
-stage-hand assistant doesn't go on stage):
+Tools are installed and removed with the preset. `create_play` and `list_assets` are on both;
+the rest are role-specific:
 
 | Tool | Who has it | What it does |
 | --- | --- | --- |
 | `create_play` | both presets | Stands the workspace up as a new play: writes `play.json` (`id`/`title`/`opening`/`characters`), `memory/always/premise.md`, and `characters/<id>.md`. Errors out if `play.json` already exists |
+| `list_assets` | both presets | Lists **this play's** assets (`assets/` + `manifest.json`, plus character cards in `characters/`), filterable by kind and keyword. There is **no cross-play asset library** and no image generation — this is the whole inventory |
 | `beat_done` | playwright | Hands over this beat's stop point: pass `options` for an option panel, `placeholder` for a free-text input, neither for no stop point this beat. Calling it means "this beat ends here" |
 | `update_state` | playwright | Changes the play's runtime state: `affinity` (per-character affinity delta, an integer, `\|Δ\|≤5`), `flags`, `scene`, `threads`. Writes into `memory/always/state/` |
-| `get_readiness` | playwright | Self-check before starting: `play.json`, story premise, character card count, sprites, backgrounds, asset count. **No hard gate** — you can start with anything missing |
-| `list_library` | playwright | Lists **this play's** assets (`assets/` + `manifest.json`, plus character cards in `characters/`), filterable by kind and keyword. At this stage there is no cross-play library and no image generation |
-| `set_craft` | playwright | Rewrites the `craft` section of `play.json`, see above |
+| `get_readiness` | stage-hand assistant | Self-check before starting: `play.json`, story premise, character card count, sprites, backgrounds, asset count. **No hard gate** — you can start with anything missing |
+| `set_craft` | stage-hand assistant | Rewrites the `craft` section of `play.json` (beat length, stop-point options, asset sources), see above |
+| `list_voices` | stage-hand assistant (needs `tts.keys`) | Searches the Fish voice catalog: builds a window from language / tags / title keywords, filters `gender` locally, sorts by likes and shows the top 25. The id you pick goes into the card's `voice` |
+| `web_search` | stage-hand assistant (needs `search.keys`) | Web search: one call returns results and page text together. For facts **outside** the play — the setting, cast and plot all live in the workspace files |
+
+`list_voices` / `web_search` are **not registered** when their keys are absent, and the prompt
+never mentions them — the model is never taught to call a tool that does not exist. The file tools
+(`read` / `write` / `edit` / `glob` / `grep` / `read_image`) come from the preset rows and are
+present in both presets: the stage-hand assistant uses `read_image` to look at artwork and at
+images the user dropped in.
 
 ## Slash command
 
@@ -323,19 +367,23 @@ can't submit an input on the player's behalf.
 
 ## Permissions and compatibility
 
-- **Network**: goes out only when a TTS key is configured, and it goes to Fish Audio
-  (`api.fish.audio` or your `baseUrl`). With no key, not a single request is sent and the whole
-  voice chain is off. Everything else is local.
+- **Network**: outbound traffic has exactly two sources — Fish Audio (`api.fish.audio` or your
+  `baseUrl`, shared by catalog lookups and synthesis) when a TTS key is configured, and Exa
+  (`api.exa.ai` or your `baseUrl`) when `search.keys` is configured. With neither, not a single
+  request is sent. Everything else is local.
 - **Files**: reads and writes stay inside the session's working directory (that is, the play's
   directory). Tools and `/new-play` only create play files in the directory you point them at;
   voice cache is written to `<play>/media-cache/tts/` (content-addressed, deletable as a whole at
   any time). Paths outside the working directory are never touched.
+- **Shell**: with `shell: false` (the default) the stage-hand assistant's `tool-bash` row stays off
+  and it has no command line; setting it to `true` mounts it — from then on what it can run is no
+  longer bounded by the file tools' path rules, so weigh that yourself.
 - **HTTP**: registers `/aivn/*` on DSH's web server (play read/write, assets, the SSE event
   stream, audio). All four write endpoints pass four gates: same-origin +
   `content-type: application/json` + a byte cap + JSON; `/aivn/audio` accepts only a bare file name
   inside the directory (`basename` check plus an `.mp3` whitelist) and no path at all.
-- **Secrets**: TTS keys are read only from config or environment variables, never into logs, URLs,
-  or git; error text carries at most the first 200 characters returned by the upstream.
+- **Secrets**: TTS and Exa keys are read only from config or environment variables, never into
+  logs, URLs, or git; error text carries at most the first 200 characters returned by the upstream.
 - **Compatibility**: the host half targets `dsh` `0.1.7-rc.2`, the client half targets
   `0.1.1-rc.2`. The Stage tab needs `dsh-web-app` (it mounts on the `conversation.view` slot).
 
@@ -393,6 +441,15 @@ Suites:
   director bar does not render, lines type onto the screen, the stop point appears, clicking an
   option delivers the original text to the playwright and lands as a receipt line on the timeline,
   and the playwright finishes writing a second beat.
+- `injection` (`dsh-e2e run e2e/verify-injection.mjs`) — the playwright's context injection: reads
+  the session log to assert that all six A-section blocks plus [State] made it into the system
+  prompt, that their content comes from the fixture files rather than "go read it yourself", and
+  checks the tool surface (the prep tools belong to the stage-hand assistant, the asset list is
+  called `list_assets`).
+- `stagehand` (`npm run e2e:stagehand`) — the stage-hand assistant: asserts the persona chapters,
+  the "Current state" injection (file listing + readiness), that both bundled skills appear in the
+  skill catalog, and that the tool surface is the stage-hand set (with none of the playwright's
+  beat-closing tools).
 - `voice` (`dsh-e2e run e2e/verify-voice.mjs`) — hits Fish Audio for real: asserts that voice
   frames arrive, the audio can be fetched and is a real MP3, **the browser decodes it to PCM and a
   source actually starts** (hooks are installed on `AudioContext` / `decodeAudioData` /

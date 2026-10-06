@@ -19,6 +19,10 @@ export const MODULES = {
 		description: '上下文注入：A 区六段与【状态】都进了系统提示词（从会话日志取断言）',
 		suites: ['verify-injection'],
 	},
+	stagehand: {
+		description: '搭台助手：persona 章节、《当前状态》注入、技能库、工具面（从会话日志取断言）',
+		suites: ['verify-stagehand'],
+	},
 	voice: {
 		description: '台词语音：分句合成、voice 帧、音频取回、浏览器出声（要真 Fish key）',
 		suites: ['verify-voice'],

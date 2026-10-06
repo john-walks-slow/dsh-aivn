@@ -8,13 +8,13 @@
  */
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
-import { readPlayReadiness, renderReadiness } from '../readiness';
+import { readPlayReadiness, renderReadiness } from '../../readiness';
 import type { PlayContext } from '../../tools/context';
 
 const DESCRIPTION = [
 	'检查这座剧目还缺什么（故事前提 / 角色卡 / 立绘 / 背景图 / 素材清单）。',
-	'开写前、或玩家问「能演了吗」时调它：报出来的缺项决定这一轮怎么写——缺背景就多给旁白，',
-	'缺立绘的主体别让它上台。**没有硬门槛**：缺什么都能开演，这个工具不拦任何事。',
+	'备料前、或用户问「能开演了吗」时调它：报出来的缺项就是接下来该补的东西。',
+	'**没有硬门槛**：缺什么都能开演，这个工具不拦任何事。',
 ].join('\n');
 
 export function createReadinessTool(ctx: PlayContext) {
@@ -27,7 +27,7 @@ export function createReadinessTool(ctx: PlayContext) {
 			render: (_args: unknown, text: string): ContentBlock[] => [{ type: 'text', text }],
 		},
 		async execute() {
-			return renderReadiness(await readPlayReadiness(ctx.playDir()));
+			return renderReadiness(readPlayReadiness(ctx.playDir()));
 		},
 	});
 }

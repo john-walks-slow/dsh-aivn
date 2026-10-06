@@ -14,6 +14,7 @@
 	"files": [
 		"lib",
 		"cordis.patch.yml",
+		"skills",
 		"README.md",
 		"README.en.md",
 		"LICENSE",
@@ -24,6 +25,7 @@
 		"build": "node build.mjs",
 		"e2e": "dsh-e2e run e2e/run.mjs --list",
 		"e2e:stage": "dsh-e2e run e2e/run.mjs stage",
+		"e2e:stagehand": "dsh-e2e run e2e/run.mjs stagehand",
 		"prepublishOnly": "npm run build && npm run typecheck",
 		"typecheck": "tsc --noEmit"
 	},

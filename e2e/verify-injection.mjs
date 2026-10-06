@@ -25,7 +25,6 @@ import {
 	newSession,
 	pickPreset,
 	sendMessage,
-	waitFor,
 } from './lib/boot.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -73,6 +72,14 @@ function systemPrompt(events) {
 	return '';
 }
 
+function toolNames(events) {
+	for (const event of events) {
+		if (event.type !== 'request/header') continue;
+		return (event.data?.header?.tools ?? []).map((tool) => tool.name).filter(Boolean);
+	}
+	return [];
+}
+
 const fixture = seedPlay(WORKSPACE);
 const browser = await launch();
 try {
@@ -87,12 +94,13 @@ try {
 	await sendMessage(page, PLAY.opening);
 	const sessionDir = newestSession();
 	// 等到日志里出现系统提示词：那是第一个 step 开头写下的，不用等整轮演完。
-	const got = await waitFor(page, () => true, { timeout: 1_000, label: 'noop' });
-	void got;
 	let prompt = '';
+	let tools = [];
 	for (let i = 0; i < 60; i += 1) {
-		prompt = systemPrompt(sessionEvents(sessionDir));
-		if (prompt !== '') break;
+		const events = sessionEvents(sessionDir);
+		prompt = systemPrompt(events);
+		tools = toolNames(events);
+		if (prompt !== '' && tools.length > 0) break;
 		await page.waitForTimeout(2_000);
 	}
 
@@ -108,6 +116,14 @@ try {
 	check('A9', prompt.includes('id: lin') && prompt.includes('id: zhou'), '《角色表》带的是两张卡的正文与 id');
 	check('A10', prompt.includes('veranda'), '《素材清单》带的是 assets/ 里真实的素材 id');
 	check('A11', !prompt.includes('不在这份提示词里'), '已经删掉阶段 1 那句「得你自己去读」');
+	// 工具面跟着角色走：备料那两个（get_readiness / set_craft）归搭台助手，剧作家不再有；
+	// 素材清单改名 list_assets 之后两个角色都有。
+	check('A12', tools.includes('list_assets') && !tools.includes('list_library'), '素材清单叫 list_assets（旧名不在）');
+	check(
+		'A13',
+		!tools.includes('get_readiness') && !tools.includes('set_craft') && tools.includes('beat_done'),
+		'备料工具不在剧作家手里（收束口在）',
+	);
 
 	console.log('\n段序：');
 	for (const heading of headings) console.log(`   ${heading}`);

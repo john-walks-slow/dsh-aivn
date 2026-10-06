@@ -1,11 +1,12 @@
 /**
- * `list_library` —— 列出这座剧目已有的素材。
+ * `list_assets` —— 列出这座剧目已有的素材（两个角色都装）。
  *
- * 工具名与 AIVN 保持一致，但**本阶段的读者变了**：那边查的是应用级的跨剧目素材资源库
+ * **名字与 AIVN 的 `list_library` 刻意不同**：那边查的是应用级跨剧目素材资源库
  * （`library/`，引用即导入的源头），这里查的是剧目自己的 `assets/` 加素材描述表
- * `assets/manifest.json`。资源库导入是下一阶段的事，所以这一版只报「你手上有什么」。
+ * `assets/manifest.json`。插件是「工作区即剧目」，没有那个跨剧目的库，同名只会让模型
+ * 去找一个不存在的东西。
  *
- * 为什么要它：剧作家挑素材靠的是**描述**（画面内容、情绪、适用场景），不是文件名——
+ * 为什么要它：挑素材靠的是**描述**（画面内容、情绪、适用场景），不是文件名——
  * 差分的名字未必与画面相符。把它列成一行一条，模型不用自己去猜目录结构。
  */
 import { existsSync } from 'node:fs';
@@ -14,10 +15,10 @@ import { join } from 'node:path';
 import { describeAsset, parseCharacterCard, type AssetMeta } from '@aivn/core';
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
-import { listAssets, readManifest } from '../../assets';
-import type { PlayContext } from '../../tools/context';
+import { listAssets, readManifest } from '../assets';
+import type { PlayContext } from './context';
 
-/** 资源库罗列的截断：一次把整个清单灌进上下文没有意义，够 agent 判断「有没有」就行。 */
+/** 清单罗列的截断：一次把整个清单灌进上下文没有意义，够 agent 判断「有没有」就行。 */
 const LIST_LIMIT = 40;
 
 const KINDS = ['backgrounds', 'cg', 'sprites', 'characters', 'bgm', 'sfx'] as const;
@@ -26,7 +27,7 @@ type AssetKind = (typeof KINDS)[number];
 const DESCRIPTION = [
 	'列出本剧目已有的素材（assets/ 目录 + 素材描述表 assets/manifest.json）。',
 	'**要挑素材先看它**：带描述的条目写的是画面内容、情绪、适用场景——文件名未必与画面对得上。',
-	'本阶段没有跨剧目的素材资源库，也没有生图：这里列的就是这座剧目的全部家当，',
+	'这里列的就是这座剧目的全部家当（没有跨剧目的素材库），',
 	'清单里没有的 id 不要写进剧本（写了不会有画面，那一行照常演，只是空着）。',
 	'可给 kind 过滤类目（backgrounds / cg / sprites / characters / bgm / sfx），可给 query 按关键词搜 id 与描述。',
 	'每行是：id | 类目 | 标题 | 描述。立绘行的 id 是 <主体id>/<差分名>，就是 <actor variant> 要写的那个名字；',
@@ -40,9 +41,9 @@ interface Row {
 	detail: string;
 }
 
-export function createListLibraryTool(ctx: PlayContext) {
+export function createListAssetsTool(ctx: PlayContext) {
 	return defineTool({
-		name: 'list_library',
+		name: 'list_assets',
 		description: DESCRIPTION,
 		parameters: {
 			kind: { type: 'string', enum: [...KINDS], description: '只列这一类；不给就是全部。' },
@@ -62,7 +63,7 @@ export function createListLibraryTool(ctx: PlayContext) {
 
 			if (matched.length === 0) {
 				return rows.length === 0
-					? '素材清单是空的（assets/ 下还没有任何素材）。本阶段没有生图，素材要玩家手工放进 assets/——缺素材就换一段能演的戏，用旁白交代。'
+					? '素材清单是空的（assets/ 下还没有任何素材）。本阶段还没有生图，素材要玩家手工放进 assets/——缺素材就换一段能演的戏，用旁白交代。'
 					: `没有匹配「${args.query ?? ''}」${args.kind ? `且类目为 ${args.kind} ` : ''}的素材（共 ${rows.length} 条，换个词或去掉过滤再试）。`;
 			}
 

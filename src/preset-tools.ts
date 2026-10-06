@@ -13,8 +13,13 @@
  *   - `agent-preset/selected`：空白会话建好之后再选预设的那条路径。
  * 两次都走同一个 `sync()`：装了哪套就卸哪套——工具跟着预设走，不跟着 Agent 走。
  *
- * 工具分两层：`create_play` 是两个字都装的基础能力（起剧目），
- * 其余五个（beat_done / update_state / get_readiness / list_library / set_craft）只给剧作家。
+ * 工具分三层（对齐 AIVN `TOOL_CATALOG` 的角色面）：
+ *   - 基础：`create_play`（起剧目）与 `list_assets`（手上有什么素材），**两个字都装**；
+ *   - 剧作家：`beat_done` / `update_state`（演出本身的收束口）；
+ *   - 搭台助手：`get_readiness` / `set_craft`，加上按配置才装的 `list_voices` / `web_search`。
+ *
+ * `get_readiness` 与 `set_craft` 从剧作家移到了搭台助手：AIVN 那边这两个能力就归工坊
+ * （`CATALOG_ROWS` 的 `readiness` 与 `files`），剧作家要的写作参数走 A 区注入现读。
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-agent';
@@ -25,12 +30,18 @@ import type { BeatGuard } from './beat-guard';
 import type { StageHub } from './hub';
 import { registerPlayContext } from './play-context';
 import { PLAYWRITER_PRESET, STAGEHAND_PRESET, sessionPreset, type LiveAgent } from './session';
+import type { Capabilities } from './stagehand/capabilities';
+import { registerStagehandContext } from './stagehand/context';
+import type { Exa } from './stagehand/exa';
+import { createReadinessTool } from './stagehand/tools/get-readiness';
+import { createListVoicesTool } from './stagehand/tools/list-voices';
+import { createSetCraftTool } from './stagehand/tools/set-craft';
+import { createWebSearchTool } from './stagehand/tools/web-search';
+import type { VoiceCatalog } from './stagehand/voice-catalog';
 import { createPlayTool } from './tools/create-play';
+import { createListAssetsTool } from './tools/list-assets';
 import type { PlayContext } from './tools/context';
 import { createBeatDoneTool } from './playwriter/tools/beat-done';
-import { createReadinessTool } from './playwriter/tools/get-readiness';
-import { createListLibraryTool } from './playwriter/tools/list-library';
-import { createSetCraftTool } from './playwriter/tools/set-craft';
 import { createUpdateStateTool } from './playwriter/tools/update-state';
 
 /** Agent 的运行时面：`LiveAgent` 再加上它自己的 scope ctx（工具注册在它上面）。 */
@@ -39,7 +50,14 @@ type ToolAgent = LiveAgent & { readonly ctx: Context };
 /** 本插件的两个预设——不在这个集合里的会话一个工具都不装。 */
 const PRESETS = new Set<string>([PLAYWRITER_PRESET, STAGEHAND_PRESET]);
 
-export function installPresetTools(ctx: Context, hub: StageHub, guard: BeatGuard): () => void {
+/** 装配要用的外部面：能力位与两个「配了才有」的客户端。 */
+export interface ToolDeps {
+	capabilities: Capabilities;
+	voices: VoiceCatalog | null;
+	exa: Exa | null;
+}
+
+export function installPresetTools(ctx: Context, hub: StageHub, guard: BeatGuard, deps: ToolDeps): () => void {
 	/** 每个 Agent 已装的工具与它们所属的预设；WeakMap 让 Agent 走掉时不留登记。 */
 	const installed = new WeakMap<object, { preset: string; off: () => void }>();
 
@@ -53,7 +71,7 @@ export function installPresetTools(ctx: Context, hub: StageHub, guard: BeatGuard
 		installed.delete(agent);
 		if (!mine) return;
 
-		installed.set(agent, { preset, off: install(hub, agent, preset, guard) });
+		installed.set(agent, { preset, off: install(hub, agent, preset, guard, deps) });
 	};
 
 	const onCreated = (payload: unknown): undefined => {
@@ -86,7 +104,13 @@ function safePlayDir(play: PlayContext): string {
 }
 
 /** 把该预设的工具挂到这个 Agent 上，返回一次性卸掉全部的卸载器。 */
-function install(hub: StageHub, agent: ToolAgent, preset: string, guard: BeatGuard): () => void {
+function install(
+	hub: StageHub,
+	agent: ToolAgent,
+	preset: string,
+	guard: BeatGuard,
+	deps: ToolDeps,
+): () => void {
 	const sessionId = String(agent.id);
 	const play: PlayContext = {
 		hub,
@@ -101,22 +125,34 @@ function install(hub: StageHub, agent: ToolAgent, preset: string, guard: BeatGua
 		},
 	};
 
-	const tools: ToolDefinition[] = [createPlayTool(play)];
+	// 基础层：两个字都装。
+	const tools: ToolDefinition[] = [createPlayTool(play), createListAssetsTool(play)];
+	const offs: Array<() => void> = [];
+
 	if (preset === PLAYWRITER_PRESET) {
-		tools.push(
-			createBeatDoneTool(play),
-			createUpdateStateTool(play),
-			createReadinessTool(play),
-			createListLibraryTool(play),
-			createSetCraftTool(play),
-		);
+		tools.push(createBeatDoneTool(play), createUpdateStateTool(play));
+	} else {
+		// 搭台助手：AIVN 工坊那半边；`can` 决定后两个装不装得上。
+		tools.push(createReadinessTool(play), createSetCraftTool(play));
+		if (deps.capabilities.voice && deps.voices) tools.push(createListVoicesTool(deps.voices));
+		if (deps.capabilities.search && deps.exa) tools.push(createWebSearchTool(deps.exa));
 	}
 
-	const offs = tools.map((tool) => agent.ctx.effect(() => agent.ctx.tools.register(tool), `dsh-aivn:${tool.name}`));
+	for (const tool of tools) {
+		offs.push(agent.ctx.effect(() => agent.ctx.tools.register(tool), `dsh-aivn:${tool.name}`));
+	}
 	if (preset === PLAYWRITER_PRESET) {
 		// A 区注入（前提 / 角色表 / 素材清单 / 写作参数 / 记忆索引 / 状态区 + 静态尾段）。
 		// 只有剧作家的 scope 上有这些段：搭台助手不写剧本，不该看见舞台契约。
 		offs.push(agent.ctx.effect(() => registerPlayContext(agent.ctx, () => safePlayDir(play)), 'dsh-aivn:play-context'));
+	} else {
+		// 搭台助手看的是「当前状态」（文件清单 + 就绪 + 剧本语言），不是舞台契约。
+		offs.push(
+			agent.ctx.effect(
+				() => registerStagehandContext(agent.ctx, () => safePlayDir(play)),
+				'dsh-aivn:stagehand-context',
+			),
+		);
 	}
 
 	return () => {
