@@ -1,9 +1,10 @@
 /**
  * 预设内的工具装配。
  *
- * 与 AIVN 的差别只有一处：那边 `createAgentKit()` 按角色一次性装配好 `tools` 数组交给 pi，
+ * 与 AIVN 的差别只有两处：那边 `createAgentKit()` 按角色一次性装配好 `tools` 数组交给 pi，
  * 这里没有那个装配点——工具注册在 **Agent 自己的 ctx 上**（`agent.ctx.tools.register`），
- * 于是要自己判断「这个 Agent 跑的是哪个预设、该装哪些工具」。
+ * 于是要自己判断「这个 Agent 跑的是哪个预设、该装哪些工具」；另外**没有「起剧目」工具**：
+ * 写 `play.json` 就是文件工具的事，字段与布局在提示词的《剧目文件》那一章（见 `play-files.ts`）。
  *
  * 判断读 `agentPresets.composedPreset(agent.ctx)`（**活的**预设，权威），
  * 会话头里的 `agentPreset` 只是创建事实、换过预设之后它就旧了，这里当兜底。
@@ -14,13 +15,13 @@
  * 两次都走同一个 `sync()`：装了哪套就卸哪套——工具跟着预设走，不跟着 Agent 走。
  *
  * 工具分三层（对齐 AIVN `TOOL_CATALOG` 的角色面）：
- *   - 基础：`create_play`（起剧目）与 `list_assets`（手上有什么素材），**两个角色都装**；
+ *   - 基础：`list_assets`（手上有什么素材），**两个角色都装**；
  *   - 剧作家：`beat_done` / `update_state`（演出本身的收束口），配了生图后端另有同步的 `generate_image`；
- *   - 搭台助手：`get_readiness` / `set_craft`，加上按配置才装的 `list_voices` / `web_search` /
+ *   - 搭台助手：`validate_play` / `set_craft`，加上按配置才装的 `list_voices` / `web_search` /
  *     `generate_image`（草稿）/ `commit_asset` / `recut_sprite` / `generate_bgm`。
  *
- * `get_readiness` 与 `set_craft` 从剧作家移到了搭台助手：AIVN 那边这两个能力就归工坊
- * （`CATALOG_ROWS` 的 `readiness` 与 `files`），剧作家要的写作参数走 A 区注入现读。
+ * `validate_play`（原名 `get_readiness`）与 `set_craft` 从剧作家移到了搭台助手：AIVN 那边
+ * 这两个能力就归工坊（`CATALOG_ROWS` 的 `readiness` 与 `files`），剧作家要的写作参数走 A 区注入现读。
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-agent';
@@ -36,13 +37,12 @@ import type { Capabilities } from './stagehand/capabilities';
 import { registerStagehandContext } from './stagehand/context';
 import type { Exa } from './stagehand/exa';
 import { stagehandGuide } from './stagehand/prompt';
-import { createReadinessTool } from './stagehand/tools/get-readiness';
+import { createValidatePlayTool } from './stagehand/tools/validate-play';
 import { createListVoicesTool } from './stagehand/tools/list-voices';
 import { createSetCraftTool } from './stagehand/tools/set-craft';
 import { createSetStageStyleTool } from './stagehand/tools/set-stage-style';
 import { createWebSearchTool } from './stagehand/tools/web-search';
 import type { VoiceCatalog } from './stagehand/voice-catalog';
-import { createPlayTool } from './tools/create-play';
 import { createListAssetsTool } from './tools/list-assets';
 import type { PlayContext } from './tools/context';
 import { createBeatDoneTool } from './playwriter/tools/beat-done';
@@ -192,7 +192,7 @@ function install(
 	};
 
 	// 基础层：两个字都装。
-	const tools: ToolDefinition[] = [createPlayTool(play), createListAssetsTool(play, { image: deps.capabilities.image })];
+	const tools: ToolDefinition[] = [createListAssetsTool(play, { image: deps.capabilities.image })];
 	const offs: Array<() => void> = [];
 
 	if (preset === PLAYWRITER_PRESET) {
@@ -202,7 +202,7 @@ function install(
 	} else {
 		// 搭台助手：AIVN 工坊那半边；`can` 决定哪几个装得上。
 		// `set_stage_style` 不门控：它只写剧目里的一个文件，不依赖任何后端配置。
-		tools.push(createReadinessTool(play), createSetCraftTool(play), createSetStageStyleTool(play));
+		tools.push(createValidatePlayTool(play), createSetCraftTool(play), createSetStageStyleTool(play));
 		if (deps.capabilities.voice && deps.voices) tools.push(createListVoicesTool(deps.voices));
 		if (deps.capabilities.search && deps.exa) tools.push(createWebSearchTool(deps.exa));
 		if (deps.capabilities.image) {

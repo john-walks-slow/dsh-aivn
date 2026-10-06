@@ -9,7 +9,8 @@
 | `src/` | 宿主半边（Cordis 插件）：中枢、DSL 管线、路由、剧目脚手架、追收束 |
 | `src/play-context.ts` | A 区注入：把前提 / 角色表 / 素材清单 / 写作参数 / 记忆索引 / 状态区挂进系统提示词 |
 | `src/playwriter/` | 剧作家预设、提示词与它专属的五个工具 |
-| `src/tools/` | 两个预设共用的工具（`create_play`） |
+| `src/tools/` | 两个预设共用的工具（`list_assets`） |
+| `src/play-files.ts` | 《剧目文件》那一章：目录布局与 `play.json` / 角色卡的字段，**两个预设共用同一段文本**（写文件就是建剧目，没有「起剧目」工具） |
 | `src/client/` | 浏览器半边（React），挂在 `conversation.view` 槽 |
 | `lib/` | **跟踪的构建产物**（`lib/index.js` / `lib/client.js`）——DSH 直接加载它 |
 | `e2e/` | dsh-e2e 套件 |

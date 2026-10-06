@@ -20,8 +20,8 @@ export const MODULES = {
 		suites: ['verify-injection'],
 	},
 	stagehand: {
-		description: '搭台助手：persona 章节、《当前状态》注入、技能库、工具面（从会话日志取断言）',
-		suites: ['verify-stagehand'],
+		description: '搭台助手：persona 章节、《当前状态》注入、技能库、工具面、自己立起一座剧目（从会话日志取断言）',
+		suites: ['verify-stagehand', 'verify-handmade-play'],
 	},
 	voice: {
 		description: '台词语音：分句合成、voice 帧、音频取回、浏览器出声（要真 Fish key）',

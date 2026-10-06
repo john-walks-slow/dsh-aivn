@@ -130,9 +130,9 @@ try {
 	check('S11', prompt.includes('galgame-audio'), '技能清单里有 galgame-audio');
 	check('S12', prompt.includes('galgame-visual-craft'), '技能清单里有 galgame-visual-craft');
 
-	// 工具面：搭台助手那一套；剧作家的收束口一个都不在
-	const expects = ['create_play', 'list_assets', 'get_readiness', 'set_craft'];
-	const forbidden = ['beat_done', 'update_state', 'list_library'];
+	// 工具面：搭台助手那一套；剧作家的收束口一个都不在，起剧目那个工具已经没有名字可装
+	const expects = ['list_assets', 'validate_play', 'set_craft'];
+	const forbidden = ['beat_done', 'update_state', 'list_library', 'create_play', 'get_readiness'];
 	check('S13', expects.every(has), `装上了 ${expects.join(' / ')}（实际：${tools.join(', ')}）`);
 	check('S14', !forbidden.some(has), `没有剧作家的工具与旧名 ${forbidden.join(' / ')}`);
 	check('S15', !has('list_voices') && !has('web_search'), '没配 key 时 list_voices / web_search 不注册');
@@ -160,6 +160,12 @@ try {
 					!prompt.includes('recut_sprite') &&
 					!musicChapter,
 		allOn ? 'persona 教两步出图与配乐（与工具面一致）' : 'persona 走没配生图的 fallback 章，且不提生图 / 配乐工具',
+	);
+	// 没有「起剧目」工具了，字段与布局必须真在提示词里（两个预设共用同一段文本）
+	check(
+		'S18',
+		prompt.includes('# 剧目文件') && prompt.includes('initialScene') && !prompt.includes('create_play'),
+		'《剧目文件》那一章在提示词里（布局与 play.json 字段），且不再提 create_play',
 	);
 
 console.log('\n段序：');

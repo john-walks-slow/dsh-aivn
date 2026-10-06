@@ -107,18 +107,19 @@ appears while the session's preset is the playwright**.
 
 ### Starting a new play
 
-No `play.json` in the workspace means "this isn't a play yet". Two entry points, and both write
-exactly the same thing:
+No `play.json` in the workspace means "this isn't a play yet" — **writing one is what starts a
+play**; there is no generator. The fields and the layout live in both presets' prompts (the
+《剧目文件》 chapter, one shared text), and the model writes them with the ordinary file tools.
 
 - **Human**: type `/new-play 雨中的旧校舍` in the input box. Without a play name, the working
-  directory name is used.
-- **Agent**: the `create_play` tool, which both presets ship.
+  directory name is used — this writes `play.json` and the skeleton for you, with no LLM round trip.
+- **Agent**: write them per that chapter. The stage-hand assistant stands a play up while preparing it.
 
-Both **only write files that don't exist**: if `play.json` is already there, it errors out (this
-is already a play — start a new one in an empty directory); if `memory/always/premise.md` and the
-character cards are already written, they are skipped and listed as "kept" in the receipt. The
-skeleton it leaves behind is the first few rows of the directory table below — fill in whatever
-is missing as you go.
+`/new-play` **only writes files that don't exist**: if `play.json` is already there, it errors out
+(this is already a play — start a new one in an empty directory); if `memory/always/premise.md` and
+the character cards are already written, they are skipped and listed as "kept" in the receipt. The
+skeleton it leaves behind is the first few rows of the directory table below — fill in whatever is
+missing as you go. To check what you wrote, have the stage-hand assistant call `validate_play`.
 
 ## Anatomy of a play
 
@@ -303,16 +304,17 @@ file it just wrote on the next beat.
 
 ## Agent tools
 
-Tools are installed and removed with the preset. `create_play` and `list_assets` are on both;
+Tools are installed and removed with the preset. `list_assets` is on both;
+**there is no "create play" tool** — `play.json` is written with the file tools (see "Starting a
+new play" above);
 the rest are role-specific:
 
 | Tool | Who has it | What it does |
 | --- | --- | --- |
-| `create_play` | both presets | Stands the workspace up as a new play: writes `play.json` (`id`/`title`/`opening`/`characters`), `memory/always/premise.md`, and `characters/<id>.md`. Errors out if `play.json` already exists |
 | `list_assets` | both presets | Lists **this play's** assets (`assets/` + `manifest.json`, plus character cards in `characters/`), filterable by kind and keyword. There is **no cross-play asset library** — this is the whole inventory |
 | `beat_done` | playwright | Hands over this beat's stop point: pass `options` for an option panel, `placeholder` for a free-text input, neither for no stop point this beat. Calling it means "this beat ends here" |
 | `update_state` | playwright | Changes the play's runtime state: `affinity` (per-character affinity delta, an integer, `\|Δ\|≤5`), `flags`, `scene`, `threads`. Writes into `memory/always/state/` |
-| `get_readiness` | stage-hand assistant | Self-check before starting: `play.json`, story premise, character card count, sprites, backgrounds, asset count. **No hard gate** — you can start with anything missing |
+| `validate_play` | stage-hand assistant | Play self-check: whether `play.json` can be read (with the reason when a field is missing or the JSON is broken), story premise, character card count, sprites, backgrounds, asset count. Call it right after writing play files. **No hard gate** — you can start with anything missing |
 | `set_craft` | stage-hand assistant | Rewrites the `craft` section of `play.json` (beat length, stop-point options, asset sources), see above |
 | `list_voices` | stage-hand assistant (needs `tts.keys`) | Searches the Fish voice catalog: builds a window from language / tags / title keywords, filters `gender` locally, sorts by likes and shows the top 25. The id you pick goes into the card's `voice` |
 | `web_search` | stage-hand assistant (needs `search.keys`) | Web search: one call returns results and page text together. For facts **outside** the play — the setting, cast and plot all live in the workspace files |
@@ -407,7 +409,7 @@ resolution, so use `gemini` for high-quality sprites.
 
 | Command | What it does |
 | --- | --- |
-| `/new-play [play name]` | Stands the current working directory up as a play. Same implementation as the `create_play` tool, with no LLM round trip |
+| `/new-play [play name]` | Stands the current working directory up as a play (writes `play.json` and the skeleton files), with no LLM round trip |
 
 The command is visible to every session (DSH commands are not preset-scoped), and it lands in the
 working directory of whichever session you type it in. It **only creates, never overwrites**: an

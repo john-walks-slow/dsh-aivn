@@ -71,7 +71,7 @@ function renderListing(dir: string): string {
 	if (!existsSync(dir)) return '（工作目录还不存在）';
 	const files: string[] = [];
 	walk(dir, dir, files, 0);
-	if (files.length === 0) return '（目录是空的——用 `create_play` 把它立起来）';
+	if (files.length === 0) return '（目录是空的——照《剧目文件》写一份 `play.json` 就是立起一座剧目）';
 	const shown = files.slice(0, LIST_LIMIT);
 	if (files.length > shown.length) {
 		shown.push(`…还有 ${files.length - shown.length} 份文件没列出来（用 glob / grep 找）`);
