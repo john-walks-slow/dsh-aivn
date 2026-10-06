@@ -43,6 +43,16 @@ export class FishTts {
 	 * 命中缓存直接复用；失败按上面的规矩换 key，全挂才抛。
 	 */
 	synthesize(text: string, voiceId: string, outDir: string): Promise<{ file: string; cached: boolean }> {
+		return this.cacheFile(this.fileNameOf(text, voiceId), outDir, () => this.request(text, voiceId));
+	}
+
+	/**
+	 * 一句话在这个模型 + 这个音色下落在盘上的文件名。
+	 *
+	 * 舞台重建（`stage-log.ts`）拿它去缓存目录里找旧音频：找到就补一帧「语音好了」，找不到
+	 * （从没合成过、或换过模型）就当这一版没有配音——**不**顺手合成，重放旧台词不该再打一次上游。
+	 */
+	fileNameOf(text: string, voiceId: string): string {
 		// 键里带上 model：换了模型（音色库/口音会变）之后，同一句话不该再命中旧音频。
 		const digest = createHash('sha1')
 			.update(this.opts.model)
@@ -51,8 +61,7 @@ export class FishTts {
 			.update('\0')
 			.update(text)
 			.digest('hex');
-		const file = `${digest}.mp3`;
-		return this.cacheFile(file, outDir, () => this.request(text, voiceId));
+		return `${digest}.mp3`;
 	}
 
 	private async cacheFile(

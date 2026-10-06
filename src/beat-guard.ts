@@ -87,7 +87,7 @@ export function installBeatGuard(ctx: Context, guard: BeatGuard, injected: Injec
 		if (!agent) return;
 		const message = createUserMessage({ content: [{ type: 'text', text: NUDGE }], source: { kind: 'user' } });
 		// 先登记再投：舞台认 id 把它从玩家时间线上摘掉（见 `injected.ts`）。
-		injected.remember(message.id);
+		injected.remember(sessionId, message.id);
 		agent.steer(message);
 	});
 }

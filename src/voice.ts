@@ -131,3 +131,21 @@ export class VoicePipeline {
 		}
 	}
 }
+
+/**
+ * 一整段台词的分句。
+ *
+ * 流式那一路是边写边分的（`VoicePipeline`），这里给的是**已经写完的整行**——
+ * 舞台重建时要靠它拼出缓存文件名，去盘上找同一句话的那份音频。`idleFlushMs: 0` 关掉空闲冲刷：
+ * 那个超时是给流式预取用的（半句话先送去合成），整段在手时它只会把一句话切成两半。
+ *
+ * 注意分句**可能**与流式那一遍不同：流式的行若中途停过 700ms 以上，那半句已经被单独合成过。
+ * 缓存按「分出来的短语」寻址，所以这种行重建之后找不到音频——那一版就当没有配音，画面照演。
+ */
+export function chunkLine(text: string): string[] {
+	const phrases: string[] = [];
+	const chunker = new PhraseChunker({ idleFlushMs: 0, onPhrase: (phrase) => phrases.push(phrase) });
+	chunker.push(text);
+	chunker.flush();
+	return phrases;
+}

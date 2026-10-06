@@ -60,7 +60,7 @@ export function installStageTap(
 	guard: BeatGuard,
 	injected: InjectedMessages,
 	voice: VoiceHost,
-): () => void {
+): StageTap {
 	const parsers = new Map<string, StageDslParser>();
 	/** 每会话的语音管线（懒建：这一行的角色没有音色时它什么都不做）。 */
 	const voices = new Map<string, VoicePipeline | null>();
@@ -121,7 +121,7 @@ export function installStageTap(
 
 	const onInput = (payload: InboxPayload): void => {
 		// 先认领再判会话：引擎投的那几条不该因为预设判断的顺序而漏摘。
-		if (injected.claim(payload.message.id)) return;
+		if (injected.claim(payload.agent.id, payload.message.id)) return;
 
 		const sessionId = payload.agent.id;
 		if (!isPlaywriter(sessionId)) return;
@@ -164,7 +164,7 @@ export function installStageTap(
 		if (!opening || opening === playerText) return;
 
 		const message = createUserMessage({ content: [{ type: 'text', text: opening }], source: { kind: 'user' } });
-		injected.remember(message.id);
+		injected.remember(sessionId, message.id);
 		agent.inject(message);
 	};
 
@@ -182,6 +182,7 @@ export function installStageTap(
 		voices.delete(sessionId);
 		voice.disposeSession(sessionId);
 		guard.forget(sessionId);
+		injected.forget(sessionId);
 	};
 
 	const offFrame = ctx.on('agent/assistant-stream', onFrame);
@@ -189,14 +190,30 @@ export function installStageTap(
 	const offInput = ctx.on('agent/inbox/inserted', onInput);
 	const offDisposed = ctx.on('agent/disposed', onDisposed);
 
-	return () => {
-		offFrame();
-		offStatus();
-		offInput();
-		offDisposed();
-		parsers.clear();
-		voices.clear();
+	return {
+		dispose: () => {
+			offFrame();
+			offStatus();
+			offInput();
+			offDisposed();
+			parsers.clear();
+			voices.clear();
+		},
+		forgetParser: (sessionId) => {
+			// 重建把这条会话的帧流整个换掉了，解析器手里那半行文本（以及没闭合的包裹标签）
+			// 属于上一版内容：留着它，下一段增量会接着旧状态吐 IR。语音管线同理。
+			parsers.delete(sessionId);
+			voices.delete(sessionId);
+			voice.disposeSession(sessionId);
+		},
 	};
+}
+
+/** 舞台管线的把手：装配期拿它转交给 `stage-log`（重建后要丢解析器）。 */
+export interface StageTap {
+	dispose(): void;
+	/** 这条会话的流式解析器与语音管线作废（会话被重投影了）。 */
+	forgetParser(sessionId: string): void;
 }
 
 /**

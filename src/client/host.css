@@ -75,3 +75,76 @@
 	font-size: 12px;
 	opacity: 0.7;
 }
+
+/**
+ * 「进行中」浮层（排队中的提示 + 正在合成的语音）。
+ *
+ * 位置由舞台自己排：导演工具栏在右上角（8px 起、一行 42px 高），这一块接着它往下摆，
+ * 两者不重叠——同锚一处会叠成一块，看着像同一个面板被画坏了。
+ *
+ * 底、描边、字色全部沿用 `@aivn/stage` 的舞台变量（它们声明在 `.stage-root` 上，
+ * 这一块在同一个 `.stage-root` 里），所以不必自带一套配色，也就不会跟主题打架。
+ */
+.aivn-pending {
+	position: absolute;
+	z-index: 45;
+	top: calc(56px + env(safe-area-inset-top, 0px));
+	right: 10px;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+}
+
+/* 徽标本身是舞台工具栏那枚 `.dir-btn`（见 stage.css），这里只补它落在浮层上的底与描边。 */
+.aivn-pending > .dir-btn {
+	padding: 0 10px;
+	border: 1px solid var(--dialog-line);
+	border-radius: var(--stage-radius);
+	background: var(--dialog-bg);
+	box-shadow: var(--dialog-shadow);
+	color: var(--dialog-ink);
+}
+
+.aivn-pending-list {
+	margin: 6px 0 0;
+	padding: 6px 8px;
+	max-width: min(70vw, 320px);
+	max-height: 40vh;
+	overflow-y: auto;
+	list-style: none;
+	border: 1px solid var(--dialog-line);
+	border-radius: var(--stage-radius);
+	background: var(--dialog-bg);
+	box-shadow: var(--dialog-shadow);
+}
+
+.aivn-pending-row {
+	display: flex;
+	gap: 6px;
+	align-items: baseline;
+	padding: 3px 0;
+	font-size: 12px;
+	color: var(--dialog-ink);
+}
+
+.aivn-pending-kind,
+.aivn-pending-note {
+	flex: 0 0 auto;
+	font-size: 11px;
+	color: var(--dialog-ink-soft);
+	opacity: 0.8;
+}
+
+.aivn-pending-text {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* 玩家按了 HIDE：舞台整块进入净画面态，浮层也跟着收起来（它在 `.theater` 外面，
+   所以靠 `:has()` 认那个状态，跟藏输入框那条同一个办法）。 */
+.aivn-stage-view:has(.theater.bare) .aivn-pending {
+	display: none;
+}

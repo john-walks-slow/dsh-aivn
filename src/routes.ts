@@ -8,8 +8,12 @@
  *   GET  /aivn/play?session=          剧目的目录与配置（`voice` 说明宿主是否配了 TTS）
  *   GET  /aivn/audio?session=&file=   一句台词的合成音频（内容寻址，可长缓存）
  *   GET  /aivn/stream?session=   IR 帧的 SSE 流，连上先补推已播出的帧
+ *                                （这条会话还一帧都没有时，先从会话面重投影一遍）
  *   POST /aivn/input             玩家输入：`{session, text, silent?}`，投给剧作家
  *                                （时间线由 tap 接管；`silent` 是不上时间线的空推进）
+ *   POST /aivn/direct            导演动作：`{session, action, text}`
+ *                                action ∈ guide（提示·随下一轮）/ interrupt（提示·打断）/
+ *                                rewrite（改写或重写这一拍，`from` 决定作废到哪儿）
  *   POST /aivn/voice             语音控制：`{session, enabled?, paused?}`
  */
 import { readFile } from 'node:fs/promises';
@@ -19,10 +23,12 @@ import type { Context } from '@deepseek-ai/cordis';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import type {} from '@deepseek-ai/dsh-host-webserver';
 import { contentTypeOf, listAssets, readManifest, resolveInPlay } from './assets';
+import { DirectorError, type Director, type RewriteFrom } from './director';
 import type { StageHub } from './hub';
 import type { InjectedMessages } from './injected';
 import { loadPlay } from './play';
-import { resolveAgent, sessionWorkspace } from './session';
+import { resolveAgent, sessionPreset, sessionWorkspace, PLAYWRITER_PRESET } from './session';
+import type { StageLog } from './stage-log';
 import { readPlayTheme, THEME_FILE } from './theme';
 import { TTS_CACHE_DIR, type VoiceHost } from './voice-host';
 
@@ -34,6 +40,8 @@ export function installStageRoutes(
 	hub: StageHub,
 	injected: InjectedMessages,
 	voice: VoiceHost,
+	director: Director,
+	stageLog: StageLog,
 ): () => void {
 	return ctx.webServer.register({
 		kind: 'prefix',
@@ -42,7 +50,7 @@ export function installStageRoutes(
 		// `process.exit(1)`。一个坏掉的 play.json、一次 EISDIR 就能把整台 DSH 连同所有会话杀掉。
 		// 这里换个可读的 500 出去，坏的范围就只在用户那一座剧目里。
 		handler: (req, res) => {
-			handle(ctx, hub, injected, voice, req, res).catch((error: unknown) => fail(res, error));
+			handle(ctx, hub, injected, voice, director, stageLog, req, res).catch((error: unknown) => fail(res, error));
 		},
 	});
 }
@@ -61,6 +69,8 @@ async function handle(
 	hub: StageHub,
 	injected: InjectedMessages,
 	voice: VoiceHost,
+	director: Director,
+	stageLog: StageLog,
 	req: IncomingMessage,
 	res: ServerResponse,
 ): Promise<void> {
@@ -114,11 +124,15 @@ async function handle(
 		return;
 	}
 	if (req.method === 'GET' && url.pathname === `${PREFIX}/stream`) {
-		openStream(hub, url, req, res);
+		await openStream(stageLog, hub, url, req, res);
 		return;
 	}
 	if (req.method === 'POST' && url.pathname === `${PREFIX}/input`) {
 		await acceptInput(ctx, injected, req, res);
+		return;
+	}
+	if (req.method === 'POST' && url.pathname === `${PREFIX}/direct`) {
+		await acceptDirector(ctx, director, req, res);
 		return;
 	}
 	if (req.method === 'POST' && url.pathname === `${PREFIX}/voice`) {
@@ -147,12 +161,27 @@ function readTheme(ctx: Context, dir: string): Record<string, string> {
 	}
 }
 
-function openStream(hub: StageHub, url: URL, req: IncomingMessage, res: ServerResponse): void {
+/**
+ * 接一条 SSE 连接。
+ *
+ * 先问 `stage-log` 要不要重投影：这条会话一帧都没有（刚分支出来、宿主重启过、从没打开过舞台）
+ * 时它会把会话面重铺一遍——重投影的帧落在中枢的缓冲里，紧接着的 `subscribe` 补推的就是它们。
+ * 有缓冲的会话（正常在看的那条）这里什么都不做，不会打断正在演的戏。
+ */
+async function openStream(
+	stageLog: StageLog,
+	hub: StageHub,
+	url: URL,
+	req: IncomingMessage,
+	res: ServerResponse,
+): Promise<void> {
 	const sessionId = url.searchParams.get('session') ?? '';
 	if (!sessionId) {
 		sendJson(res, 400, { error: 'session is required' });
 		return;
 	}
+
+	await stageLog.ensure(sessionId);
 
 	const unsubscribe = hub.subscribe(sessionId, res);
 	const stop = () => unsubscribe();
@@ -227,9 +256,83 @@ async function acceptInput(
 	}
 
 	const message = createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } });
-	if (body.silent === true) injected.remember(message.id);
+	if (body.silent === true) injected.remember(sessionId, message.id);
 	agent.followup(message);
 	sendJson(res, 200, { ok: true });
+}
+
+/**
+ * 导演动作：提示（引导 / 打断）、改写、重写。
+ *
+ * 与 `/aivn/input` 分开是为了两件事：导演的话**不是玩家的台词**（`director.ts` 给它自己一支
+ * source kind），而改写/重写会**动会话面**（作废一段上下文，再让剧作家重写）——那是一件比
+ * 「替玩家说一句」重得多的事，不该藏在同一个入口后面。
+ *
+ * 三条都只认剧作家预设的会话：搭台助手与普通对话没有舞台，也就没有导演栏。
+ */
+async function acceptDirector(
+	ctx: Context,
+	director: Director,
+	req: IncomingMessage,
+	res: ServerResponse,
+): Promise<void> {
+	const body = await readJsonBody(req, res);
+	if (body === null) return;
+
+	const sessionId = typeof body.session === 'string' ? body.session : '';
+	const text = typeof body.text === 'string' ? body.text.trim() : '';
+	const action = typeof body.action === 'string' ? body.action : '';
+	if (!sessionId || !action) {
+		sendJson(res, 400, { error: 'session and action are required' });
+		return;
+	}
+	// 重写可以不带要求（留空 = 纯重写一遍），提示必须先有话。
+	if (text === '' && action !== 'rewrite') {
+		sendJson(res, 400, { error: 'text is required for this action' });
+		return;
+	}
+
+	const agent = await resolveAgent(ctx, sessionId);
+	if (!agent) {
+		sendJson(res, 404, { error: `no such session: ${sessionId}` });
+		return;
+	}
+	if (sessionPreset(ctx, sessionId) !== PLAYWRITER_PRESET) {
+		sendJson(res, 400, { error: 'this session is not a playwright session' });
+		return;
+	}
+
+	try {
+		switch (action) {
+			case 'guide':
+				director.guide(sessionId, agent, text);
+				break;
+			case 'interrupt':
+				await director.interrupt(sessionId, agent, text);
+				break;
+			case 'rewrite':
+				await director.rewrite(sessionId, agent, {
+					text: text === '' ? '按你的判断把这一拍重写一遍，方向可以换。' : text,
+					from: rewriteFrom(body.from),
+				});
+				break;
+			default:
+				sendJson(res, 400, { error: `unknown action: ${action}` });
+				return;
+		}
+	} catch (error) {
+		if (error instanceof DirectorError) {
+			sendJson(res, 400, { error: error.message });
+			return;
+		}
+		throw error;
+	}
+	sendJson(res, 200, { ok: true, queue: director.snapshot(sessionId) });
+}
+
+/** 作废到哪儿；缺省「整拍重来」（`beat`）。 */
+function rewriteFrom(raw: unknown): RewriteFrom {
+	return raw === 'line' ? 'line' : 'beat';
 }
 
 /**

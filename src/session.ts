@@ -5,8 +5,17 @@
  * DSL 管线（见 `stage-tap.ts`），搭台助手只管生成素材、不上台。
  */
 import type { Context } from '@deepseek-ai/cordis';
-import type { SessionId } from '@deepseek-ai/dsh-session';
-import type { UserMessage } from '@deepseek-ai/dsh-llm';
+import type {
+	AgentCancelCause,
+	SessionEvent,
+	SessionEventMap,
+	SessionEventType,
+	SessionId,
+	SessionSurface,
+	SurfaceEventType,
+	SurfaceIntent,
+} from '@deepseek-ai/dsh-session';
+import type { Message, MessageId, UserMessage } from '@deepseek-ai/dsh-llm';
 import type {} from '@deepseek-ai/dsh-agent';
 import type {} from '@deepseek-ai/dsh-agent-preset-registry';
 import type {} from '@deepseek-ai/dsh-api-session-controller';
@@ -18,24 +27,47 @@ export const PLAYWRITER_PRESET = 'aivn-playwriter';
 export const STAGEHAND_PRESET = 'aivn-stagehand';
 
 /**
- * Agent 的运行时面。`@deepseek-ai/dsh-agent` 的公开类型只声明了 `id`，
- * 工作区与预设挂在它的 session 上、投递消息靠 `followup`/`steer`，
- * 这里按实际用法收窄一份。
+ * Agent 手里的那条会话，按本插件用到的面收窄。
+ *
+ * 事件日志与会话面都是 `@deepseek-ai/dsh-session` 的公开类型（类型位置上的收窄不会丢精度）；
+ * `append` 只用来投一条**替换会话面尾部**的导演标记（见 `director.ts`），所以照原样声明。
+ */
+export interface LiveSession {
+	readonly id: string;
+	readonly header?: {
+		readonly cwd?: string;
+		readonly agentPreset?: string;
+	};
+	/** 模型可见的事件序列（`SessionSurface`）。空 = 玩家还没说过话，也就是第一条消息。 */
+	readonly surface: SessionSurface;
+	/** 整份事件日志（重建帧流用）。 */
+	snapshotEvents(): readonly SessionEvent[];
+	/** 一条事件投影成模型消息（重建帧流用）；不产出消息的事件返回 null。 */
+	deriveEventMessage(event: SessionEvent): Message | null;
+	/** 追加一条事件。`stage-log`/`director` 只用 `user/message` 这一支。 */
+	append<T extends SessionEventType>(
+		type: T,
+		data: SessionEventMap[T],
+		...opts: T extends SurfaceEventType ? [opts: SurfaceIntent<T>] : []
+	): SessionEvent<T>;
+}
+
+/**
+ * Agent 的运行时面。`@deepseek-ai/dsh-agent` 的公开类型只声明了 `id`（它那几支
+ * `declare module './types.ts'` 出不了包），这里按实际用法收窄一份。
  */
 export interface LiveAgent {
 	readonly id: string;
 	/** Agent 自己的 scope ctx：预设内的工具与服务注册在它上面。 */
 	readonly ctx: Context;
-	readonly session?: {
-		readonly header?: {
-			readonly cwd?: string;
-			readonly agentPreset?: string;
-		};
-		/**
-		 * 模型可见的事件序列（`@deepseek-ai/dsh-session` 的 `SessionSurface`）。
-		 * 「这条会话还是空的吗」只有它答得准：空 = 玩家还没说过话，也就是第一条消息。
-		 */
-		readonly surface?: { readonly nodes: readonly unknown[] };
+	/** 有没有一轮在跑：导演的「打断」「重写」都要先看它。 */
+	readonly status: 'idle' | 'running';
+	readonly session?: LiveSession;
+	/** 排队中的 steering（打断之后要把它们清掉，否则旧指令会追着新一轮跑）。 */
+	readonly inbox: {
+		readonly nextStep: readonly UserMessage[];
+		remove(id: MessageId): boolean;
+		clear(): void;
 	};
 	followup(message: UserMessage): void;
 	/**
@@ -44,6 +76,12 @@ export interface LiveAgent {
 	 * 挤进玩家的第一句所在的那一轮（见 `stage-tap.ts` 的 `openPlay`）。
 	 */
 	inject(message: UserMessage): void;
+	/** 投一条 steering（最近的 step 边界吃）。 */
+	steer(message: UserMessage): void;
+	/** 中止当前这一轮；`keepInbox` 保住排队与 steering。 */
+	cancel(cause: AgentCancelCause, options?: { keepInbox?: boolean }): void;
+	/** 等到这条 Agent 真正闲下来（打断之后必须等，不然会话面还在动）。 */
+	whenIdle(): Promise<void>;
 }
 
 /** 在册的 live Agent；冷会话（宿主重启后没恢复）取不到。 */

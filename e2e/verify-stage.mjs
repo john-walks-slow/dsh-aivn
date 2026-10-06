@@ -6,7 +6,8 @@
  *   在插件仓库根落一份剧目夹具 → 新建会话并选「剧作家」预设 → 说一句
  *   → 会话头部出现「AIVN」tab（只在剧作家预设的会话上）→ 选中后整块对话主区由 `@aivn/stage` 渲染
  *   → 宿主 SSE 的 IR 流被消费并逐字显示 → 停止点的选项把输入发回宿主、
- *   在时间线上落成一行回执，剧作家接着写完第二轮再交一个停止点。
+ *   在时间线上落成一行回执，剧作家接着写完第二轮再交一个停止点；
+ *   导演工作栏（提示 / 改写 / 重写）在这一页上。
  *
  * 运行：dsh-e2e run e2e/run.mjs stage
  */
@@ -143,8 +144,18 @@ try {
 		// S5 已经在这里判过了，跳的是它之后的全部。
 		skip(KNOWN_IDS.slice(KNOWN_IDS.indexOf('S5') + 1), 'AIVN tab 未挂载，跳过');
 	} else {
-		const directorBar = await page.evaluate(() => document.querySelector('.theater-director') !== null);
-		check('S6', !directorBar, '导演工作栏未渲染（directorBar={false}）');
+		// 导演工作栏现在是**要**渲染的（提示 / 改写 / 重写三格；生图那一格插件没有落点，
+		// 由 `showGenerate={false}` 收掉）。这里只验它在了、且只有这三格。
+		const directorBar = await page.evaluate(() => {
+			const bar = document.querySelector('.theater-director');
+			if (!bar) return null;
+			return [...bar.querySelectorAll('.dir-btn')].map((el) => (el.textContent ?? '').trim());
+		});
+		check(
+			'S6',
+			Array.isArray(directorBar) && ['提示', '改写', '重写'].every((label) => directorBar.includes(label)),
+			`导演工作栏已渲染：${Array.isArray(directorBar) ? directorBar.join(' / ') : '未渲染'}`,
+		);
 
 		const notice = await page.evaluate(
 			() => document.querySelector('.aivn-stage-notice')?.textContent?.trim() ?? '',

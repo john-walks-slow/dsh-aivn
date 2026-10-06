@@ -7,15 +7,20 @@
  *
  * 与 AIVN app 的三处接线差异，都源于插件这边没有编排器、没有谱系、也不做合成：
  *
- * - **没有谱系**：`buildTranscript(null, lines)` 出来的条目 nodeId 恒为 null，
- *   改写/分岔/回顾/生图按钮天然置灰。导演工作栏整个不渲染（`directorBar={false}`），
- *   `onView` 空转（上滑手势等于没接）。
+ * - **没有谱系**：`buildTranscript(null, lines)` 出来的条目 nodeId 恒为 null，回顾/分岔没有
+ *   落点，`onView` 空转（上滑手势等于没接）。导演栏照常渲染，但「提示」的第二岔是**打断**
+ *   （`promptAlt="interrupt"`）而不是开新枝，生图那一格不摆（`showGenerate={false}`）——
+ *   `targets` 里的锚点是插件自己铸的（`beat:current` / `line:<seq>`），服务端按它决定
+ *   作废到哪儿。回退与分支交给 DSH 原生那两样（rewind / 在新对话中分支），舞台只是跟着
+ *   会话面重投影一遍（`src/stage-log.ts`）。
  * - **没有语音**：`voiceAvailable={false}`，三态恒 none，重听按钮不出现。
  * - **轮边界来自宿主**：不是编排器的 `beat_end`，是 tap 从 `agent/status` 摘下来的
  *   `beat` 帧——剧作家起笔即开演，停笔即「写完了，等玩家」。
  *
  * 玩家输入只有一个出口：`POST /aivn/input`。它把话投给剧作家，落进时间线由宿主的
  * `agent/inbox/inserted` 监听统一负责——DSH 原生输入框与这里的选肢卡走的是同一条路。
+ * 导演栏那三个动作走 `POST /aivn/direct`：它们不是玩家在戏里说的话（宿主给它们自己一支
+ * 来源，舞台上不会多出一行台词），改写 / 重写还会作废会话里已经写出来的那一段。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react';
 import {
@@ -37,6 +42,7 @@ import {
 import type { AssetMeta, PlayConfig, StageEvent, StopPayload } from '@aivn/core';
 import stageCss from '@aivn/stage/stage.css';
 import { injectCss } from './inject-css';
+import { PendingPanel, type PendingItem } from './pending-panel';
 
 /** 「继续」投出去的正文：一句括号里的舞台指示，宿主侧会标 `silent`（不上玩家时间线）。 */
 const CONTINUE = '（继续）';
@@ -62,7 +68,17 @@ type StageFrame =
 	/** `lineSeq` 是那一行 `say_start` 帧的 seq，不是本帧的 seq。 */
 	| { seq: number; kind: 'voice'; lineSeq: number; phrase: number; state: 'started' | 'ready'; url?: string }
 	/** 剧目皮肤：全量快照（最后一条就是当前该用的那套），幂等。 */
-	| { seq: number; kind: 'style'; theme: Record<string, string> };
+	| { seq: number; kind: 'style'; theme: Record<string, string> }
+	/** 前面推的一切作废，紧接着的帧才是这条会话现在的样子（回退 / 重写 / 分支 / 重启）。 */
+	| { seq: number; kind: 'reset' }
+	/** 提示队列：全量快照，幂等。 */
+	| { seq: number; kind: 'guide'; items: readonly GuideItem[] };
+
+interface GuideItem {
+	id: string;
+	text: string;
+	status: 'pending' | 'sent';
+}
 
 interface PlayPayload {
 	/** 没有剧目时为 null。 */
@@ -120,6 +136,12 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 	const [theme, setTheme] = useState<Record<string, string>>({});
 	const [failed, setFailed] = useState<string | null>(null);
 	const [resetToken, setResetToken] = useState(0);
+	/** 提示队列（导演排的话）。全量快照，最后一条就是现值。 */
+	const [guide, setGuide] = useState<readonly GuideItem[]>([]);
+	/** 正在重投影：这期间画面暂时是空的，别把它当成「还没开演」。 */
+	const [rebuilding, setRebuilding] = useState(false);
+	/** 上面那枚的读数版：SSE 那条 effect 不随它重建，闭包里读到的是旧值，所以状态之外留一份。 */
+	const rebuildingRef = useRef(false);
 	const toast = useToasts();
 	const [voiceOn, setVoiceOn] = useState(() =>
 		typeof window === 'undefined' ? true : readFlag(window.localStorage, VOICE_FLAG, true),
@@ -230,6 +252,9 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 		setStop(null);
 		setIsNoStop(false);
 		setLive(false);
+		setGuide([]);
+		rebuildingRef.current = false;
+		setRebuilding(false);
 		setResetToken((n) => n + 1);
 		requestRender();
 
@@ -256,6 +281,34 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 			}
 			if (frame.seq <= lastSeq.current) return;
 			lastSeq.current = frame.seq;
+
+			if (frame.kind === 'reset') {
+				// 重建：宿主把这条会话的帧流整个换了一遍（回退 / 重写 / 分支）。播放层要归零，
+				// 否则它会拿着上一版的游标接着往下走。`resetToken` 就是那条线（见 usePlayback）。
+				builder.reset();
+				director.reset();
+				sawStop.current = false;
+				setStop(null);
+				setIsNoStop(false);
+				// 提示队列**不清**：它不在会话面上，重建的尾巴上宿主会补一帧现值回来。
+				// 重建帧紧跟着就来；这中间的空白不是「还没开演」，先别把「开演」摆出来。
+				rebuildingRef.current = true;
+				setRebuilding(true);
+				setResetToken((n) => n + 1);
+				requestRender();
+				return;
+			}
+
+			if (frame.kind === 'guide') {
+				setGuide(frame.items);
+				return;
+			}
+
+			// 除 reset 之外的任何一帧都说明重投影已经落地了（重建流以 beat 帧收尾）。
+			if (rebuildingRef.current) {
+				rebuildingRef.current = false;
+				setRebuilding(false);
+			}
 
 			if (frame.kind === 'voice') {
 				// `lineSeq` 是那一行 `say_start` 帧的 seq——语音挂在台词行上，不是挂在流的位置上。
@@ -324,6 +377,24 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 			} catch (error) {
 				toast.push(`没能送到剧作家：${describe(error)}`, 'error');
 				return false;
+			}
+		},
+		[sessionId, toast],
+	);
+
+	/**
+	 * 一次导演动作。三条路都走 `/aivn/direct`：提示（引导 / 打断）与改写 / 重写。
+	 *
+	 * 与 `send` 分开是因为它不是「替玩家说一句」：宿主给这些话自己一支来源，舞台的时间线上
+	 * 不会多出一行玩家台词；而改写 / 重写还会作废会话里已经写出来的那一段（见 `director.ts`）。
+	 */
+	const direct = useCallback(
+		async (action: 'guide' | 'interrupt' | 'rewrite', text: string, from?: 'beat' | 'line'): Promise<void> => {
+			if (!sessionId) return;
+			try {
+				await postJson('/aivn/direct', { session: sessionId, action, text, ...(from ? { from } : {}) });
+			} catch (error) {
+				toast.push(`导演指令没能送到：${describe(error)}`, 'error');
 			}
 		},
 		[sessionId, toast],
@@ -443,13 +514,34 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 		continueCardOn: false,
 	});
 
+	/**
+	 * 导演栏的锚点。
+	 *
+	 * 插件这边没有谱系节点，所以三个锚点都是**自己铸的**：一个不透明的标签，服务端按它
+	 * 决定作废到哪儿（`/aivn/direct` 的 `from`）。舞台只把它们当字符串传递（`onFork` 的
+	 * 锚点 / `onEdit` 的 nodeId），不必认识它们的含义。
+	 *
+	 * 两边都只认「当前这一拍」：插件没有回看游标（`onView` 空转、上滑手势等于没接），
+	 * 播放头看见的那一行就是最新的一行。
+	 */
+	const hasContent = lines.some((line) => line.type === 'say');
 	const targets: DirectorTargets = {
-		beatId: null,
+		beatId: hasContent ? 'beat:current' : null,
 		beatNodeId: null,
-		lineNodeId: null,
+		lineNodeId: playback.view?.seq == null ? null : `line:${playback.view.seq}`,
 		lineSeq: playback.view?.seq ?? null,
 		lineText: playback.view?.text ?? '',
 	};
+
+	/** 「进行中」浮层：排队的提示 + 正在合成的那几句语音。 */
+	const pending: PendingItem[] = [
+		...guide
+			.filter((item) => item.status === 'pending')
+			.map((item) => ({ key: item.id, kind: 'guide' as const, text: item.text, note: '排队中' })),
+		...lines
+			.filter((line) => line.type === 'say' && director.voiceState(line.seq ?? null) === 'pending')
+			.map((line) => ({ key: `voice:${line.key}`, kind: 'voice' as const, text: line.text, note: '合成中' })),
+	];
 
 	if (!sessionId) return <Notice text="这个会话还没有舞台。" />;
 
@@ -481,11 +573,31 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 				onToggleVoice={toggleVoice}
 				busy={busy}
 				targets={targets}
-				directorBar={false}
+				directorBar
+				// 插件不做谱系分支（用户定的口径：分支走 DSH 原生的「在新对话中分支」），
+				// 所以「提示」的第二岔是打断，而不是从这一行开新枝。
+				promptAlt="interrupt"
+				// 出图在搭台助手那条会话里做，舞台这排键没有落点，别摆一个点了没反应的键。
+				showGenerate={false}
 				onView={noop}
-				onPrompt={(text) => void send(text)}
-				onEdit={noop}
-				onFork={noop}
+				onPrompt={(text, mode) => void direct(mode === 'interrupt' ? 'interrupt' : 'guide', text)}
+				onEdit={(_nodeId, text) => {
+					// 「改写这一句」到会话层就是**让剧作家重写这一拍**：剧本是它的输出，插件没有
+					// 可改的脚本文件。作废从最后一步起（`from: 'line'`），把这一句交代清楚。
+					const before = targets.lineText;
+					void direct(
+						'rewrite',
+						before && before !== text
+							? `把这一拍重写一遍：把这一句「${before}」改成「${text}」，其余照旧。`
+							: `把这一拍重写一遍，这一句改成：${text}`,
+						'line',
+					);
+				}}
+				onFork={(_anchor, opts) => {
+					// 只可能是「重写」（分岔那条岔已经换成了打断）：从这一轮开头整段重来，
+					// 交给剧作家的就是玩家在面板里写的那句要求（留空 = 纯重写）。
+					void direct('rewrite', opts?.instruction ?? '', 'beat');
+				}}
 				onGenerateCg={noop}
 				onReplay={(seq) => void director.replay(seq)}
 				voiceState={(seq) => director.voiceState(seq)}
@@ -494,7 +606,7 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 				canContinue={affordance.clickToContinue}
 				onContinue={continueOn}
 				overlay={
-					playback.scrubbed ? null : lines.length === 0 ? (
+					playback.scrubbed || rebuilding ? null : lines.length === 0 ? (
 						/* 空舞台：摆一个「开演」，等玩家按第一下。开局指令是剧目自己的 opening。 */
 						<div className="choice-overlay" role="group" aria-label="开演">
 							<div className="choices">
@@ -516,6 +628,7 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 					) : null
 				}
 			/>
+			<PendingPanel items={pending} />
 			<ToastStack toasts={toast.toasts} onDismiss={toast.dismiss} />
 		</div>
 	);

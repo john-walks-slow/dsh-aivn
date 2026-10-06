@@ -27,6 +27,11 @@ export type BeatState = 'start' | 'end';
  *   客户端按它把音频挂回台词行上。
  * - `style`：剧目皮肤。**全量快照**（不是增量）：重连补推时最后一条就是当前该用的那套，
  *   幂等，不必关心中间改过几版。
+ * - `reset`：**前面推的一切作废**，紧接着的帧才是这条会话现在的样子（`stage-log` 重建、
+ *   回退/重写之后用）。它自己也是帧、也有 seq，于是客户端可以在**去重之前**认出它——
+ *   重建帧的 seq 一律更大，去重不会把新的一幕丢掉。seq 因此**不回退**。
+ * - `guide`：提示队列的**全量快照**（与 `style` 同一个口径，幂等）。导演排了一句提示、
+ *   或那句提示真的进了会话时各推一次，舞台的 pending 面板据此显示「排队中 / 已送出」。
  */
 export type StageFrame = StageFrameBody & { seq: number };
 
@@ -35,7 +40,16 @@ type StageFrameBody =
 	| { kind: 'ir'; event: StageEvent }
 	| { kind: 'beat'; state: BeatState }
 	| { kind: 'voice'; lineSeq: number; phrase: number; state: 'started' | 'ready'; url?: string }
-	| { kind: 'style'; theme: Record<string, string> };
+	| { kind: 'style'; theme: Record<string, string> }
+	| { kind: 'reset' }
+	| { kind: 'guide'; items: readonly GuideFrameItem[] };
+
+/** `guide` 帧里的一条：面板只读它（id 用来配对，text 是玩家写的那句原文）。 */
+export interface GuideFrameItem {
+	id: string;
+	text: string;
+	status: 'pending' | 'sent';
+}
 
 /** 一条挂着的 SSE 连接：响应 + 它的心跳。 */
 interface Client {
@@ -71,7 +85,30 @@ export class StageHub {
 		return this.push(sessionId, { kind: 'style', theme });
 	}
 
-	private push(sessionId: string, frame: StageFrameBody): StageFrame {		const seq = (this.seqs.get(sessionId) ?? 0) + 1;
+	/** 收下一帧提示队列（全量快照）。导演排队与送出各推一次，舞台的面板据此翻状态。 */
+	appendGuide(sessionId: string, items: readonly GuideFrameItem[]): StageFrame {
+		return this.push(sessionId, { kind: 'guide', items });
+	}
+
+	/**
+	 * 丢掉这条会话已经推过的帧，发一帧「从这里重新开始」。
+	 *
+	 * **seq 不归零**：seq 归零之后重建帧的序号会小于客户端已经应用到的最大值，被去重整批丢掉
+	 * ——客户端那次「断档重放」的判断恰恰是靠 seq 往前跳（见 `stage-view.tsx`）。所以重置帧
+	 * 自己占一个新号，重建帧跟着往后排。
+	 */
+	reset(sessionId: string): StageFrame {
+		this.buffers.set(sessionId, []);
+		return this.push(sessionId, { kind: 'reset' });
+	}
+
+	/** 这条会话推过帧没有。SSE 新连接据此决定要不要先把舞台重建一遍。 */
+	hasFrames(sessionId: string): boolean {
+		return (this.buffers.get(sessionId)?.length ?? 0) > 0;
+	}
+
+	private push(sessionId: string, frame: StageFrameBody): StageFrame {
+		const seq = (this.seqs.get(sessionId) ?? 0) + 1;
 		this.seqs.set(sessionId, seq);
 		const framed: StageFrame = { seq, ...frame };
 

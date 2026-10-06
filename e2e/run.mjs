@@ -31,6 +31,10 @@ export const MODULES = {
 		description: '剧目舞台皮肤：令牌白名单与防漂移、默认皮零变化、theme.json 落成、跨会话实时换装',
 		suites: ['verify-style'],
 	},
+	director: {
+		description: '导演工具栏：提示（引导 / 打断）、改写 / 重写作废会话面、舞台 reset 重投影、分支会话重建',
+		suites: ['verify-director'],
+	},
 	settings: {
 		description: '插件设置面：Plugins 页里的配置卡、写入落点、就地生效、密钥脱敏与清除',
 		suites: ['verify-settings'],

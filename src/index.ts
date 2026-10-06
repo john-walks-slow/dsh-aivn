@@ -18,11 +18,13 @@ import type {} from '@deepseek-ai/dsh-settings';
 import type {} from '@deepseek-ai/cordis-plugin-loader';
 import { BeatGuard, installBeatGuard } from './beat-guard';
 import { installPlayCommands } from './commands';
+import { Director } from './director';
 import { StageHub } from './hub';
 import { InjectedMessages } from './injected';
 import { registerPresets } from './playwriter/preset';
 import { installPresetTools } from './preset-tools';
 import { installStageRoutes } from './routes';
+import { StageLog } from './stage-log';
 import { installStageTap } from './stage-tap';
 import { createTts, type FishTts } from './tts';
 import { createMediaBackends, type MediaBackends } from './media/backends';
@@ -213,14 +215,30 @@ export async function apply(ctx: Context, config: Config): Promise<() => void> {
 		ctx.logger,
 	);
 
+	const tap = installStageTap(ctx, hub, guard, injected, voice);
+	// 导演的动作全是**会话层**的：提示投进下一轮，改写/重写往会话里加一条替换标记。
+	const director = new Director(hub, injected);
+	// 帧流的真相源是会话面：这条把「会话现在长什么样」重投影成一条帧流（回退、重写、分支、重启）。
+	const stageLog = new StageLog(ctx, {
+		hub,
+		injected,
+		voice,
+		// 重建会把这条会话的流式解析器与语音管线作废（它们手里是上一版内容的半成品）。
+		onRebuilt: (sessionId) => tap.forgetParser(sessionId),
+		// 提示队列在导演手里，不在会话面上：重置帧清掉客户端那份之后要补回来。
+		pendingGuides: (sessionId) => director.snapshot(sessionId),
+	});
+
 	const tools = installPresetTools(ctx, hub, guard, runtime);
 	const presets = await registerPresets(ctx, { shell: runtime.current.capabilities.shell });
 	const disposers: Array<() => void> = [
-		installStageTap(ctx, hub, guard, injected, voice),
+		tap.dispose,
 		tools.dispose,
 		installBeatGuard(ctx, guard, injected),
 		installPlayCommands(ctx),
 		presets.dispose,
+		director.install(ctx),
+		stageLog.install(),
 	];
 
 	// 设置界面改完的值经 loader 原位提交进 `config` 的这些引用，这里重建运行期面：
@@ -252,7 +270,7 @@ export async function apply(ctx: Context, config: Config): Promise<() => void> {
 	});
 
 	ctx.inject(['webServer'], (webCtx) => {
-		disposers.push(installStageRoutes(webCtx, hub, injected, voice));
+		disposers.push(installStageRoutes(webCtx, hub, injected, voice, director, stageLog));
 		webCtx.logger.info('[dsh-aivn] stage routes mounted on /aivn');
 	});
 

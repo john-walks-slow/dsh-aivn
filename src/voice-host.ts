@@ -9,11 +9,13 @@
  * 缓存落在剧目自己的 `media-cache/tts/` 下（可重建、不进版本库）。内容寻址，
  * 所以同一个音色说同一句话在重连补推、快进回看里都命中同一份。
  */
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { StageHub } from './hub';
 import { readVoiceMap } from './play-context';
 import type { FishTts } from './tts';
-import { VoicePipeline } from './voice';
+import { chunkLine, VoicePipeline } from './voice';
+import type { VoicedLine } from './stage-log';
 
 /** 音频缓存目录（相对剧目根）。 */
 export const TTS_CACHE_DIR = join('media-cache', 'tts');
@@ -68,6 +70,33 @@ export class VoiceHost {
 	disposeSession(sessionId: string): void {
 		this.pipelines.get(sessionId)?.dispose();
 		this.pipelines.delete(sessionId);
+	}
+
+	/**
+	 * 舞台重建时补发语音：**只补盘上已经有的那几句**。
+	 *
+	 * 重建会把台词行重新编号，旧的语音帧（挂着旧行号）随之作废；音频本身是内容寻址的，
+	 * 于是按同一套算法（分句 + `sha1(模型, 音色, 短语)`）找回文件名，命中就补一帧 `ready`，
+	 * 客户端的「重听」按钮照常可用。没命中就什么都不发——重放旧台词不该再打一次 TTS。
+	 */
+	replayCached(sessionId: string, playDir: string, lines: readonly VoicedLine[]): void {
+		const tts = this.ttsOf();
+		if (!tts) return;
+		const voices = readVoiceMap(playDir);
+		for (const line of lines) {
+			const voiceId = voices.get(line.charId);
+			if (!voiceId) continue;
+			chunkLine(line.text).forEach((phrase, index) => {
+				const file = tts.fileNameOf(phrase, voiceId);
+				if (!existsSync(join(playDir, TTS_CACHE_DIR, file))) return;
+				this.hub.appendVoice(sessionId, {
+					lineSeq: line.lineSeq,
+					phrase: index,
+					state: 'ready',
+					url: `/aivn/audio?session=${encodeURIComponent(sessionId)}&file=${encodeURIComponent(file)}`,
+				});
+			});
+		}
 	}
 
 	/** 语音总开关 / 客户端背压。会话还没建管线时什么都不用做。 */
