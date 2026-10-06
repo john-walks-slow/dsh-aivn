@@ -55,7 +55,7 @@
 	},
 	"devDependencies": {
 		"@aivn/core": "file:../stage-ai/packages/core",
-		"@aivn/stage": "file:../stage-ai/.worktrees/dsh-vn-stage/packages/stage",
+		"@aivn/stage": "file:../stage-ai/packages/stage",
 		"@deepseek-ai/cordis": "^4.0.4",
 		"@deepseek-ai/cordis-plugin-loader": "^1.0.5",
 		"@deepseek-ai/dsh-agent-preset-registry": "0.1.7-rc.2",
