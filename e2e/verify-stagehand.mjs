@@ -141,8 +141,8 @@ try {
 	check('S12', prompt.includes('galgame-visual-craft'), '技能清单里有 galgame-visual-craft');
 
 	// 工具面：搭台助手那一套；剧作家的收束口一个都不在，「只写一个文件」的那几个也没有名字可装
-	const expects = ['list_assets', 'validate_play', 'set_stage_style'];
-	const forbidden = ['beat_done', 'list_library', 'create_play', 'get_readiness', 'set_craft', 'update_state'];
+	const expects = ['validate_play', 'set_stage_style'];
+	const forbidden = ['beat_done', 'list_library', 'list_assets', 'create_play', 'get_readiness', 'set_craft', 'update_state'];
 	check('S13', expects.every(has), `装上了 ${expects.join(' / ')}（实际：${tools.join(', ')}）`);
 	check('S14', !forbidden.some(has), `没有剧作家的工具与旧名 ${forbidden.join(' / ')}`);
 	check('S15', !has('list_voices') && !has('web_search'), '没配 key 时 list_voices / web_search 不注册');

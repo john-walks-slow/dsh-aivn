@@ -238,7 +238,7 @@ function renderCast(
 /**
  * 素材清单：按类目列 id，每一项带上描述表里的说明。
  *
- * 描述是这里的重点（`list_assets` 的理由也是它）：差分名未必与画面相符，
+ * 描述是这里的重点：差分名未必与画面相符，
  * 剧作家挑素材靠的是「这一张画的是什么」。
  */
 function renderAssets(index: Record<string, string[]>, notes: (id: string, charId?: string) => AssetMeta): string {

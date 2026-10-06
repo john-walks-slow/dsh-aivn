@@ -28,14 +28,17 @@ import {
 	isSpriteStature,
 	statureOf,
 	SPRITE_FRAMING_ASPECT,
+	SPRITE_FRAMING_SHOT,
 	type AssetMeta,
 	type SpriteFraming,
 	type SpriteStature,
 } from '@aivn/core';
-import { readManifest, resolveInPlay } from '../assets';
+import { characterNames, readManifest, resolveInPlay } from '../assets';
+import { loadPlaySync } from '../play';
 import { cutout, resolveTuning, type CutoutResult, type CutoutTuning } from './cutout';
-import { aspectMatches, extOf, sizeOfImage, type ImageAspect, type ImageBackend } from './image';
+import { aspectMatches, extOf, sniffImageMime, sizeOfImage, type ImageAspect, type ImageBackend } from './image';
 import type { MusicBackend } from './music';
+import { fetchWebImage } from './web-image';
 
 /** 素材类目：背景、事件插图、立绘。BGM 走 `generateBgm` 那条单独的路（没有草稿与抠底）。 */
 export type AssetKind = 'background' | 'cg' | 'sprite';
@@ -48,17 +51,20 @@ const NEUTRAL = 'neutral';
 const DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** 素材 id / 差分名的白名单：字母数字开头，中文照收，不含路径分隔符。 */
 const STEM_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N}._-]*$/u;
+/** 图片文件：立绘目录里数差分时只认它。 */
+const IMAGE_FILE = /\.(png|jpe?g|webp)$/i;
 /** 垫图张数上限（Gemini 3 系上限 14，这里按产品口径收到 6）。 */
 const MAX_REFERENCES = 6;
 
 /**
  * 立绘后缀：**只写与「主体是人还是物」无关的构图与画风约束**，不描述任何人物特征——
- * 这里的每个词都会被当成设定印进图里。
+ * 这里的每个词都会被当成设定印进图里（早先这里写过「between the twin tails」，等于给所有角色
+ * 定了个双马尾：prompt 里明写 pink long straight hair，出来的仍是双马尾）。
  *
  * 两段都是硬约束不是修饰词：`src/media/cutout.ts` 的全局色键抠底要求 2D 平涂 + 单一纯色底
  * （3D 渲染的渐变与投影会让底色散成一片灰），剪影连成一片才能分割人物与底色。
  */
-const COMMON_TAIL =
+const STYLE_TAIL =
 	'. Japanese anime style 2D illustration, flat cel shading with clean crisp lineart, NOT a 3D render, ' +
 	'no 3D CGI look. ';
 
@@ -73,11 +79,52 @@ const KEY_BACKGROUND =
  * 留白约束：人形专属（非人走 `square`，不拼它——给猫套上「手臂与躯干不能留窄缝」只会得到人形猫）。
  *
  * **姿势不在这里规定**：定妆照是所有差分的垫图基准，姿势写死等于把角色气质终身固定。
- * 留在这里的是抠底真要的那条：手臂与躯干之间不能留窄缝（色键够不着那条缝，人会被拆成两块轮廓）。
+ * 留在这里的是抠底真要的两条：手臂与躯干之间不能留窄缝（色键够不着那条缝，人会被拆成两块轮廓）；
+ * 以及头顶要留空——舞台按统一头顶留白摆位，不点明的话模型会把所有角色都顶到画幅上沿。
  */
 const POSE_TAIL =
 	', arms either resting against the body or clearly separated from it, never with a narrow sliver of ' +
-	'background trapped between them.';
+	'background trapped between an arm and the torso' +
+	'. Shorter characters may leave more empty space above the head, and taller characters may leave less, ' +
+	'so every character keeps some space above the head rather than touching the top edge of the frame';
+
+/**
+ * 非人主体（`square`）的留白约束：只说「完整入画 + 四周留空」。
+ *
+ * 抠底靠的是「主体四周有一圈底色」，这与人形无关，所以这句留着；姿态与「头顶留白」都去掉
+ * ——猫没有双臂，吊灯没有头顶。
+ */
+const PROP_TAIL =
+	', the entire subject fully inside the frame with clear empty background space all around it, ' +
+	'nothing cropped by the frame edges';
+
+/**
+ * 定妆照的前置中性描述：压住角色卡或本次 prompt 里的表情词（那一条只对当前差分有效）。
+ *
+ * **只说表情与气质，不说姿势**（姿势归调用方）；**按取景取词**：给非人主体说 portrait 会得到
+ * 「猫的肖像照」——portrait 是人形概念，模型要么给一只坐着的人形猫，要么干脆画个人。
+ */
+const NEUTRAL_LEAD: Record<SpriteFraming, string> = {
+	full: 'a calm neutral-expression portrait of the character, in a natural pose that expresses their personality.',
+	half: 'a calm neutral-expression portrait of the character, in a natural pose that expresses their personality, waist up.',
+	square: 'the subject shown whole, in a neutral state.',
+};
+
+/**
+ * 差分：只改**表情 / 状态**，身份特征一律锁死——垫图之外的第二道保险。
+ * 画风要求与定妆照一字不差，否则两个人。
+ *
+ * 「facial expression」也是人形词：猫的差分（睡着的 / 炸毛的）说「只改面部表情」会让模型
+ * 认真去找那张猫脸，所以非人那套说的是「只改状态」。
+ */
+const IDENTITY_TAIL =
+	'Same 2D flat cel-shaded anime illustration style, NOT a 3D render, ' +
+	'same single flat solid background colour as the reference image, no text, no shadow, no gradient.';
+const HUMAN_IDENTITY =
+	'Same character as the reference image: identical hairstyle, hair color, eye color, outfit and body type. ' +
+	'Change only the facial expression.';
+const PROP_IDENTITY =
+	'The same subject as the reference image, in the same pose and same colours. Change only its state.';
 
 /** 一张要出的图：类目 + 身份（背景/插图给 id，立绘给主体与差分）+ 这次的参数。 */
 export interface AssetTarget {
@@ -94,9 +141,9 @@ export interface AssetTarget {
 	stature?: SpriteStature;
 	/** 立绘级标题（无卡主体靠它出名牌）。 */
 	title?: string;
-	/** 垫图：主体 id（自动用它的 neutral 立绘）或剧目内相对路径。 */
+	/** 垫图：主体 id（自动用它的 neutral 立绘）、剧目内相对路径，或 http(s) 网址。 */
 	references?: string[];
-	/** 本次出图的模型 / 尺寸覆盖（剧目级口子，不给跟部署配置）。 */
+	/** 本次出图的模型 / 尺寸：不给跟剧目 `play.json` 的 `image` 段，再不给跟部署配置。 */
 	model?: string;
 	size?: string;
 }
@@ -122,6 +169,11 @@ export interface GeneratedAsset {
 	absPath: string;
 	/** 这个目标此前已有素材（可能是用户放的），本次是覆盖。 */
 	replaced: boolean;
+	/**
+	 * 顺手补出来的那张定妆照（剧作家要差分、而该主体还没有 neutral 时）。
+	 * 它是真金白银出的图，回执里必须一起说，别让用户以为只出了一张。
+	 */
+	autoNeutral?: GeneratedAsset;
 	cutout?: { coverage: number; figureHeight: number };
 }
 
@@ -144,8 +196,17 @@ interface AssetSpec {
 	spriteId?: string;
 	variant?: string;
 	framing?: SpriteFraming;
+	/** 立绘级（不是差分级的）取景：自动补的那张 neutral 按它走。 */
+	baseFraming?: SpriteFraming;
 	stature?: SpriteStature;
 	title?: string;
+}
+
+/** 一张解析好的垫图：字节 + 它的**显示名**（主体 id 才有；路径与网址是 `null`）。 */
+interface ResolvedReference {
+	mimeType: string;
+	data: Buffer;
+	name: string | null;
 }
 
 interface DraftRecord {
@@ -197,7 +258,8 @@ export class PlayAssets {
 	 *
 	 * 这是「一次出三张候选给用户挑」的入口——三张都只是草稿，没被挑中的那张不会在素材表里
 	 * 留下任何痕迹。差分的身份基准恒为**已入库**的 neutral：草稿当不了基准（拿一张没人过目的
-	 * 脸锚定全套差分，事后换掉基准等于整套差分换人）。
+	 * 脸锚定全套差分，事后换掉基准等于整套差分换人），所以这里一律硬抛，不自动补
+	 * （自动补走 `generate`：那条路是「图一出来就要用」，没有挑候选这一步）。
 	 */
 	async draft(target: AssetTarget, prompt: string): Promise<DraftedAsset> {
 		const backend = this.imageBackend();
@@ -218,16 +280,19 @@ export class PlayAssets {
 			}
 		}
 		const references = await this.references(spec, target.references);
-		const full = spec.kind === 'sprite' ? prompt.trim() + spriteTail(spec) : prompt.trim();
-		const model = target.model?.trim();
+		const full = suffixFor(spec, prompt.trim(), references);
+		// 模型与档位：调用方显式给 > 剧目 `play.json` 的 `image` 段 > 部署级设置（后端自己回落）。
+		const play = loadPlaySync(this.dir)?.config.image;
+		const model = target.model?.trim() || play?.model;
+		const size = target.size?.trim() || play?.size;
 		const generated = await backend.generate({
 			prompt: full,
 			aspectRatio: spec.aspect,
-			...(references.length > 0 ? { references } : {}),
+			...(references.length > 0 ? { references: references.map(({ mimeType, data }) => ({ mimeType, data })) } : {}),
 			// 立绘要抠底，源图分辨率是唯一能压住轮廓锯齿的手段；背景与 CG 不挑这个。
 			...(spec.kind === 'sprite' ? { minTier: '2K' as const } : {}),
 			...(model ? { model } : {}),
-			...(target.size ? { size: target.size } : {}),
+			...(size ? { size } : {}),
 		});
 		this.assertCanvas(spec, generated.data);
 
@@ -238,17 +303,23 @@ export class PlayAssets {
 	}
 
 	/**
-	 * 出图并**入库**：`draft` + `commit` 的组合。
+	 * 出图并**入库**：`draft` + `commit` 的组合。剧作家的缺图补位走这条——那边的图一出来就是
+	 * 要用的，没有「挑候选」这一步。
 	 *
-	 * 剧作家的缺图补位与素材页的手动生图走这条——那边的图一出来就是要用的，没有「挑候选」这一步。
-	 * 同一最终目标的并发只跑一次（`inflight`）；`draft` 不去重——同一目标并发出三张候选正是它要的。
+	 * 与 `draft` 的两处不同：进来先 `ensureNeutral`（差分的定妆照缺了就顺手补一张），
+	 * 同一最终目标的并发只跑一次（`inflight`；`draft` 不去重——同一目标并发出三张候选正是它要的）。
 	 */
 	async generate(target: AssetTarget, prompt: string): Promise<GeneratedAsset> {
 		const spec = await this.resolve(target);
 		const key = `${spec.kindPath}/${spec.stem}`;
 		const running = this.inflight.get(key);
 		if (running) return running;
-		const job = this.draft(target, prompt).then((draft) => this.commit(draft.draftId));
+		const job = (async (): Promise<GeneratedAsset> => {
+			const auto = await this.ensureNeutral(spec, prompt);
+			const draft = await this.draft(target, prompt);
+			const committed = await this.commit(draft.draftId);
+			return auto ? { ...committed, autoNeutral: auto } : committed;
+		})();
 		this.inflight.set(key, job);
 		try {
 			return await job;
@@ -256,6 +327,67 @@ export class PlayAssets {
 			if (this.inflight.get(key) === job) this.inflight.delete(key);
 		}
 	}
+
+	/**
+	 * 这个目标在剧目里已经有素材了吗。
+	 *
+	 * 剧作家出图前的守卫：出图会**覆盖同名文件**，模型忘了一次核对就把用户刚验收过的图顶掉，
+	 * 还白烧一份配额。同目标的并发在 `generate` 里另有 `inflight` 兜底，这里挡的是「上一轮出过」。
+	 */
+	async exists(target: AssetTarget): Promise<boolean> {
+		const spec = await this.resolve(target);
+		return this.existing(spec.kindPath, spec.stem);
+	}
+
+	/**
+	 * 差分生成前确保有 neutral 垫图，返回自动补出来的那张（没有则 null）：
+	 *
+	 * - 有 → 正常派生；
+	 * - 没有且该主体一个差分都没有 → 自动先定一张（没有既存差分，不存在不一致）；
+	 * - 没有但已有其它差分 → 报错让用户先过目新定妆照：那条差分是拿别的脸锚定的，新补一张
+	 *   只会与它静默换脸。
+	 *
+	 * 一批并发出 6 个差分时，6 条调用会一起看到「没定妆照」并各自来补；多花的钱与换脸靠
+	 * `inflight` 挡住——6 条内层调用的目标都是 `sprites/<id>/neutral` 这同一个 key。
+	 */
+	private async ensureNeutral(spec: AssetSpec, prompt: string): Promise<GeneratedAsset | null> {
+		if (spec.kind !== 'sprite' || spec.variant === NEUTRAL) return null;
+		if (await this.existing(spec.kindPath, NEUTRAL)) return null;
+		const others = await this.spriteStems(spec.spriteId!);
+		if (others.length > 0) {
+			throw new Error(
+				`${spec.spriteId} 缺 ${NEUTRAL} 定妆照，但已有 ${others.length} 个差分（${others.join('、')}）：` +
+					'新补的定妆照会与已有差分不是同一个人，演出中会静默换脸。' +
+					'请先单独生成一次 neutral 让用户过目，确认后再生成差分。',
+			);
+		}
+		// prompt 是「角色描述 + 本次表情」，直接拿去出定妆照会变成「哭得很凶但表情中性」的自相矛盾
+		// 指令。压一条前置的中性描述盖住表情词，角色外观描述留在后面。取景按**立绘级**走，不按这条
+		// 差分：对半身说 standing 会把画拉回全身，景别后缀与它当场打架。
+		const framing = spec.baseFraming ?? DEFAULT_SPRITE_FRAMING;
+		return this.generate(
+			{
+				kind: 'sprite',
+				spriteId: spec.spriteId,
+				variant: NEUTRAL,
+				framing,
+				...(spec.stature ? { stature: spec.stature } : {}),
+				...(spec.title ? { title: spec.title } : {}),
+			},
+			`${NEUTRAL_LEAD[framing]} ${prompt}`,
+		);
+	}
+
+	/** 该主体立绘目录里已有的差分名（用来判「一个差分都没有」）。 */
+	private async spriteStems(spriteId: string): Promise<string[]> {
+		const dir = join(this.dir, 'assets', 'sprites', spriteId);
+		if (!existsSync(dir)) return [];
+		return (await readdir(dir))
+			.filter((file) => IMAGE_FILE.test(file))
+			.map((file) => file.replace(/\.\w+$/, ''))
+			.sort((a, b) => a.localeCompare(b));
+	}
+
 
 	/** 同目标并发去重（只在这一层：草稿要的是「并发出三张」）。 */
 	private readonly inflight = new Map<string, Promise<GeneratedAsset>>();
@@ -345,7 +477,10 @@ export class PlayAssets {
 			if (spriteId === '') throw new Error('立绘要 spriteId（主体 id，就是 assets/sprites/<id>/ 的目录名）');
 			const stem = assertStem(spriteId, '主体 id');
 			const variant = (target.variant?.trim() || NEUTRAL);
-			const declared = readManifest(this.dir)[stem] ?? {};
+			const manifest = readManifest(this.dir);
+			const level = manifest[stem] ?? {};
+			// 差分级声明盖过立绘级：一套里另有一条 closeup 时要认它，否则那条覆盖键白写。
+			const declared = { ...level, ...manifest[`${stem}/${variant}`] };
 			const framing = pickFraming(target.framing, declared.framing, `${stem} 的立绘取景`);
 			const stature = pickStature(target.stature, declared.stature, `${stem} 的立绘体量`);
 			return {
@@ -356,6 +491,7 @@ export class PlayAssets {
 				spriteId: stem,
 				variant,
 				framing,
+				baseFraming: framingOf(level.framing) ?? DEFAULT_SPRITE_FRAMING,
 				stature,
 				...(target.title?.trim() ? { title: target.title.trim() } : {}),
 			};
@@ -371,29 +507,46 @@ export class PlayAssets {
 	}
 
 	/**
-	 * 解析垫图：主体 id → 它的 neutral 立绘；其余当剧目内相对路径读。
+	 * 解析垫图，每一项可以是三态：
+	 *
+	 * 1. **主体 id**（`lin` / `mecha`）——有立绘就垫，不要求有角色卡；顺带把它的**显示名**带上
+	 *    （角色卡的 `name`，没有卡就用素材表标题，再没有就用 id 本身），提示词里的编号锚点要用；
+	 * 2. **剧目内相对路径**（`assets/backgrounds/ref.png`）——没有名字；
+	 * 3. **http(s) 网址**——现下到内存里（不落盘：它只是这一次出图的输入），同样没有名字。
 	 *
 	 * 立绘的基准是**隐式**的：非 neutral 的差分一律拿已入库的 neutral 垫图（身份的唯一来源），
 	 * 显式 references 在 `draft` 里已被拒。
 	 */
-	private async references(
-		spec: AssetSpec,
-		explicit: string[] | undefined,
-	): Promise<{ mimeType: string; data: Buffer }[]> {
+	private async references(spec: AssetSpec, explicit: string[] | undefined): Promise<ResolvedReference[]> {
 		const wanted = [...(explicit ?? [])];
 		if (spec.kind === 'sprite' && spec.variant !== NEUTRAL) wanted.unshift(spec.spriteId!);
 		if (wanted.length > MAX_REFERENCES) {
 			throw new Error(`垫图最多 ${MAX_REFERENCES} 张，这次给了 ${wanted.length} 张`);
 		}
-		const out: { mimeType: string; data: Buffer }[] = [];
+		const names = characterNames(this.dir);
+		const manifest = readManifest(this.dir);
+		const out: ResolvedReference[] = [];
 		for (const ref of wanted) {
-			const file = /[/.]/.test(ref) ? ref : await this.neutralOf(ref);
-			// 路径一律过剧目内解析：`../` 与绝对路径直接拒（垫图会把文件内容发给生图后端，
-			// 这是一条**读**出工作区的口子，不能用裸 join）。
-			const abs = resolveInPlay(this.dir, file);
-			if (!abs) throw new Error(`垫图路径越界：${ref}（只能给剧目内的相对路径）`);
-			if (!existsSync(abs)) throw new Error(`垫图找不到：${ref}（剧目里没有这个文件）`);
-			out.push({ mimeType: mimeOf(abs), data: await readFile(abs) });
+			if (/^https?:\/\//i.test(ref)) {
+				out.push({ ...(await fetchWebImage(ref)), name: null });
+				continue;
+			}
+			if (/[/.]/.test(ref)) {
+				// 路径一律过剧目内解析：`../` 与绝对路径直接拒（垫图会把文件内容发给生图后端，
+				// 这是一条**读**出工作区的口子，不能用裸 join）。
+				const abs = resolveInPlay(this.dir, ref);
+				if (!abs) throw new Error(`垫图路径越界：${ref}（只能给剧目内的相对路径或 http(s) 网址）`);
+				if (!existsSync(abs)) throw new Error(`垫图找不到：${ref}（剧目里没有这个文件）`);
+				out.push({ mimeType: mimeOf(abs), data: await readFile(abs), name: null });
+				continue;
+			}
+			const abs = resolveInPlay(this.dir, await this.neutralOf(ref));
+			if (!abs) throw new Error(`垫图路径越界：${ref}`);
+			out.push({
+				mimeType: mimeOf(abs),
+				data: await readFile(abs),
+				name: names.get(ref) ?? manifest[ref]?.title ?? ref,
+			});
 		}
 		return out;
 	}
@@ -627,10 +780,101 @@ export class PlayAssets {
 
 /* ── 小工具 ─────────────────────────────────────────────────────────────── */
 
-/** 立绘提示词后缀：公共段 + 色键底（+ 人形取景时的留白约束）。 */
-function spriteTail(spec: AssetSpec): string {
-	const pose = spec.framing && spec.framing !== 'square' ? POSE_TAIL : '';
-	return `${COMMON_TAIL}${KEY_BACKGROUND}${pose}`;
+/**
+ * 提示词后缀：真正发出去的图才算数（`sent` 就是这一次垫了几张）。
+ *
+ * 三段分工照 AIVN `playAssets.ts` 的 `suffixFor`：
+ * - **立绘**：定妆照走 `neutralSuffix`（构图 + 色键底），带垫图时加一句「就是参考图里那个人」；
+ *   差分走 `identitySuffix`（身份锁 + 景别 + 状态）；
+ * - **背景 / CG**：垫了图就点明「第几张是谁」——图本身没有名字，模型只看到「第一张、第二张」。
+ *   不点明，多人 CG 就会各画各的，而且是**看起来完全正常**地画错：不报错、图也好看，
+ *   只是七濑长成了澪。
+ */
+function suffixFor(spec: AssetSpec, prompt: string, sent: ResolvedReference[]): string {
+	if (spec.kind !== 'sprite') {
+		if (sent.length === 0) return prompt;
+		return sent.every((ref) => ref.name !== null)
+			? `${prompt}. ${referenceSuffix(sent.map((ref) => ref.name!))}`
+			: `${prompt}. ${genericReferenceSuffix(sent)}`;
+	}
+	if (spec.variant === NEUTRAL) {
+		const base = `${prompt}, ${neutralSuffix(spec.framing)}`;
+		// 定妆照垫的是**外部**图（用户给的既有角色图、原画）：底色与画风归构图段管，这一句只补身份。
+		return sent.length > 0 ? `${base} ${neutralReferenceTail(spec.framing)}` : base;
+	}
+	return `${prompt}. ${identitySuffix(spec.framing)}`;
+}
+
+/**
+ * 参考图后缀：每一项按数组顺序编号，名字取自角色卡（没写名字就退回 id）。
+ *
+ * 非可省：垫图是按 `references` 的顺序一个个塞成 inlineData 的，模型看到的就是「第一张、第二张」。
+ */
+function referenceSuffix(names: string[]): string {
+	const roster = names.map((name, i) => `${i + 1}) ${name}`).join(', ');
+	return (
+		`The attached reference images are, in this exact order: ${roster}. ` +
+		'Keep each of them recognisably that same person — identical face, hairstyle, hair color, ' +
+		'eye color and outfit — while placing them in the new scene. Do not merge them into one person.'
+	);
+}
+
+/** 有路径 / 网址这类没有名字的垫图时用它：能报名字的报名字，剩下的叫「reference image」。 */
+function genericReferenceSuffix(refs: ResolvedReference[]): string {
+	if (!refs.some((ref) => ref.name)) {
+		return (
+			'Follow the attached reference image(s) for visual appearance, design details, ' +
+			'color palette and overall aesthetic while rendering the described scene.'
+		);
+	}
+	const roster = refs.map((ref, i) => `${i + 1}) ${ref.name ?? 'reference image'}`).join(', ');
+	return (
+		`The attached reference images are, in this exact order: ${roster}. ` +
+		'Maintain consistent visual appearance, character identity, hairstyle, facial features, and design elements ' +
+		'as depicted in the corresponding reference images while adapting them to the scene.'
+	);
+}
+
+/** 定妆照的参考图尾注（垫的是外部图，不是自家 neutral）。 */
+function neutralReferenceTail(framing: SpriteFraming | undefined): string {
+	if ((framing ?? DEFAULT_SPRITE_FRAMING) === 'square') {
+		return 'Based on the attached reference image: the same subject with identical colors, markings and features.';
+	}
+	return (
+		'Based on the attached reference image: the same character — identical face, hairstyle, hair color, ' +
+		'eye color and outfit — redrawn in the pose and framing described above.'
+	);
+}
+
+/**
+ * 主体为人（full/half）时的后缀：景别措辞 + 人形留白 + 画风与色键底。
+ *
+ * 开头必须是 `SPRITE_FRAMING_SHOT` 而不是写死的 "full body"：取景是半身的角色照样会被画成全身，
+ * 出图与舞台声明对不上，站位又得重新量。`framing` 自己决定的是画幅（像素）与舞台摆位（CSS），
+ * 两者都传不进提示词——模型唯一能知道「画到哪儿」的通道就是措辞。
+ */
+function humanSuffix(framing: SpriteFraming | undefined): string {
+	return `${SPRITE_FRAMING_SHOT[framing ?? DEFAULT_SPRITE_FRAMING]}${POSE_TAIL}${STYLE_TAIL}${KEY_BACKGROUND}`;
+}
+
+/** 定妆照后缀：`square` 是非人主体的唯一入口，人形与非人的差别只有留白那两句。 */
+function neutralSuffix(framing: SpriteFraming | undefined): string {
+	const f = framing ?? DEFAULT_SPRITE_FRAMING;
+	return f === 'square'
+		? `${SPRITE_FRAMING_SHOT[f]}${PROP_TAIL}${STYLE_TAIL}${KEY_BACKGROUND}`
+		: humanSuffix(f);
+}
+
+/**
+ * 差分后缀：身份锁 + 景别（+ 非人的留白）+ 画风。
+ *
+ * 差分也要点明景别：垫图（neutral 定妆照）是全身时，模型很容易照着垫图把一条半身差分
+ * 也画成全身。
+ */
+function identitySuffix(framing: SpriteFraming | undefined): string {
+	const f = framing ?? DEFAULT_SPRITE_FRAMING;
+	const lead = f === 'square' ? PROP_IDENTITY : HUMAN_IDENTITY;
+	return `${lead} ${SPRITE_FRAMING_SHOT[f]}. ${f === 'square' ? `${PROP_TAIL}. ` : ''}${IDENTITY_TAIL}`;
 }
 
 /** 草稿里要记下的那点「身份」（入库时按它落位）。 */
@@ -676,11 +920,9 @@ function mimeOf(path: string): string {
 	return 'application/octet-stream';
 }
 
-/** 从字节头部认 mime（草稿落盘用；后端给的 mimeType 可能缺失）。 */
+/** 从字节头部认 mime（草稿落盘用；后端给的 mimeType 可能缺失，认不出就当 JPEG）。 */
 function mimeOfBuffer(data: Buffer): string {
-	if (data.length > 8 && data.readUInt32BE(0) === 0x89504e47) return 'image/png';
-	if (data.length > 12 && data.subarray(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
-	return 'image/jpeg';
+	return sniffImageMime(data) ?? 'image/jpeg';
 }
 
 async function readJson<T>(file: string, fallback: T): Promise<T> {

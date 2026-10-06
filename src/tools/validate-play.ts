@@ -10,8 +10,8 @@
  */
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
-import { readPlayReadiness, renderReadiness } from '../../readiness';
-import type { PlayContext } from '../../tools/context';
+import { readPlayReadiness, renderReadiness } from '../readiness';
+import type { PlayContext } from './context';
 
 const DESCRIPTION = [
 	'检查这座剧目：play.json 读不读得出来，还缺什么（故事前提 / 角色卡 / 立绘 / 背景图 / 素材清单）。',

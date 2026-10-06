@@ -56,4 +56,22 @@ voice: <音色 id>
 \`sprite\` 是立绘目录名（缺省与 id 同名），\`voice\` 是音色 id（没有音色就整行不写）。
 名字里有冒号、井号或以连字符开头时加引号（\`name: "小樱: 二代目"\`）——直接写会被 YAML 当成别的意思。
 **玩家扮演的主角固定用 id \`protagonist\`**（\`characters/protagonist.md\`）：人设要留出让玩家代入的余地，
-别把他的性格写死。`;
+别把他的性格写死。
+
+## 素材与描述表 assets/
+
+素材按类目放，**路径的每一段都是剧本里引用的名字**：
+
+- \`assets/backgrounds/<id>.<ext>\` / \`assets/cg/<id>.<ext>\` —— \`<scene bg="id">\` / \`<cg id="id">\`；
+- \`assets/sprites/<主体id>/<差分名>.png\` —— \`<actor id="主体id" variant="差分名">\`；主体 id 就是角色卡
+  那个 id（卡上写了 \`sprite:\` 时以卡上的为准），\`neutral\` 是这套差分的身份基准；
+- \`assets/bgm/<id>.<ext>\` / \`assets/sfx/<id>.<ext>\` —— \`<scene bgm="id">\` / \`<sfx src="id">\`。
+
+\`assets/manifest.json\` 是**描述表**，键是素材 id、值是它的说明（\`title\` / \`description\` / \`tags\` /
+\`mood\` / \`scene\` / \`framing\` / \`stature\`）。**要挑素材就 \`read\` 它**——文件名看不出画面，
+描述才看得出（这也是全剧目唯一一处「有什么素材、各自画的是什么」的清单）。立绘多一层：
+整个主体共用的字段（\`framing\` / \`stature\` / \`title\`）挂在**主体 id** 上，
+某一条差分的取景与主体不同时才另写一条 \`<主体id>/<差分名>\`。
+
+\`description\` / \`tags\` / \`mood\` / \`scene\` 可以手写（新素材补一句适用场景就是写它）；
+\`framing\` / \`stature\` 决定画幅与台上站位，交给出图工具写，别手改。`;

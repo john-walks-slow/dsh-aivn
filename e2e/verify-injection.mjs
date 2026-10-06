@@ -118,7 +118,7 @@ try {
 	check('A11', !prompt.includes('不在这份提示词里'), '已经删掉阶段 1 那句「得你自己去读」');
 	// 工具面跟着角色走：剧作家有收束口与校验口，没有搭台助手那一套；
 	// 「只写一个文件」的工具一律没有——play.json / craft 段 / 状态文件都是文件工具写的。
-	check('A12', tools.includes('list_assets') && !tools.includes('list_library'), '素材清单叫 list_assets（旧名不在）');
+	check('A12', !tools.includes('list_assets') && !tools.includes('list_library'), '素材清单不进工具面（旧名也不在）');
 	check(
 		'A13',
 		tools.includes('beat_done') && tools.includes('validate_play') && !tools.includes('set_stage_style'),

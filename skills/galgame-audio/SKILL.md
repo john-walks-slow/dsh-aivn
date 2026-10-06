@@ -112,7 +112,7 @@ HowWorks Music 约 275 首。**AI 生成曲上架 Steam 需做 AI 内容披露�
 
 工具配了音乐后端才注册；它**同步等待**（一首约 175 秒的曲子实测 84 秒），所以先想清楚再调。
 
-- **一类场景一首**：别为同一情绪反复出；出之前先 `list_assets` 看 `bgm` 类目里已有什么。
+- **一类场景一首**：别为同一情绪反复出；出之前先读 `assets/manifest.json` 看 `bgm` 里已有什么。
 - **上游固定给约 176 秒、没有时长参数**：要它适合循环就在 prompt 里写 `seamless loop, no fade out`——循环意图只能靠提示词表达。
 - **prompt 写清四件事**：情绪（quiet / tense / bittersweet）、乐器（piano / strings / synth）、节奏（slow / mid-tempo）、用途（rainy afternoon scene）。
 - **落库后补一句适用场景**（素材表的描述）——剧作家挑曲子看的就是它，文件名看不出来。

@@ -18,7 +18,7 @@ const DESCRIPTION = [
 	'**这一步会等**（一首约 175 秒的曲子实测要 84 秒左右），所以想清楚再调：一首曲子只该配一类场景。',
 	'`prompt` 写英文，说清情绪、乐器、节奏与用途（如「quiet piano, rainy afternoon, slow, loopable」）。',
 	'上游**固定给约 176 秒、没有时长参数**：要它适合循环就在 prompt 里写 seamless loop、no fade out。',
-	'别为同一类场景反复出：先 `list_assets` 看 `bgm` 类目里已有什么，mood 对得上就用已有的。',
+	'别为同一类场景反复出：先 read `assets/manifest.json` 看 `bgm` 里已有什么，mood 对得上就用已有的。',
 	'落库时会补一条素材表记录（`source: AI 生成`）；描述（`description`）留给用户或你自己按剧情补。',
 ].join('\n');
 

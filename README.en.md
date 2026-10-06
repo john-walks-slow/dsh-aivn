@@ -158,7 +158,8 @@ The remaining fields (all optional):
 | `initialState` / `initialScene` | The play's starting state and starting scene |
 | `scriptLanguage` | Script language (ISO 639-1). Defaults to following whatever language the player speaks |
 | `voiceLanguage` / `defaultVoiceId` / `cover` | Voice and cover: they belong to the AIVN app; this plugin doesn't read them yet |
-| `image` / `agents` | Image generation and agent runtime settings: they belong to the AIVN app; this plugin doesn't read them yet |
+| `image` | `{"model": "…", "size": "2K"}`: **this play's own image model and size tier**, overriding the deployment settings (each field overrides only itself; leave it out to follow the deployment). One play may want 2K sprites for cutout while another is fine with 1K CGs |
+| `agents` | Agent runtime settings: they belong to the AIVN app; this plugin doesn't read them yet |
 
 ### characters/&lt;id&gt;.md
 
@@ -307,15 +308,16 @@ file it just wrote on the next beat.
 
 ## Agent tools
 
-Tools are installed and removed with the preset. `list_assets` and `validate_play` are on both;
-**no tool exists whose only job is writing a file** — `play.json`, its `craft` section and
-`memory/always/state/` are written with the file tools, and the prompts say what shape they take
-(see "Starting a new play" above);
-the rest are role-specific:
+Tools are installed and removed with the preset. `validate_play` is on both; the rest are
+role-specific. **No tool exists for anything the file tools already do** — `play.json`, its `craft`
+section and `memory/always/state/` are written with the file tools, and the prompts say what shape
+they take (see "Starting a new play" above). "What assets does this play have" is the same story:
+the playwright gets the asset list and cast table injected into its A-section every beat (id +
+description), and the stage-hand assistant reads the file listing in "Current state" and
+`assets/manifest.json` when it wants descriptions.
 
 | Tool | Who has it | What it does |
 | --- | --- | --- |
-| `list_assets` | both presets | Lists **this play's** assets (`assets/` + `manifest.json`, plus character cards in `characters/`), filterable by kind and keyword. There is **no cross-play asset library** — this is the whole inventory |
 | `beat_done` | playwright | Hands over this beat's stop point: pass `options` for an option panel, `placeholder` for a free-text input, neither for no stop point this beat. Calling it means "this beat ends here" |
 | `validate_play` | both presets | Play self-check: whether `play.json` can be read (with the reason when a field is missing or the JSON is broken), whether `craft` holds values the engine does not recognise, whether the state files are sound, story premise, character card count, sprites, backgrounds, asset count. Call it right after writing play files. **No hard gate** — you can start with anything missing |
 | `list_voices` | stage-hand assistant (needs `tts.keys`) | Searches the Fish voice catalog: builds a window from language / tags / title keywords, filters `gender` locally, sorts by likes and shows the top 25. The id you pick goes into the card's `voice` |
@@ -376,8 +378,11 @@ candidates and let the user pick" only works if the user can actually see them.
 
 - **`framing`** decides the generated aspect ratio and the on-stage placement: `full` 9:16 /
   `half` 3:4 / `square` 1:1. Use `full` or `half` for people, `square` for non-human subjects
-  (cats, props) — "full body" / "half body" are human-shaped words. Keep one tier per subject; the
-  declaration lives under the `<spriteId>` key of `assets/manifest.json`.
+  (cats, props) — "full body" / "half body" are human-shaped words. Keep one tier per subject: the
+  declaration lives under the `<spriteId>` key of `assets/manifest.json` (the level shared by the
+  whole subject); when one variant differs, write a second `<spriteId>/<variant>` entry. The
+  subject-level framing **follows the `neutral` take** — it is the reference every variant is
+  derived from, and one closeup must not drag the whole subject's placement around.
 - **`stature`** (`small` / `normal` / `large` / `huge`) is only about how big the subject stands on
   stage, independent of framing: a mech is "full framing + huge", a cat is "square framing + small".
 - **Cutout is automatic**: every sprite runs through a chroma-key cutout (`src/media/cutout.ts`:
@@ -406,6 +411,26 @@ sprite automatically gets that subject's committed `neutral` as its reference (p
 cannot lock a face). So the order per subject is: generate the neutral, commit one, then derive the
 other variants. And no format but `gemini` can reach 2K — cutout jaggies are only softened by
 resolution, so use `gemini` for high-quality sprites.
+
+`references` accepts three forms: a **subject id** (uses that subject's committed `neutral`), a
+**play-relative path**, or an **http(s) URL** (downloaded into memory, never to disk: private,
+loopback and cloud-metadata addresses are refused, every redirect hop is re-checked, 20 MB cap).
+When a background or CG references several subjects the engine writes "which one is which, in this
+exact order" into the prompt — the images themselves have no names, and without the roster a
+multi-character CG quietly draws the wrong person: no error, a good-looking picture, just the
+wrong face.
+
+Two more automatic behaviours on the playwright path:
+
+- **Existing same-named assets are skipped**: the receipt says "already there" and gives the tag to
+  reference it, so nothing is overwritten and no quota is burned;
+- **a missing `neutral` is generated on the way** when a variant is requested (once per concurrent
+  batch, and it is reported in the receipt). But if the subject **already has other variants** and
+  only lacks the `neutral`, it errors out and asks you to look first — the new face and the existing
+  variants would not be the same person, and that is a silent face swap mid-play.
+
+**Per-play model and size** live in `play.json`'s `image` section (`{"model": "…", "size": "2K"}`);
+leave them out to follow the deployment settings. The override applies to both roles.
 
 ## Slash command
 
@@ -552,8 +577,8 @@ Suites:
 - `injection` (`dsh-e2e run e2e/verify-injection.mjs`) — the playwright's context injection: reads
   the session log to assert that all six A-section blocks plus [State] made it into the system
   prompt, that their content comes from the fixture files rather than "go read it yourself", and
-  checks the tool surface (the prep tools belong to the stage-hand assistant, the asset list is
-  called `list_assets`).
+  checks the tool surface (the prep tools belong to the stage-hand assistant; the asset list is
+  not a tool at all — it is injected).
 - `stagehand` (`npm run e2e:stagehand`) — the stage-hand assistant: asserts the persona chapters,
   the "Current state" injection (file listing + readiness), that both bundled skills appear in the
   skill catalog, and that the tool surface is the stage-hand set (with none of the playwright's

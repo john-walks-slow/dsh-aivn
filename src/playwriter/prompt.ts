@@ -8,7 +8,7 @@
  * 写作参数、记忆索引、世界状态。凡提示词里提到「自己去看」的地方，指的都是这些注入段，
  * 不是某个工具。
  *
- * 本阶段剧作家装得上的工具：`list_assets`、`validate_play`、`beat_done`，加上 DSH 的文件工具
+ * 本阶段剧作家装得上的工具：`validate_play`、`beat_done`，加上 DSH 的文件工具（素材靠 A 区注入的清单看）
  * （read / write / edit / glob / grep）。**提示词里出现的工具名不出这个集合**——
  * `set_stage_style` / `list_voices` / `web_search` 归搭台助手，`generate_image` / `import_asset` / 技能库 /
  * 限制级通道 / 记忆详情与归档检索都还没实现，对应的整章一律删掉，不留悬空承诺。
@@ -50,6 +50,7 @@ const FORMAT_RULES = `# 剧本格式（Stage DSL，必须严格遵守）
 ## 场景与立绘指令（必须出现在对应台词之前）
 
 <scene bg="背景id" bgm="音乐id" bgm_volume="0.4" ambient="环境音id" ambient_volume="0.3" transition="fade"/>
+<scene bg="新背景id" clear/>（开新场：换地方 / 时间跳了 / 阵容大换，台上的人全下，后面把本场在的人用 actor 重铺一遍；同屋换个时间不带）
 <actor id="主体id" variant="差分id" shot="景别" action="行为词" leave="退场"/>
 <sfx src="音效id" volume="0.5"/>
 <cg id="cgid" caption="插图说明"/>
@@ -64,7 +65,7 @@ const FORMAT_RULES = `# 剧本格式（Stage DSL，必须严格遵守）
 | variant | 立绘目录里已有的差分 id | 换表情、换状态。机甲受损、猫炸毛与人的笑同样是它 |
 | shot | wide normal close extreme | 镜头远近。**不给就是全身**，用近景只是把镜头推近 |
 | action | 见下表 | 角色的一个反应动作，演一次就结束 |
-| leave | fade | 让这个人退场 |
+| leave | fade | 这一场里这个人先走一步（开新场用 scene 的 clear 一次清，不用逐个 leave） |
 
 **台上的一切同权**：人、机甲、猫、道具都按同一个 id 寻址，换图一律走 \`variant\`——没有「人的 expression」
 与「非人的 state」之分（这两个旧属性名引擎照读，但新写的剧本一律用 variant）。人的笑、机甲的 damaged、
@@ -240,10 +241,12 @@ const IMAGE_CHAPTER = `# 缺图怎么办（generate_image）
 剧目里没有你要的背景 / 插图 / 立绘时，用 \`generate_image\` 当场要一张。它**同步等图**
 （70–140 秒，这一轮就停在那里），出图即入库，回执给最终路径——**回执回来之后**那一行剧本才引用得到它。
 
-- **先 \`list_assets\` 看一眼**：已有同名或有现成的同类素材时不要重出（出图会覆盖同名文件）。
+- **先看 A 区的《素材清单》与《角色表》**：已有同名或有现成的同类素材时不要重出——同名时引擎会直接跳过并告诉你（它不覆盖旧图）。
 - **一轮的预算是 240 秒，一次出图占掉一半以上**：只为这一轮真的要引用的东西出图，别为「以后可能用得上」出。
-- 立绘按 \`spriteId\`（主体 id）+ \`variant\` 出；非 neutral 的差分自动垫该主体的 neutral 定妆照，
-  所以那个主体得先有 neutral。人物用 framing=full 或 half，猫与道具用 square。
+- 立绘按 \`spriteId\`（主体 id）+ \`variant\` 出；非 neutral 的差分自动垫该主体的 neutral 定妆照。
+  那个主体**一张立绘都还没有**时，引擎会先自动补一张 neutral 再出这张差分——回执里两张都给你，
+  记得两张都跟用户交代；但它**已经有别的差分、只缺 neutral** 时会被拒绝（那套差分是拿别的脸锚定的，
+  先单独要一张 neutral 让用户过目）。人物用 framing=full 或 half，猫与道具用 square。
 - 出图期间这一轮是停着的、玩家看到的是等待——不要一轮里连出好几张。
 - 抠底是自动的；用户说边上脏、发丝被啃，让搭台助手用 \`recut_sprite\` 重抠（画面不变），你别重新出图。`;
 

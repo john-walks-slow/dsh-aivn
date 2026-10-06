@@ -8,8 +8,8 @@
 | --- | --- |
 | `src/` | 宿主半边（Cordis 插件）：中枢、DSL 管线、路由、剧目脚手架、追收束 |
 | `src/play-context.ts` | A 区注入：把前提 / 角色表 / 素材清单 / 写作参数 / 记忆索引 / 状态区挂进系统提示词 |
-| `src/playwriter/` | 剧作家预设、提示词与它专属的五个工具 |
-| `src/tools/` | 两个预设共用的工具（`list_assets`） |
+| `src/playwriter/` | 剧作家预设、提示词与它专属的工具（`beat_done`，配了生图另有同步的 `generate_image`） |
+| `src/tools/` | 两个预设共用的工具与工具上下文（`validate_play` / `PlayContext`） |
 | `src/play-files.ts` | 《剧目文件》那一章：目录布局与 `play.json` / 角色卡的字段，**两个预设共用同一段文本**（写文件就是建剧目，没有「起剧目」工具） |
 | `src/client/` | 浏览器半边（React），挂在 `conversation.view` 槽 |
 | `lib/` | **跟踪的构建产物**（`lib/index.js` / `lib/client.js`）——DSH 直接加载它 |
@@ -60,7 +60,8 @@ dsh-e2e stop
 - **必须先 `dsh-e2e start`**：`dsh-e2e run` 自己不起实例，实例不在时套件会以
   `missing DSH_E2E_PORT` 直接失败。
 - **改过 `lib/` 之后要 `dsh-e2e stop` 再 `start`**，否则跑的还是旧模块。
-- 套件有三个，都在 `e2e/run.mjs` 的 `MODULES` 里：`stage`（演出闭环，`verify-stage.mjs`）、
+- 套件分组都在 `e2e/run.mjs` 的 `MODULES` 里（`dsh-e2e run e2e/run.mjs --list` 看全），例如
+  `stage`（演出闭环，`verify-stage.mjs` + `verify-opening.mjs`）、
   `injection`（A 区注入，`verify-injection.mjs`，从**会话日志**取系统提示词断言——日志是多帧 zstd，
   用 `zstd -dc` 解）、`voice`（台词语音，`verify-voice.mjs`，真打 Fish Audio，跑之前要 export
   `DSH_AIVN_TTS_KEYS`；它在页面里给 `AudioContext` / `decodeAudioData` / `AudioBufferSourceNode.start`

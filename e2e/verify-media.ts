@@ -10,11 +10,13 @@
  * 桩回来的是**真实字节**，走的是与真后端完全相同的落盘路径。
  */
 import { existsSync, rmSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
+import { SPRITE_FRAMING_SHOT } from '@aivn/core';
 import { PlayAssets } from '../src/media/assets';
+import { cutout } from '../src/media/cutout';
 import { playwriterTail } from '../src/playwriter/prompt';
 import { stagehandPrompt } from '../src/stagehand/prompt';
 import type { GeneratedImage, ImageBackend, ImageRequest } from '../src/media/image';
@@ -48,14 +50,28 @@ async function landscape(width = 1920, height = 1080): Promise<Buffer> {
 		.toBuffer();
 }
 
+/** 桩后端收到的每一次请求（验提示词后缀、模型与档位覆盖、补定妆照都用它）。 */
+const seen: ImageRequest[] = [];
+
 /** 桩后端：按请求的画幅给一张真图（sprite 给纯绿底人形，其它给横构图）。 */
 function stubImage(): ImageBackend {
 	return {
 		async generate(req: ImageRequest): Promise<GeneratedImage> {
-			if (req.aspectRatio === '9:16') return { data: await keyedSprite(), mimeType: 'image/png' };
+			seen.push(req);
+			// 立绘三档画幅各给一张真尺寸的绿底人形（画幅自校验会按字节里的真实尺寸对账）
+			if (req.aspectRatio === '9:16') return { data: await keyedSprite(1080, 1920), mimeType: 'image/png' };
+			if (req.aspectRatio === '3:4') return { data: await keyedSprite(1440, 1920), mimeType: 'image/png' };
+			if (req.aspectRatio === '1:1') return { data: await keyedSprite(1080, 1080), mimeType: 'image/png' };
 			return { data: await landscape(), mimeType: 'image/png' };
 		},
 	};
+}
+
+/** 跑一次出图，拿回这一趟真正发给后端的提示词（多条时给最后一条）。 */
+async function promptOf(run: () => Promise<unknown>): Promise<string> {
+	const before = seen.length;
+	await run();
+	return seen.at(-1)?.prompt ?? '';
 }
 
 /** 桩后端：一段可辨认的假 M4A（只验落盘与扩展名，不验可播性）。 */
@@ -235,6 +251,321 @@ try {
 	escape = error instanceof Error ? error.message : String(error);
 }
 check('M23', escape.includes('越界'), `垫图路径越界被拒（${escape.slice(0, 40)}…）`);
+
+
+/* ── 11. 立绘提示词后缀：四段（景别 / 身份锁 / 非人留白 / 头顶留白）── */
+
+const neutralPrompt = seen.find((req) => req.prompt.includes('silver hair'))?.prompt ?? '';
+check(
+	'M24',
+	neutralPrompt.includes(SPRITE_FRAMING_SHOT.full) &&
+		neutralPrompt.includes('space above the head') &&
+		neutralPrompt.includes('#00FF00') &&
+		neutralPrompt.includes('NOT a 3D render'),
+	'定妆照后缀带景别措辞 / 头顶留白 / 色键底',
+);
+check(
+	'M25',
+	!neutralPrompt.includes('Change only the facial expression'),
+	'定妆照不写差分那套身份锁（「只改表情」对着定妆照是自相矛盾的）',
+);
+
+const propPrompt = await promptOf(() =>
+	assets.draft({ kind: 'sprite', spriteId: 'probe_cat', framing: 'square' }, 'a calico cat sitting'),
+);
+check(
+	'M26',
+	propPrompt.includes(SPRITE_FRAMING_SHOT.square) &&
+		propPrompt.includes('nothing cropped by the frame edges') &&
+		!propPrompt.includes('narrow sliver'),
+	'非人主体（square）走「完整入画 + 四周留白」，不套人形的手臂留白',
+);
+
+const variantPrompt = await promptOf(() =>
+	assets.draft({ kind: 'sprite', spriteId: 'probe_girl', variant: 'smile' }, 'a gentle smile'),
+);
+check(
+	'M27',
+	variantPrompt.includes('Same character as the reference image') &&
+		variantPrompt.includes('Change only the facial expression') &&
+		variantPrompt.includes(SPRITE_FRAMING_SHOT.full) &&
+		variantPrompt.includes('Same 2D flat cel-shaded anime illustration style'),
+	'差分带身份锁 + 景别 + 与定妆照一字不差的画风要求',
+);
+
+/* ── 12. 垫图的编号锚点（多人同框时「第几张是谁」）── */
+
+await mkdir(join(dir, 'characters'), { recursive: true });
+await writeFile(join(dir, 'characters', 'lead.md'), '---\nname: 七濑\nsprite: lead\n---\n\n十七岁，话少。\n');
+await mkdir(join(dir, 'assets', 'sprites', 'lead'), { recursive: true });
+await writeFile(join(dir, 'assets', 'sprites', 'lead', 'neutral.png'), await readFile(spriteAsset.absPath));
+
+const cgPrompt = await promptOf(() =>
+	assets.draft({ kind: 'cg', name: 'two_shot', references: ['lead'] }, 'a quiet rooftop at night'),
+);
+check('M28', cgPrompt.includes('in this exact order: 1) 七濑'), 'CG 垫主体 id 时把角色**名字**写进编号锚点');
+
+const pathPrompt = await promptOf(() =>
+	assets.draft(
+		{ kind: 'cg', name: 'path_probe', references: ['assets/backgrounds/rooftop_dusk.png'] },
+		'a quiet rooftop at night',
+	),
+);
+check(
+	'M29',
+	pathPrompt.includes('Follow the attached reference image(s)') && !pathPrompt.includes('in this exact order'),
+	'垫的是没有名字的路径时退回通用措辞，不瞎编号',
+);
+
+/* ── 13. 剧作家路径：缺定妆照自动补 + 已有同名跳过 ── */
+
+const auto = await assets.generate({ kind: 'sprite', spriteId: 'late_bloom', variant: 'angry' }, 'a girl shouting');
+check(
+	'M30',
+	auto.autoNeutral?.path === 'assets/sprites/late_bloom/neutral.png' &&
+		existsSync(join(dir, 'assets', 'sprites', 'late_bloom', 'neutral.png')),
+	'缺定妆照时先自动补一张 neutral（回执里带上它）',
+);
+check(
+	'M31',
+	existsSync(join(dir, 'assets', 'sprites', 'late_bloom', 'angry.png')) &&
+		(await readFile(join(dir, 'assets', 'generated.json'), 'utf8')).includes('a calm neutral-expression portrait'),
+	'差分照常派生，补出来的那张走的是中性前置描述',
+);
+
+await mkdir(join(dir, 'assets', 'sprites', 'stranded'), { recursive: true });
+await writeFile(join(dir, 'assets', 'sprites', 'stranded', 'angry.png'), await readFile(spriteAsset.absPath));
+let stranded = '';
+try {
+	await assets.generate({ kind: 'sprite', spriteId: 'stranded', variant: 'sad' }, 'a sad face');
+} catch (error) {
+	stranded = error instanceof Error ? error.message : String(error);
+}
+check('M32', stranded.includes('静默换脸'), '已有别的差分却不缺 neutral 时拒绝自动补（防静默换脸）');
+
+check(
+	'M33',
+	(await assets.exists({ kind: 'background', name: 'rooftop_dusk' })) &&
+		(await assets.exists({ kind: 'sprite', spriteId: 'probe_girl', variant: 'neutral' })) &&
+		!(await assets.exists({ kind: 'background', name: 'never_made' })),
+	'exists() 认得已有素材与不存在的素材（剧作家出图前的守卫）',
+);
+
+/* ── 14. 逐剧目出图设置：play.json 的 image 段 ── */
+
+await writeFile(
+	join(dir, 'play.json'),
+	`${JSON.stringify({ id: 'probe_media', title: '素材探针', image: { model: 'play-model-x', size: '4K' } }, null, 2)}\n`,
+);
+await assets.draft({ kind: 'background', name: 'override_probe' }, 'a room');
+const overrideReq = seen.at(-1);
+check(
+	'M34',
+	overrideReq?.model === 'play-model-x' && overrideReq?.size === '4K',
+	'play.json 的 image 段覆盖部署级的模型与档位',
+);
+await assets.draft({ kind: 'background', name: 'explicit_probe', model: 'explicit-model' }, 'a room');
+check('M35', seen.at(-1)?.model === 'explicit-model', '调用方显式给的模型盖过 play.json');
+
+/* ── 15. 垫图网址：内网地址挡死（SSRF）── */
+
+let ssrf = '';
+try {
+	await assets.draft({ kind: 'background', name: 'ssrf_probe', references: ['http://127.0.0.1:9/ref.png'] }, 'nope');
+} catch (error) {
+	ssrf = error instanceof Error ? error.message : String(error);
+}
+check('M36', ssrf.includes('内网'), `垫图网址拒绝内网地址（${ssrf.slice(0, 40)}…）`);
+
+/* ── 16. 抠底回归（照 AIVN `apps/server/test/cutout.test.ts` 的四条）── */
+
+/** 读某点的 alpha。 */
+async function alphaAt(data: Buffer, x: number, y: number): Promise<number> {
+	const { data: raw, info } = await sharp(data).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+	return raw[(y * info.width + x) * info.channels + 3] ?? 0;
+}
+
+/**
+ * 色键夹具：纯白底 + 深色人形，人形里埋四块「离底色不同远近」的封闭口袋。
+ * 四个都贴不到画面边——纯色键不看连通性，贴不贴边不改变任何事：
+ * A 离底色 4 格、B 20 格、C 42 格、D 60 格（走 PNG，JPEG 的色振铃会把摆好的色差搅没）。
+ */
+async function keyedPockets(): Promise<Buffer> {
+	const width = 200;
+	const height = 300;
+	const raw = Buffer.alloc(width * height * 3).fill(255);
+	const paint = (x0: number, y0: number, x1: number, y1: number, c: [number, number, number]): void => {
+		for (let y = y0; y <= y1; y++) {
+			for (let x = x0; x <= x1; x++) {
+				const o = (y * width + x) * 3;
+				raw[o] = c[0];
+				raw[o + 1] = c[1];
+				raw[o + 2] = c[2];
+			}
+		}
+	};
+	paint(40, 20, 160, 280, [40, 50, 80]);
+	paint(60, 40, 99, 79, [251, 251, 252]);
+	paint(100, 40, 139, 79, [235, 235, 237]);
+	paint(60, 100, 99, 139, [213, 213, 216]);
+	paint(100, 100, 139, 139, [195, 195, 197]);
+	return sharp(raw, { raw: { width, height, channels: 3 } }).png().toBuffer();
+}
+
+/** 人物内部被抠穿的像素数（落在不透明外框之内的全透明像素）。量容差效应时不依赖坐标换算。 */
+async function interiorHoles(data: Buffer): Promise<number> {
+	const { data: raw, info } = await sharp(data).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+	const alpha = (x: number, y: number): number => raw[(y * info.width + x) * info.channels + 3] ?? 0;
+	let minX = info.width;
+	let maxX = -1;
+	let minY = info.height;
+	let maxY = -1;
+	for (let y = 0; y < info.height; y++) {
+		for (let x = 0; x < info.width; x++) {
+			if (alpha(x, y) > 0) {
+				if (x < minX) minX = x;
+				if (x > maxX) maxX = x;
+				if (y < minY) minY = y;
+				if (y > maxY) maxY = y;
+			}
+		}
+	}
+	let holes = 0;
+	for (let y = minY; y <= maxY; y++) {
+		for (let x = minX; x <= maxX; x++) if (alpha(x, y) === 0) holes++;
+	}
+	return holes;
+}
+
+/** 容差用例的夹具是刻意干净的 PNG，而 `keySmooth` 是给 JPEG 环纹用的降噪前置：只问色键本身时关掉它。 */
+const NO_SMOOTH = { keySmooth: 0 } as const;
+
+// 与底色同色的封闭块照抠不误——「别撞色」是出图那一步的责任
+{
+	const width = 200;
+	const height = 300;
+	const raw = Buffer.alloc(width * height * 3).fill(255);
+	const paint = (x0: number, y0: number, x1: number, y1: number, c: number): void => {
+		for (let y = y0; y <= y1; y++) {
+			for (let x = x0; x <= x1; x++) {
+				const o = (y * width + x) * 3;
+				raw[o] = c;
+				raw[o + 1] = c;
+				raw[o + 2] = c;
+			}
+		}
+	};
+	paint(40, 20, 160, 280, 40); // 人形
+	paint(80, 130, 120, 190, 255); // 白袜子：与底色逐位同色、封闭
+	const data = await sharp(raw, { raw: { width, height, channels: 3 } }).png().toBuffer();
+
+	// 白袜子中心 (100,160) 映射到输出画布（人物外框 + 等比缩放 + 底部居中）
+	const box = { x0: 39, y0: 19, x1: 161, y1: 281 };
+	const w = box.x1 - box.x0 + 1;
+	const h = box.y1 - box.y0 + 1;
+	const scale = Math.min(1080 / w, 1920 / h);
+	const left = Math.round((1080 - Math.round(w * scale)) / 2);
+	const top = 1920 - Math.round(h * scale);
+	const x = left + Math.round((100 - box.x0) * scale);
+	const y = top + Math.round((160 - box.y0) * scale);
+
+	const result = await cutout(data, { ...NO_SMOOTH });
+	check(
+		'M37',
+		(await alphaAt(result.data, x, y)) === 0 && (await alphaAt(result.data, left + Math.round(2 * scale), y)) === 255,
+		'与底色同色的封闭块被抠穿（纯色键不分内外），人形自己没被连坐',
+	);
+}
+
+// tolerance 是唯一旋钮：多远的像素算底色全由它定
+{
+	const data = await keyedPockets();
+	const tight = await interiorHoles((await cutout(data, { tolerance: 8, ...NO_SMOOTH })).data);
+	const loose = await interiorHoles((await cutout(data, { tolerance: 48, ...NO_SMOOTH })).data);
+	const widest = await interiorHoles((await cutout(data, { tolerance: 64, ...NO_SMOOTH })).data);
+	check(
+		'M38',
+		loose - tight > 2000 && widest - loose > 1000,
+		`容差是唯一旋钮（紧档抠穿 ${tight}px，中档 ${loose}px，松档 ${widest}px）`,
+	);
+}
+
+// 边界带的 alpha 是反解出来的真实覆盖率，不是钉死的 128 地板
+{
+	const width = 400;
+	const height = 2120;
+	const raw = Buffer.alloc(width * height * 3).fill(255);
+	const bands: { y: number; coverage: number; value: number }[] = [
+		{ y: 200, coverage: 0.2, value: 212 },
+		{ y: 800, coverage: 0.5, value: 148 },
+		{ y: 1400, coverage: 0.8, value: 83 },
+	];
+	for (let y = 100; y < 2020; y++) {
+		for (let x = 100; x < 300; x++) {
+			const o = (y * width + x) * 3;
+			const v = x === 100 ? (bands.find((b) => y >= b.y && y < b.y + 500)?.value ?? 40) : 40;
+			raw[o] = v;
+			raw[o + 1] = v;
+			raw[o + 2] = v;
+		}
+	}
+	const result = await cutout(await sharp(raw, { raw: { width, height, channels: 3 } }).png().toBuffer());
+
+	// scale 恒等于 1，人形 200 宽居中落在 1080 画布的 x 440..639，底对齐
+	const left = Math.round((1080 - 200) / 2);
+	const measured: number[] = [];
+	let ok = true;
+	for (const band of bands) {
+		const edge = await alphaAt(result.data, left, band.y);
+		measured.push(edge);
+		ok = ok && Math.abs(edge - Math.round(255 * band.coverage)) <= 2 && edge < 255;
+		ok = ok && (await alphaAt(result.data, left + 1, band.y)) === 255;
+		ok = ok && (await alphaAt(result.data, left - 1, band.y)) === 0;
+	}
+	check(
+		'M39',
+		ok && new Set(measured).size === 3,
+		`边界 alpha 是真覆盖率而不是 128 地板（三档实测 ${measured.join(' / ')}）`,
+	);
+}
+
+// 色键底（绿底）+ 亮色前景：覆盖率与反解出来的边缘色都对（分母必须带符号）
+{
+	const width = 400;
+	const height = 2120;
+	const BG: [number, number, number] = [0, 255, 0];
+	const SKIN: [number, number, number] = [245, 215, 190];
+	const blend = SKIN.map((v, c) => Math.round(0.5 * v + 0.5 * BG[c]!));
+	const raw = Buffer.alloc(width * height * 3);
+	for (let y = 0; y < height; y++) {
+		for (let x = 0; x < width; x++) {
+			const o = (y * width + x) * 3;
+			const inside = x >= 101 && x < 300 && y >= 100 && y < 2020;
+			// 那条半覆盖列只画在人形里，别一路画到画布上下缘——否则外框会被它撑成整张图高
+			const c = x === 100 && y >= 100 && y < 2020 ? blend : inside ? SKIN : BG;
+			raw[o] = c[0]!;
+			raw[o + 1] = c[1]!;
+			raw[o + 2] = c[2]!;
+		}
+	}
+	const result = await cutout(await sharp(raw, { raw: { width, height, channels: 3 } }).png().toBuffer());
+	const { data, info } = await sharp(result.data).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+	const at = (x: number, y: number): number[] => {
+		const o = (y * info.width + x) * info.channels;
+		return [data[o]!, data[o + 1]!, data[o + 2]!, data[o + 3]!];
+	};
+	// 与「反解覆盖率」那条用例同一套尺寸换算：200 宽的人形居中落在 1080 画布的 x 440
+	const left = Math.round((1080 - 200) / 2);
+	const edge = at(left, 600);
+	const solid = at(left + 20, 600);
+	const blendOk = Math.abs(edge[3]! - 128) <= 6 && [0, 1, 2].every((c) => Math.abs(edge[c]! - SKIN[c]!) <= 12);
+	const solidOk = solid[3] === 255 && [0, 1, 2].every((c) => Math.abs(solid[c]! - SKIN[c]!) <= 4);
+	check(
+		'M40',
+		blendOk && solidOk && at(left - 3, 600)[3] === 0,
+		`绿底 + 亮色前景：半覆盖像素反解回前景色且不残留底色（边缘 ${edge[3]}，实心 ${solid[3]}）`,
+	);
+}
 
 await rm(dir, { recursive: true, force: true });
 const passed = results.filter((r) => r.ok).length;

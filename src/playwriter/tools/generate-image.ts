@@ -9,7 +9,7 @@
  * 模型拿到它就能在紧接着的剧本里引用一个**确实存在**的素材 id。
  */
 import { defineTool } from '@deepseek-ai/dsh-tools';
-import { playAssetsOf } from '../../media/assets';
+import { playAssetsOf, type AssetTarget } from '../../media/assets';
 import type { MediaBackends } from '../../media/backends';
 import {
 	generatedResult,
@@ -28,7 +28,7 @@ const DESCRIPTION = [
 	'立绘会自动抠底成透明 PNG；画幅跟着 framing 走（人物常用 full 或 half，猫与道具用 square）。',
 	'**出图即入库**：写进 `assets/` 与素材表，回执给最终路径——**这一轮就能在剧本里引用它**：',
 	'`<scene bg="id">` / `<cg id="id">` / `<actor id="spriteId" variant="…">`。',
-	'**先 `list_assets` 看一眼**：剧目里已有同名或有现成的同类素材时不要重出（出图会覆盖同名文件）。',
+	'**同名素材已经有了就直接返回、不重出**（出图会覆盖同名文件）：回执里会说「已经有了」，照常引用即可。',
 	'别为「以后可能用得上」出图：一轮的预算是 240 秒，一次出图就占掉一半以上。缺什么、这一轮真的要引用才出。',
 	'同一主体多个差分要分几次调用（每张写自己的 prompt）；它们串行等待，一轮里出不了几张，先出这一轮真要用的。',
 	PROMPT_RULES,
@@ -44,7 +44,24 @@ export function createSyncImageTool(ctx: PlayContext, media: MediaBackends) {
 		async execute(args) {
 			const { target, prompt } = toTarget(args as ImageArgs);
 			const assets = playAssetsOf(ctx.playDir(), media);
+			// 已有同名素材就跳过：出图会覆盖同名文件，模型忘了一次核对就把用户刚验收过的图顶掉，
+			// 还白烧一份配额。这里替它挡一道（提示词里那条「先看一眼」不是每次都被照做）。
+			if (await assets.exists(target)) return existingNote(target);
 			return generatedResult(await assets.generate(target, prompt));
 		},
 	});
+}
+
+/** 「已经有了，别重出」的回执：把引用它的写法一并给出，省得模型再去查。 */
+function existingNote(target: AssetTarget): string {
+	if (target.kind === 'sprite') {
+		const variant = target.variant ? ` variant="${target.variant}"` : '';
+		return (
+			`${target.spriteId} 的 ${target.variant ?? 'neutral'} 立绘剧目里已经有了，不用重出。` +
+			`直接 \`<actor id="${target.spriteId}"${variant}>\` 引用它；要另一张表情就换个 variant 再调。`
+		);
+	}
+	const label = target.kind === 'background' ? '背景' : '插图';
+	const tag = target.kind === 'background' ? `<scene bg="${target.name}">` : `<cg id="${target.name}">`;
+	return `剧目里已经有同名${label}，跳过生成，直接 ${tag} 引用 ${target.name}。`;
 }

@@ -114,6 +114,18 @@ export function extOf(mimeType: string): '.jpg' | '.png' | '.webp' {
 	return '.jpg';
 }
 
+/**
+ * 图片字节头嗅探：扩展名与 content-type 都可能骗人，认头最实。
+ * 认不出返回 null（调用方自己决定当什么——PNG 字节装进 `.jpg` 会让不嗅探的客户端裂图）。
+ */
+export function sniffImageMime(bytes: Buffer): string | null {
+	if (bytes.length > 8 && bytes.subarray(1, 4).toString('latin1') === 'PNG') return 'image/png';
+	if (bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
+	if (bytes.length > 12 && bytes.subarray(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
+	if (bytes.length > 6 && bytes.subarray(0, 6).toString('latin1').startsWith('GIF8')) return 'image/gif';
+	return null;
+}
+
 /** 从图片字节读画幅（PNG 走 IHDR、JPEG 走 SOFn 扫描、WEBP 走 VP8/VP8L 头）。认不出返回 null。 */
 export function sizeOfImage(data: Buffer): { width: number; height: number } | null {
 	if (data.length > 24 && data.readUInt32BE(0) === 0x89504e47) {

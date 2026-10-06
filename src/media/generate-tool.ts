@@ -31,6 +31,7 @@ export const IMAGE_PARAMETERS = {
 		type: 'string',
 		description:
 			'立绘的主体 id：`assets/sprites/<spriteId>/` 的目录名，也是 `<actor id>` / `<say id>` 引用的名字。' +
+			'角色卡的 `sprite:` 写了别的名字时，立绘在那个目录里（用卡上的那个名字）。' +
 			'**没有角色卡也能出**（机甲、道具、猫、只出现一轮的路人都这样）。kind=sprite 时必填。',
 	},
 	variant: {
@@ -41,10 +42,11 @@ export const IMAGE_PARAMETERS = {
 	},
 	references: {
 		type: 'array',
-		items: { type: 'string', description: '主体 id 或剧目内相对路径' },
+		items: { type: 'string', description: '主体 id、剧目内相对路径，或 http(s) 网址' },
 		description:
-			'垫图：主体 id（自动用它的中性立绘）或剧目内相对路径（如 assets/backgrounds/ref.png），最多 6 张，' +
-			'顺序就是提示词里「第一张、第二张」的顺序。**非 neutral 的立绘不用给**——身份基准恒为该主体的 neutral。',
+			'垫图：主体 id（自动用它的中性立绘）、剧目内相对路径（如 assets/backgrounds/ref.png）或 http(s) 网址' +
+			'（网上看到的参考图直接给链接），最多 6 张，顺序就是提示词里「第一张、第二张」的顺序。' +
+			'**非 neutral 的立绘不用给**——身份基准恒为该主体的 neutral。',
 	},
 	framing: {
 		type: 'string',
@@ -90,7 +92,7 @@ export const PROMPT_RULES = [
 	'  （表情、姿势、角度），别重新描述长相——重写一遍会和垫图打架。',
 	'- **姿势、机位、景别都要显式写**：只说「她站在天台上」出来是对称站立的正面像；要写清机位（平视/俯视/仰视/侧身回眸）、',
 	'  动作（坐/走/倚靠/回头）与景别（full body / medium shot / close-up）。不写景别，袜子鞋子这类细节直接出框。',
-	'- 立绘的抠底构图与画风后缀（单一纯色底、平涂、哪里要留白）由引擎自动拼在 prompt 末尾，别重复也别改写；',
+	'- 立绘的抠底构图与画风后缀（单一纯色底、平涂、哪里要留白、景别）由引擎自动拼在 prompt 末尾，别重复也别改写；',
 	'  主体配色与默认的纯绿底撞色时，才在 prompt 里点名换一个纯色底。背景与插图没有这层后缀，构图要自己写。',
 ].join('\n');
 
@@ -98,7 +100,8 @@ export const PROMPT_RULES = [
 export const REFERENCE_RULE = [
 	'**垫图**：',
 	'- 定妆照（neutral）可以垫外部参考图——用户拿一张既有角色图来定妆走的就是这条；',
-	'- CG 与背景可以垫主体 id 或剧目内路径，把要出场的角色或想要的画面垫进去；',
+	'- CG 与背景可以垫主体 id、剧目内路径或 http(s) 网址，把要出场的角色或想要的画面垫进去；',
+	'  垫角色时**按出场顺序给主体 id**（引擎会把「第几张是谁」写进提示词，多人同框才不会各画各的）；',
 	'- 非 neutral 的立绘**不要给 references**：身份基准恒为该主体已入库的 neutral（换基准会与既有差分不是同一个人）。',
 ].join('\n');
 
@@ -164,11 +167,18 @@ export function draftResult(draft: DraftedAsset): string {
 /** 剧作家：同步出图即入库，回执里给最终 id 与图片。 */
 export function generatedResult(asset: GeneratedAsset): string {
 	const label = asset.kind === 'sprite' ? '立绘' : asset.kind === 'background' ? '背景' : asset.kind === 'cg' ? '插图' : '素材';
-	return [
+	const lines = [
 		`${label}已生成并入库：\`${asset.path}\`${asset.replaced ? '（覆盖了同名旧素材）' : ''}`,
 		`![${asset.kind}](${asset.absPath})`,
 		'这一轮就能引用它。',
-	]
-		.join('\n')
-		.concat(cutoutNote(asset));
+	];
+	if (asset.autoNeutral) {
+		// 这一张是真金白银出的：不说，用户会以为只出了一张、也会奇怪台上有张没见过的脸。
+		lines.push(
+			'',
+			`另外顺手补了一张 \`${asset.autoNeutral.path}\`（这个主体此前没有定妆照，差分都以它为身份基准）。`,
+			`![neutral](${asset.autoNeutral.absPath})`,
+		);
+	}
+	return lines.join('\n').concat(cutoutNote(asset));
 }
