@@ -43,7 +43,7 @@ try {
 		() => [...document.querySelectorAll('span[title]')].some((el) => (el.textContent ?? '').trim() === '剧作家'),
 		{ timeout: 30_000, label: '会话头回显预设名' },
 	);
-	await openViewTabWhenReady(page, '舞台', 90_000);
+	await openViewTabWhenReady(page, 'AIVN', 90_000);
 
 	// 等第一句台词上屏：语音开关就在对话区右下，和台词一起才看得出关系。
 	const shown = await waitFor(
