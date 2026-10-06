@@ -7,11 +7,12 @@
 
 把 AIVN 的舞台引擎装进 DSH。
 
-一个**工作区就是一部剧目**：在里面开会话、选「剧作家」预设，对话页就多一个「舞台」tab，
+一个**工作区就是一部剧目**：在里面开会话、选「剧作家」预设，对话页就多一个「AIVN」tab
+（**只给剧作家会话**——搭台助手的会话里没有这个 tab），
 剧作家写的 Stage DSL 被实时演出来——背景、立绘、台词条、停止点选项都在这里；玩家点一条选项，
 这句话回到剧作家手上，它接着往下写。
 
-![舞台 tab：背景、立绘、台词条，右下角是语音开关与「重听这句」](screenshots/screenshot-1.png)
+![AIVN tab：背景、立绘、台词条，右下角是语音开关与「重听这句」](screenshots/screenshot-1.png)
 
 ## 装
 
@@ -37,10 +38,10 @@ dsh plugin --profile web add github:john-walks-slow/dsh-aivn
       config: {}
 ```
 
-- **客户端半边**（「舞台」tab）挂在 `conversation.view` 槽上，需要 `dsh-web-app`。它在
+- **客户端半边**（「AIVN」tab）挂在 `conversation.view` 槽上，需要 `dsh-web-app`。它在
   `package.json` 的 `dsh.client{platform:"web"}` 里声明，不走 Loader。
 
-可配的有三处——**语音**、**搭台助手的命令行**、**联网检索**；都不配也能照常跑（只是那项能力没有）：
+可配的有五处——**语音**、**联网检索**、**生图**、**配乐**、**搭台助手的命令行**；都不配也能照常跑（只是那几项能力没有，对应工具不注册、提示词不提）：
 
 ```yaml
 - id: aivn
@@ -58,7 +59,7 @@ dsh plugin --profile web add github:john-walks-slow/dsh-aivn
     image:                               # 配了它两个角色才会出图
       format: gemini                     # gemini | openai | modelslab（接口格式，不是产品名）
       baseUrl: http://127.0.0.1:38000    # 本机 flow2api；官方 API 或别的网关填它自己的地址
-      model: gemini-3.1-flash-image
+      model: gemini-3.0-pro-image
       size: 1K                           # 1K / 2K / 4K（K 大写），或字面像素 1536x1024
       apiKey: ""                         # 本机网关不校验就留空（留空 = 不带鉴权头）
       timeoutMs: 180000
@@ -93,9 +94,9 @@ key 两处都没有 = 那项能力停用：工具**不注册**、提示词里也
    预设是**在会话开始时**定下的，中途换不了——想换就新建一个会话。
 2. 会话的工作目录根要有 `play.json`。没有的话舞台会明说「这个会话的工作目录里没有 play.json，
    还不是一座剧目」——那就先把它立起来，见下。
-3. 说一句话，或者切到「舞台」tab 点「开演」。之后的一切都在舞台上发生。
+3. 说一句话，或者切到「AIVN」tab 点「开演」。之后的一切都在舞台上发生。
 
-「舞台」tab 是会话头部的第四个 tab（Chat / Trajectory / 舞台）。
+「AIVN」tab 是会话头部的第三个 tab（Chat / Trajectory / AIVN），**只在这个会话是剧作家预设时出现**。
 
 ### 起一座新剧目
 
@@ -431,7 +432,7 @@ play/
   `/aivn/audio` 只接受目录内的纯文件名（`basename` 判定 + `.mp3` 白名单），不接受任何路径。
 - **密钥**：TTS 与 Exa 的 key 只从配置或环境变量读，不进日志、不进 URL、不进 git；错误文案里
   最多带上游返回的前 200 字符。
-- **兼容**：宿主半边对齐 `dsh` `0.1.7-rc.2`，客户端半边对齐 `0.1.1-rc.2`。「舞台」tab 需要
+- **兼容**：宿主半边对齐 `dsh` `0.1.7-rc.2`，客户端半边对齐 `0.1.1-rc.2`。「AIVN」tab 需要
   `dsh-web-app`（挂在 `conversation.view` 槽上）。
 
 ## 开发
@@ -479,7 +480,7 @@ dsh-e2e stop
 套件：
 
 - `stage`（`npm run e2e:stage`）——在工作区根落一份临时剧目夹具 → 新建会话并选「剧作家」预设 →
-  发一句 → 断言「舞台」tab 挂载、导演工作栏不渲染、台词逐字上屏、停止点出来、点选项后原文被投给
+  发一句 → 断言「AIVN」tab 挂载、导演工作栏不渲染、台词逐字上屏、停止点出来、点选项后原文被投给
   剧作家并在时间线上落成一行回执、剧作家接着写完第二轮。
 - `injection`（`dsh-e2e run e2e/verify-injection.mjs`）——剧作家的上下文注入：从会话日志断言
   A 区六段与【状态】都进了系统提示词、内容取自夹具文件而不是「自己去读」，并核对工具面

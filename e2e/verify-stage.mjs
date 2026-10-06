@@ -4,7 +4,7 @@
  *
  * 证明这条链完整成立：
  *   在插件仓库根落一份剧目夹具 → 新建会话并选「剧作家」预设 → 说一句
- *   → 会话头部出现「舞台」tab → 选中后整块对话主区由 `@aivn/stage` 渲染
+ *   → 会话头部出现「AIVN」tab（只在剧作家预设的会话上）→ 选中后整块对话主区由 `@aivn/stage` 渲染
  *   → 宿主 SSE 的 IR 流被消费并逐字显示 → 停止点的选项把输入发回宿主、
  *   在时间线上落成一行回执，剧作家接着写完第二轮再交一个停止点。
  *
@@ -126,7 +126,7 @@ try {
 
 	/* —— 舞台 tab 与挂载 —— */
 
-	const switched = await openViewTabWhenReady(page, '舞台', 90_000);
+	const switched = await openViewTabWhenReady(page, 'AIVN', 90_000);
 	const mounted =
 		switched && (await waitFor(page, () => document.querySelector('.stage-root.aivn-stage-view') !== null, {
 			timeout: 30_000,
@@ -135,13 +135,13 @@ try {
 	check(
 		'S5',
 		Boolean(mounted),
-		`切到「舞台」后整块主区由插件渲染（tab：${(await listTabs(page)).join(' / ') || '无'}）`,
+		`切到「AIVN」后整块主区由插件渲染（tab：${(await listTabs(page)).join(' / ') || '无'}）`,
 	);
 
 	if (!mounted) {
 		await shot(page, join(ARTIFACTS, 'stage-not-mounted.png'));
 		// S5 已经在这里判过了，跳的是它之后的全部。
-		skip(KNOWN_IDS.slice(KNOWN_IDS.indexOf('S5') + 1), '舞台未挂载，跳过');
+		skip(KNOWN_IDS.slice(KNOWN_IDS.indexOf('S5') + 1), 'AIVN tab 未挂载，跳过');
 	} else {
 		const directorBar = await page.evaluate(() => document.querySelector('.theater-director') !== null);
 		check('S6', !directorBar, '导演工作栏未渲染（directorBar={false}）');

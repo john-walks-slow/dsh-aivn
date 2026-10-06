@@ -115,6 +115,11 @@ try {
 	check('S5', headings.includes('# 设定流程（这是你的工作方式，不是可选建议）'), '有《设定流程》章');
 	check('S6', headings.includes('# 出图要点') && headings.includes('# 剧目写作要点'), '有《出图要点》与《剧目写作要点》');
 	check('S7', !headings.includes('# 演出契约') && !headings.includes('# 剧本格式（Stage DSL，必须严格遵守）'), '没有剧作家的舞台契约（两套注入不串）');
+	// 舞台 tab 只给剧作家会话：搭台助手这一侧连 tab 都不该出现（2026-10-06 用户要求）
+	const tabs = await page.evaluate(() =>
+		[...document.querySelectorAll('[role="tab"]')].map((tab) => (tab.textContent ?? '').trim()),
+	);
+	check('S7b', !tabs.includes('AIVN'), `搭台助手会话没有 AIVN tab（实际：${tabs.join(' / ') || '无'}）`);
 
 	// 注入：《当前状态》读的是盘上的真实文件，就绪报告也在
 	check('S8', headings.includes('# 当前状态'), '有《当前状态》注入段');

@@ -9,7 +9,7 @@ AIVN's stage engine, inside DSH.
 
 **One workspace is one play**: open a session in it, pick the **playwright (the script-writing agent role)** preset, and the conversation page gains a **Stage** tab where the Stage DSL the playwright writes is performed live — backgrounds, sprites, dialogue bar, stop-point options, all of it. The player clicks an option; that line goes back to the playwright, and it writes on.
 
-![Stage tab: background, sprites, dialogue bar; the voice toggle and "replay this line" sit in the bottom right](screenshots/screenshot-1.png)
+![AIVN tab: background, sprites, dialogue bar; the voice toggle and "replay this line" sit in the bottom right](screenshots/screenshot-1.png)
 
 ## Install
 
@@ -35,11 +35,12 @@ dsh plugin --profile web add github:john-walks-slow/dsh-aivn
       config: {}
 ```
 
-- **The client half** (the Stage tab) mounts on the `conversation.view` slot and needs
+- **The client half** (the AIVN tab) mounts on the `conversation.view` slot and needs
   `dsh-web-app`. It is declared under `dsh.client{platform:"web"}` in `package.json` and
   does not go through the Loader.
 
-Three things are configurable — **voice**, the **stagehand's shell**, and **web search**; leave them
+Five things are configurable — **voice**, **web search**, **image generation**, **music**, and the
+**stagehand's shell**; leave them
 all out and everything still runs (those capabilities are simply absent):
 
 ```yaml
@@ -58,7 +59,7 @@ all out and everything still runs (those capabilities are simply absent):
     image:                               # with this both roles can generate images
       format: gemini                     # gemini | openai | modelslab (wire protocol, not a product)
       baseUrl: http://127.0.0.1:38000    # local flow2api; point it at the official API or your gateway
-      model: gemini-3.1-flash-image
+      model: gemini-3.0-pro-image
       size: 1K                           # 1K / 2K / 4K (uppercase K), or literal pixels 1536x1024
       apiKey: ""                         # empty = no auth header (local gateways often don't check)
       timeoutMs: 180000
@@ -100,7 +101,8 @@ configurable. **Changing config requires a dsh restart**: the capability set is 
 3. Say something, or switch to the **Stage** tab and hit **Start**. Everything after that happens
    on stage.
 
-The Stage tab is the fourth tab in the session header (Chat / Trajectory / Stage).
+The AIVN tab is the third tab in the session header (Chat / Trajectory / AIVN), and it **only
+appears while the session's preset is the playwright**.
 
 ### Starting a new play
 
@@ -486,7 +488,7 @@ can't submit an input on the player's behalf.
 - **Secrets**: TTS and Exa keys are read only from config or environment variables, never into
   logs, URLs, or git; error text carries at most the first 200 characters returned by the upstream.
 - **Compatibility**: the host half targets `dsh` `0.1.7-rc.2`, the client half targets
-  `0.1.1-rc.2`. The Stage tab needs `dsh-web-app` (it mounts on the `conversation.view` slot).
+  `0.1.1-rc.2`. The AIVN tab needs `dsh-web-app` (it mounts on the `conversation.view` slot).
 
 ## Development
 
@@ -538,7 +540,7 @@ The instance home is `<worktree>/.dsh-e2e-home` and is not tracked by git. Two l
 Suites:
 
 - `stage` (`npm run e2e:stage`) — drops a temporary play fixture at the workspace root → starts a
-  session on the playwright preset → sends one line → asserts that the Stage tab mounts, the
+  session on the playwright preset → sends one line → asserts that the AIVN tab mounts, the
   director bar does not render, lines type onto the screen, the stop point appears, clicking an
   option delivers the original text to the playwright and lands as a receipt line on the timeline,
   and the playwright finishes writing a second beat.
