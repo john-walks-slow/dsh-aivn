@@ -32,7 +32,7 @@ export interface PlaySpec {
 	title: string;
 	/** 剧目 id；不写就取工作目录名。 */
 	id?: string;
-	/** 开局 user 消息里的起始指令；不写走引擎缺省。 */
+	/** 开局那条 user 消息的正文；不写走引擎缺省。 */
 	opening?: string;
 	/** 世界观前提，写进 `memory/always/premise.md`。 */
 	premise?: string;

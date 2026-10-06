@@ -45,7 +45,7 @@ export function createPlayTool(ctx: PlayContext) {
 			opening: {
 				type: 'string',
 				description:
-					'开局指令：玩家点「开演」时发给剧作家的第一句（如「（游戏开始，请演出第一轮）」）。不写走引擎缺省。',
+					'开局指令：玩家在这条会话里说第一句话时，它与那句话同轮发给剧作家（空舞台上的「开演」按钮发的也是它）。如「（游戏开始，请演出第一轮）」。不写走引擎缺省。',
 			},
 			characters: {
 				type: 'array',

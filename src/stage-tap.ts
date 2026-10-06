@@ -17,18 +17,20 @@
  *   inbox 进 Agent，于是时间线上只有这一处落点，两条路既不会各写一条、也不会漏写。
  *   引擎自己投的那些（追收束、空「继续」）也走这条路，靠 `InjectedMessages` 按 id 摘出去——
  *   它们不是玩家说的话，摆上时间线就是替玩家编了一句台词。
+ * - 玩家的**第一条**消息：顺手把剧目的开局指令（`play.json` 的 `opening`）补进去，与玩家
+ *   那一句同轮送到，见 `openPlay`。
  */
 import type { Context } from '@deepseek-ai/cordis';
 import { StageDslParser, type StageEvent } from '@aivn/core';
 import type {} from '@deepseek-ai/dsh-agent';
-import type { UserMessage } from '@deepseek-ai/dsh-llm';
+import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm';
 import type { BeatGuard } from './beat-guard';
 import type { StageHub } from './hub';
 import type { InjectedMessages } from './injected';
-import { sessionWorkspace } from './session';
+import { loadPlaySync } from './play';
 import type { VoiceHost } from './voice-host';
 import type { VoicePipeline } from './voice';
-import { PLAYWRITER_PRESET, sessionPreset } from './session';
+import { PLAYWRITER_PRESET, sessionPreset, sessionWorkspace, type LiveAgent } from './session';
 
 /** 事件载荷都带一层 `{ agent }` 外壳（由 agent 作用域的分发器补上）。 */
 interface AgentShell {
@@ -47,7 +49,8 @@ interface StatusPayload extends AgentShell {
 	status: 'idle' | 'running';
 }
 
-interface InboxPayload extends AgentShell {
+interface InboxPayload {
+	agent: LiveAgent;
 	message: UserMessage;
 }
 
@@ -124,7 +127,45 @@ export function installStageTap(
 		if (!isPlaywriter(sessionId)) return;
 
 		const text = messageText(payload.message);
-		if (text) hub.append(sessionId, { kind: 'player_input', text });
+		if (!text) return;
+
+		hub.append(sessionId, { kind: 'player_input', text });
+		openPlay(sessionId, payload.agent, text);
+	};
+
+	/**
+	 * 玩家的第一条消息：把剧目的开局指令一并补进去。
+	 *
+	 * `opening` 在引擎里就是「开局那条 user 消息的正文」（缺省「（游戏开始，请演出第一轮）」），
+	 * AIVN 里由玩家按下「开演」发出去。DSH 这边玩家先说话——会话空着时连 tab 列都没有，
+	 * 舞台上的「开演」够不着——所以开局指令跟着第一条消息走。
+	 *
+	 * **必须投进 `next-step`，不能 `followup`**：一轮开始时宿主只从 `next-turn` 认领**一条**
+	 * 消息（`claim` 里下一轮那一格的 deleteCount 就是 1），排第二的那条要等下一轮——玩家会看见
+	 * 剧作家把第一轮演完之后又无端演一遍。`next-step` 是整批认领的，且在下一轮那条之前，于是
+	 * 它与玩家的第一句落在**同一个请求**里，开局指令还排在前面。
+	 *
+	 * 投递在**同一条同步链**上：宿主正是在 `inbox.splice()` 里发 `agent/inbox/inserted`、之后
+	 * 才唤醒驱动器，所以此刻补进去的这条赶得上同一轮的第一步。读剧目也因此用同步版
+	 * （`loadPlaySync`）——异步读一趟回来，驱动器已经起了。
+	 *
+	 * 判据是「这条会话还没有任何模型可见的历史」：重启后恢复的会话带着整份日志，不会再补一次。
+	 * 玩家自己就把开局那句说了（与 `opening` 逐字相同）也不补——同一轮里同一句话出现两次，
+	 * 剧作家只会把第一轮演两遍。投出去的这条登记进 `InjectedMessages`：它和引擎自己的推进
+	 * 一样不是玩家说的话，摆上时间线就是替玩家编了一句台词。
+	 */
+	const openPlay = (sessionId: string, agent: LiveAgent, playerText: string): void => {
+		if ((agent.session?.surface?.nodes.length ?? 1) !== 0) return;
+
+		const play = loadPlaySync(sessionWorkspace(ctx, sessionId));
+		if (!play) return;
+
+		const opening = play.config.opening.trim();
+		if (!opening || opening === playerText) return;
+
+		const message = createUserMessage({ content: [{ type: 'text', text: opening }], source: { kind: 'user' } });
+		injected.remember(message.id);
+		agent.inject(message);
 	};
 
 	/**

@@ -30,6 +30,9 @@
    删掉它，舞台会在半句台词之后停住、玩家没有可点的东西。追收束那一句与舞台的「继续」
    都会落进 `agent/inbox/inserted`，得在 `src/injected.ts` 里按 `message.id` 登记摘除，
    否则它们会变成玩家台词条上的一行（**别退回按正文比对**，改一个字就静默失效）。
+   引擎自己补的消息想挤进**当前**那一轮只能用 `agent.inject`（落 `next-step`，整批认领）：
+   `followup` 落 `next-turn`，而一轮只认领一条，第二条要等下一轮。开局指令就是这么补的
+   （`stage-tap.ts` 的 `openPlay`，跟着玩家的第一条消息走）。
 5. **提示词分两段**：`PLAYWRITER_PROMPT` 是 persona 的 `prefix`（静态前半），
    `PLAYWRITER_TAIL` 由 `src/play-context.ts` 注册成 order 200 的段。中间夹着 A 区的动态段——
    `persona` 那一格只装得下一段静态文本，所以「A 区之后」的几章必须由插件自己挂。

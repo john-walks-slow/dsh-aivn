@@ -98,8 +98,9 @@ configurable. **Changing config requires a dsh restart**: the capability set is 
 2. The session's working directory root needs a `play.json`. Without one, the stage says outright
    "this session's working directory has no play.json, so it isn't a play yet" — stand one up
    first, see below.
-3. Say something, or switch to the **Stage** tab and hit **Start**. Everything after that happens
-   on stage.
+3. Say something to start. Everything after that happens on stage — **that first message carries the
+   play's opening instruction (`opening`) to the playwright with it**, so you don't have to recite the
+   opening line yourself; anything ("let's go") works.
 
 The AIVN tab is the third tab in the session header (Chat / Trajectory / AIVN), and it **only
 appears while the session's preset is the playwright**.
@@ -149,7 +150,7 @@ The remaining fields (all optional):
 
 | Field | Purpose |
 | --- | --- |
-| `opening` | Body of the opening user message. This is what **Start** and **Continue** on the stage send to the playwright. Defaults to `（游戏开始，请演出第一轮）` |
+| `opening` | Body of the opening user message. It goes to the playwright together with the player's first message in the session; the **Start** button on an empty stage sends it too. Defaults to `（游戏开始，请演出第一轮）` |
 | `characters` | `[{ id, name }]`. **Only used to put names on the dialogue bar**: sprite binding lives in the character card's frontmatter |
 | `craft` | Writing parameters, see below |
 | `initialState` / `initialScene` | The play's starting state and starting scene |

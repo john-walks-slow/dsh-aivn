@@ -31,8 +31,19 @@ export interface LiveAgent {
 			readonly cwd?: string;
 			readonly agentPreset?: string;
 		};
+		/**
+		 * 模型可见的事件序列（`@deepseek-ai/dsh-session` 的 `SessionSurface`）。
+		 * 「这条会话还是空的吗」只有它答得准：空 = 玩家还没说过话，也就是第一条消息。
+		 */
+		readonly surface?: { readonly nodes: readonly unknown[] };
 	};
 	followup(message: UserMessage): void;
+	/**
+	 * 投一条「这一步之内」的消息（`next-step`）。与 `followup` 的区别是要紧的：一轮开始时
+	 * 宿主从 `next-turn` 只认领一条，`next-step` 整批认领且排在它前面——开局指令靠这一点
+	 * 挤进玩家的第一句所在的那一轮（见 `stage-tap.ts` 的 `openPlay`）。
+	 */
+	inject(message: UserMessage): void;
 }
 
 /** 在册的 live Agent；冷会话（宿主重启后没恢复）取不到。 */
