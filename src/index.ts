@@ -110,7 +110,7 @@ export interface Config {
  *         image:
  *           format: gemini
  *           baseUrl: http://127.0.0.1:38000
- *           model: gemini-3.1-flash-image
+ *           model: gemini-3.0-pro-image
  *           size: 1K
  *         music:
  *           baseUrl: http://127.0.0.1:38000

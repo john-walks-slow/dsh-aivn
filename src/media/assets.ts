@@ -270,7 +270,8 @@ export class PlayAssets {
 		const source = await this.readSource(spec);
 		const cut = await cutout(source.data, resolveTuning({ ...this.opts.tuning, ...tuning }));
 		const written = await this.persist(spec, cut.data, '.png');
-		await this.recordPrompt(spec, written.path, '（重抠：画面未变，只重跑了抠底）');
+		// 重抠不产生新画面：台账里那条「当初用什么描述出的」不许动（AIVN 同口径：台账的写者
+		// 只有出图与 BGM）。重抠的事实在工具回执里说，不进台账。
 		return { ...written, cutout: { coverage: cut.coverage, figureHeight: cut.figureHeight } };
 	}
 

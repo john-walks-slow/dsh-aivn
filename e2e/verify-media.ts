@@ -119,9 +119,16 @@ check(
 	'台账记下了这张图当初用的 prompt',
 );
 
-// 2. 重抠：不重新出图，覆盖同一张 PNG
+// 2. 重抠：不重新出图，覆盖同一张 PNG；台账里原来的出图 prompt 不许动
+const ledgerBefore = JSON.parse(await readFile(join(dir, 'assets', 'generated.json'), 'utf8'));
 const recut = await assets.recut({ kind: 'sprite', spriteId: 'probe_girl' }, { tolerance: 56 });
+const ledgerAfter = JSON.parse(await readFile(join(dir, 'assets', 'generated.json'), 'utf8'));
 check('M8', recut.cutout !== undefined && existsSync(recut.absPath), '原地重抠覆盖了同一张立绘');
+check(
+	'M8b',
+	ledgerAfter['probe_girl/neutral']?.prompt === ledgerBefore['probe_girl/neutral']?.prompt,
+	'重抠不改台账里原来的出图记录',
+);
 
 // 3. 背景：草稿 + 入库
 const bg = await assets.draft({ kind: 'background', name: 'rooftop_dusk' }, 'empty school rooftop at dusk');

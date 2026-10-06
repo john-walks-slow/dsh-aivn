@@ -11,7 +11,7 @@
  * - **档位只能填 `1K / 2K / 4K`**（官方大小写敏感），像素尺寸由 `aspectRatio` × 档位决定。
  *
  * 模型名不做白名单：这里是通用格式，填哪家的模型名由部署方决定。flow2api 那条路的画幅档位写在
- * **模型别名**里（`gemini-3.1-flash-image-portrait-2k` 这种），`imageConfig` 会被忽略。
+ * **模型别名**里（`gemini-3.0-pro-image-portrait-2k` 这种），`imageConfig` 会被忽略。
  */
 import {
 	IMAGE_ASPECTS,
