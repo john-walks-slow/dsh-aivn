@@ -47,7 +47,7 @@ const FIRST_BEAT_TIMEOUT = 600_000;
 const BEAT_TIMEOUT = 480_000;
 
 const KNOWN_IDS = [
-	'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8',
+	'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D6b', 'D7', 'D8',
 	'D9', 'D10', 'D11', 'D12', 'D13', 'D14', 'D15', 'D16', 'D17',
 ];
 
@@ -276,6 +276,30 @@ try {
 			'D6',
 			seg.includes('引导') && seg.includes('打断') && !seg.includes('分岔'),
 			`「提示」的两岔：${seg.join(' / ') || '未渲染'}`,
+		);
+		// 弹窗里的控件得真拿到样式：这些规则一度只留在宿主 app.css，而插件只加载
+		// `@aivn/stage` 的 stage.css——弹窗只剩壳子、分段控件与输入框是裸控件。
+		// 判据取「包里的值」而不是「有没有背景色」：分段控件是 8px 圆角 + 5px 12px
+		// 内边距、OOC 前缀是胶囊，裸控件会落回全局 button/input 的 2px 圆角。
+		// `display` 只认「不是 block」：`.seg` 声明的是 inline-flex，而它在弹窗的
+		// 列式 flex 容器里会被 CSS 块化（inline-flex → flex），裸 div 则是 block。
+		const skin = await page.evaluate(() => {
+			const css = (el, props) =>
+				el ? Object.fromEntries(props.map((p) => [p, getComputedStyle(el)[p]])) : null;
+			return {
+				seg: css(document.querySelector('.guide-seg'), ['display', 'borderRadius']),
+				segBtn: css(document.querySelector('.guide-seg .seg-btn'), ['borderRadius', 'padding']),
+				ooc: css(document.querySelector('.ooc-shortcut'), ['borderRadius']),
+			};
+		});
+		check(
+			'D6b',
+			skin.seg?.display !== 'block' &&
+				skin.seg?.borderRadius === '10px' &&
+				skin.segBtn?.borderRadius === '8px' &&
+				skin.segBtn?.padding === '5px 12px' &&
+				skin.ooc?.borderRadius === '999px',
+			`提示面板的样式：${JSON.stringify(skin)}`,
 		);
 		await tryShot(page, join(ARTIFACTS, 'director-prompt-panel.png'));
 		await page.evaluate(() => {
