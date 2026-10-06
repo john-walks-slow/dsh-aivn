@@ -47,33 +47,44 @@ const check = (id, ok, note = '') => {
 };
 
 /**
- * 实例进程里带着几把 `DSH_AIVN_TTS_KEYS`——读 `/proc/<pid>/environ`，不猜。
+ * 本套件唯一的**环境前提**：实例得是「没带 `DSH_AIVN_TTS_KEYS`」起来的。
  *
- * 这是本套件唯一的**环境前提**：S8/S12 断言「没配 key 时 `/aivn/play` 的 `voice` 必须是 false」，
- * 而只要实例进程里有这个变量，环境兜底就会让它恒为 true，那两条必然假红。跑 voice 套件时
- * 恰恰**必须**带上它，于是「刚跑完语音再跑设置」会得到两条看起来像产品坏了的红。
- * 与其让人对着红去查产品，不如在动任何东西之前把原因说清楚。
+ * S8/S12 断言「没配 key 时 `/aivn/play` 的 `voice` 必须是 false」，而只要实例进程里有这个变量，
+ * 环境兜底就会让它恒为 true，那两条必然假红；跑 `voice` 套件时又恰恰**必须**带上它，于是
+ * 「刚跑完语音再跑设置」会得到两条看起来像产品坏了的红。
+ *
+ * 依据是 `dsh-e2e` 启动时写进 `instance.json` 的 `env` 快照（只记变量名不记值）——启动者此刻
+ * 就知道自己带着什么环境。不去读 `/proc/<pid>/environ` 猜：PID 复用、过期的 instance.json
+ * 都会给出错误结论。快照**不在**也不算通过（旧版 harness 起的实例），直接让人重起——
+ * 在「读不到」时静默放行，等于它最需要起作用的环境里恰好失效。
  */
-function instanceEnvKeys() {
+function instanceEnv() {
 	try {
-		const { pid } = JSON.parse(readFileSync(join(E2E_HOME, 'instance.json'), 'utf8'));
-		const entry = readFileSync(`/proc/${pid}/environ`, 'utf8')
-			.split('\0')
-			.find((line) => line.startsWith('DSH_AIVN_TTS_KEYS='));
-		return entry ? entry.slice('DSH_AIVN_TTS_KEYS='.length).split(',').filter(Boolean).length : 0;
+		const info = JSON.parse(readFileSync(join(E2E_HOME, 'instance.json'), 'utf8'));
+		return typeof info.env === 'string' ? info.env.split(',').filter(Boolean) : null;
 	} catch {
-		return 0; // 读不到就当没有：这个前提是「说清楚」，不是新的失败来源
+		return null;
 	}
 }
 
-const envKeys = instanceEnvKeys();
-if (envKeys > 0) {
+const HOW_TO_RESTART = [
+	`  怎么办：cd ${ROOT} && dsh-e2e stop && dsh-e2e start --wait-ready（不要带该变量）后再跑；`,
+	'          要跑 voice 套件时才 export DSH_AIVN_TTS_KEYS。',
+].join('\n');
+
+const instanceEnvNames = instanceEnv();
+if (instanceEnvNames === null) {
+	console.error(
+		['✗ 读不到实例的环境快照（instance.json 里没有 env 字段），无法判定本套件的前提——', '  这个实例是旧版 dsh-e2e 起的。', HOW_TO_RESTART].join('\n'),
+	);
+	process.exit(2);
+}
+if (instanceEnvNames.includes('DSH_AIVN_TTS_KEYS')) {
 	console.error(
 		[
-			`✗ 这个实例的进程里带着 DSH_AIVN_TTS_KEYS（${envKeys} 把），本套件要求没有它的实例：`,
+			'✗ 这个实例带着 DSH_AIVN_TTS_KEYS 起来的，本套件要求没有它的实例：',
 			'  S8/S12 断言「没配 key 时 voice 为 false」，环境变量兜底会把它顶成 true，两条必然假红。',
-			`  怎么办：cd ${ROOT} && dsh-e2e stop && dsh-e2e start --wait-ready（不要带该变量）后再跑；`,
-			'          要跑 voice 套件时才 export DSH_AIVN_TTS_KEYS。',
+			HOW_TO_RESTART,
 		].join('\n'),
 	);
 	process.exit(2);

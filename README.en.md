@@ -552,12 +552,19 @@ rebuild before committing. `npm publish` runs `prepublishOnly` (rebuild + typech
 out matches the source.
 
 Forgetting the rebuild is silent — everything is fine locally and only the person who installs it
-sees the breakage. There is a self-check for that (it re-bundles in memory with the same options and
-byte-compares against the committed `lib/`, writing nothing):
+sees the breakage. There is a self-check for that, wired into a `pre-commit` hook as well (it
+re-bundles in memory with the same options and byte-compares against the committed `lib/`, writing
+nothing):
 
 ```bash
-node build.mjs --check
+node build.mjs --check                 # run it by hand
+git config core.hooksPath .githooks    # once per clone; then it runs on every commit
 ```
+
+The host half (`lib/index.js`) does not depend on the sibling repo, so it is judged strictly. The
+browser half (`lib/client.js`) bundles `@aivn/stage`, so it is judged strictly only while that
+sibling checkout is clean; otherwise it warns — a difference there usually means someone is editing
+that package right now.
 
 ### e2e
 

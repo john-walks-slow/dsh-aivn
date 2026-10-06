@@ -84,14 +84,18 @@ dsh-e2e stop
 ## 产物与源码
 
 `lib/` 是受跟踪的构建产物，改了 `src/` 必须重建并一起提交。忘了重建的失败是静默的（本地正常、
-别人装上才炸），所以自查一条：
+别人装上才炸），所以它挂成一道**真的会拦人的**关卡，而不是一份说明书：
 
 ```bash
-node build.mjs --check    # 用同一套构建参数在内存里重打一遍，与 lib/ 逐字节比对，不落盘
+git config core.hooksPath .githooks   # 每个 clone 各做一次（core.hooksPath 不随仓库走）
+node build.mjs --check                # 钩子跑的就是这条；手动排查时也可以直接跑
 ```
 
 它会连带打印这次比对是在什么现场做的：仓库路径、HEAD、工作树是否干净、与上游差几笔、
-以及 `@aivn/core` / `@aivn/stage` 两个兄弟检出是否干净（打包会把它们的检出内容算进去）。
+以及 `@aivn/core` / `@aivn/stage` 两个兄弟检出是否干净。判定强度分两档：宿主半边
+（`lib/index.js`）与兄弟仓无关，永远硬判；客户端半边（`lib/client.js`）把 `@aivn/stage`
+打进了包，只在兄弟检出干净时硬判，否则只警告（那时的不一致多半是别人正在改那只包）。
+钩子可以在确认无关时用 `git commit --no-verify` 绕过。
 
 ## 改名要连带改的地方
 

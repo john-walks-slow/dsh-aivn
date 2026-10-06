@@ -10,10 +10,14 @@
  * 客户端 bundle 的 load id 必须等于包名，否则整个 application combo 会二次执行。
  *
  * `--check` 不写任何文件：用同一套构建参数在内存里重打一遍，与 `lib/` 里已提交的产物逐字节比对。
- * 这是「静默失败」类缺陷的防线——产物跟不上源码时，插件在别人的机器上才炸，而本地一切正常。
- * 顺带把判断这条结论需要的现场打出来（仓库路径、HEAD、工作树、远端、依赖检出的状态）。
+ * 这是「静默失败」类缺陷的防线（产物跟不上源码时，本地一切正常、别人装上才炸），挂在
+ * `.githooks/pre-commit` 上，见 AGENTS.md 的「产物与源码」一节。
+ *
+ * 两半的判定强度不同，因为来路不同：宿主半边只外部依赖宿主与 sharp，**永远**硬判；
+ * 客户端半边把兄弟仓 `@aivn/stage` 的内容打进包里，所以只有那两个检出**干净**时硬判，
+ * 否则只能警告——那时不一致多半是别人正在改那只包，而不是我们忘了重建。
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { build } from 'esbuild';
@@ -77,38 +81,41 @@ function git(args) {
 	}
 }
 
+/** 两个兄弟检出的状态：客户端半边的比对结论要读得懂它们才算数。 */
+function dependencies() {
+	return ['@aivn/core', '@aivn/stage'].map((name) => {
+		const path = `node_modules/${name}`;
+		if (!existsSync(path)) return { name, repo: '', dirty: null };
+		const repo = git(['-C', path, 'rev-parse', '--show-toplevel']);
+		if (!repo) return { name, repo: '', dirty: null };
+		const dirty = git(['-C', repo, 'status', '--porcelain', '--', `packages/${name.replace('@aivn/', '')}`]).split('\n').filter(Boolean);
+		return { name, repo, dirty };
+	});
+}
+
 /** 这次比对是在什么现场做的——结论离了现场就说不清。 */
-function surroundings() {
+function surroundings(deps) {
 	const repo = git(['rev-parse', '--show-toplevel']) || process.cwd();
 	const head = git(['rev-parse', '--short', 'HEAD']);
 	const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']);
 	const dirty = git(['status', '--porcelain']).split('\n').filter(Boolean);
 	const upstream = git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']);
-	const rows = [
-		['仓库', repo],
-		['HEAD', `${head} (${branch})`],
-		['工作树', dirty.length === 0 ? '干净' : `${dirty.length} 处未提交（含 lib/ 就是产物本身）`],
-		['远端', upstream ? `${upstream}，领先 ${git(['rev-list', '--count', `${upstream}..HEAD`])} / 落后 ${git(['rev-list', '--count', `HEAD..${upstream}`])}` : '无上游（本仓库没有配 remote）'],
+	const lines = [
+		`  仓库     ${repo}`,
+		`  HEAD     ${head} (${branch})`,
+		`  工作树   ${dirty.length === 0 ? '干净' : `${dirty.length} 处未提交（含 lib/ 就是产物本身）`}`,
+		`  远端     ${upstream ? `${upstream}，领先 ${git(['rev-list', '--count', `${upstream}..HEAD`])} / 落后 ${git(['rev-list', '--count', `HEAD..${upstream}`])}` : '无上游'}`,
 	];
-	// 打包会把兄弟仓的检出内容算进去，它脏着的时候比对结论就只对这些源码成立。
-	for (const dep of ['@aivn/core', '@aivn/stage']) {
-		const pkg = `node_modules/${dep}`;
-		if (!existsSync(pkg)) {
-			rows.push([dep, '不在 node_modules 里（先 npm install）']);
-			continue;
-		}
-		const depRepo = git(['-C', pkg, 'rev-parse', '--show-toplevel']);
-		const depDirty = depRepo ? git(['-C', depRepo, 'status', '--porcelain', '--', pkg.replace('node_modules/', '')]).split('\n').filter(Boolean) : [];
-		rows.push([dep, depRepo ? (depDirty.length ? `${depRepo} —— 有 ${depDirty.length} 处未提交，会被算进这次比对` : `${depRepo} —— 干净`) : '不是 git 检出']);
+	for (const dep of deps) {
+		lines.push(`  ${dep.name.padEnd(8)} ${dep.dirty === null ? '不在 node_modules 里（先 npm install）' : dep.repo ? `${dep.repo} —— ${dep.dirty.length ? `有 ${dep.dirty.length} 处未提交` : '干净'}` : '不是 git 检出'}`);
 	}
-	const width = Math.max(...rows.map(([key]) => key.length));
-	return rows.map(([key, value]) => `  ${key.padEnd(width)}  ${value}`).join('\n');
+	return lines.join('\n');
 }
 
 /** 逐字节比对，返回 null 表示一致。 */
 function difference(built, path) {
 	if (!existsSync(path)) return '磁盘上没有这个文件';
-	const onDisk = execFileSync('cat', [path], { maxBuffer: 1 << 28 }).toString('utf8');
+	const onDisk = readFileSync(path, 'utf8');
 	if (onDisk === built) return null;
 	const at = [...built].findIndex((char, index) => char !== onDisk[index]);
 	return `不一致：磁盘 ${(onDisk.length / 1024).toFixed(1)} KiB / 构建 ${(built.length / 1024).toFixed(1)} KiB，首个不同在第 ${at < 0 ? '（长度不同）' : at} 字节`;
@@ -117,21 +124,44 @@ function difference(built, path) {
 const { host, client } = await bundle();
 
 if (CHECK) {
+	const deps = dependencies();
+	const depsClean = deps.every((dep) => dep.dirty && dep.dirty.length === 0);
+
 	console.log('产物 ↔ 源码比对（用 build.mjs 同一套参数重打一遍，不落盘）\n');
-	console.log(surroundings());
+	console.log(surroundings(deps));
 	console.log('');
-	let bad = 0;
-	for (const [path, built] of [
-		['lib/index.js', host],
-		['lib/client.js', client],
+
+	let failed = 0;
+	let cautioned = 0;
+	for (const [path, built, hostHalf] of [
+		['lib/index.js', host, true],
+		['lib/client.js', client, false],
 	]) {
 		const diff = difference(built, path);
-		if (diff) bad += 1;
-		console.log(`  ${diff ? '✗' : '✓'} ${path}  ${diff ?? `一致（${(built.length / 1024).toFixed(1)} KiB）`}`);
+		if (diff === null) {
+			console.log(`  ✓ ${path}  一致（${(built.length / 1024).toFixed(1)} KiB）`);
+			continue;
+		}
+		// 宿主半边与兄弟仓无关；客户端半边要兄弟仓干净才判得动（它把 @aivn/stage 打进了包）。
+		if (hostHalf || depsClean) {
+			failed += 1;
+			console.log(`  ✗ ${path}  ${diff}`);
+		} else {
+			cautioned += 1;
+			console.log(`  ⚠ ${path}  ${diff}`);
+			console.log('      兄弟检出是脏的（上面那行指出了哪只），这一半的差异多半来自它、而不是忘了重建——不据此判定。');
+		}
 	}
+
 	console.log('');
-	console.log(bad === 0 ? '产物与源码一致。' : `${bad} 个产物没跟上源码——跑 npm run build 重建并提交。`);
-	process.exit(bad === 0 ? 0 : 1);
+	if (failed) {
+		console.log(`${failed} 个产物没跟上源码——跑 npm run build 重建并提交。`);
+	} else if (cautioned) {
+		console.log('宿主半边与源码一致；客户端半边因兄弟检出是脏的而未判定。');
+	} else {
+		console.log('产物与源码一致。');
+	}
+	process.exit(failed === 0 ? 0 : 1);
 }
 
 await rm('lib', { recursive: true, force: true });

@@ -590,11 +590,16 @@ npm run typecheck
 ```
 
 `lib/` 是**受跟踪的产物**，改完 `src/` 必须重建并一起提交。忘了重建时本地一切正常、别人装上才炸，
-所以有一条自查（用同一套构建参数在内存里重打一遍，与仓库里的 `lib/` 逐字节比对，不落盘）：
+所以有一条自查，它同时挂在 `pre-commit` 钩子上（用同一套构建参数在内存里重打一遍，与仓库里的
+`lib/` 逐字节比对，不落盘）：
 
 ```bash
-node build.mjs --check
+node build.mjs --check        # 手动跑
+git config core.hooksPath .githooks    # 每个 clone 各做一次，之后提交前自动拦
 ```
+
+宿主半边（`lib/index.js`）与兄弟仓无关，永远硬判；客户端半边（`lib/client.js`）把 `@aivn/stage`
+打进了包，所以只在兄弟检出**干净**时硬判，否则只警告——那时不一致多半是别人正在改那只包。
 
 `lib/` 是**跟踪的构建产物**：DSH 直接加载它，所以改完 `src/` 必须重建再提交。
 `npm publish` 前会跑 `prepublishOnly`（重建 + 类型检查），保证发出去的和源码一致。

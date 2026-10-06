@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+#
+# 提交前挡住「改了 src 忘了重建产物」：`lib/` 是受跟踪的构建产物，DSH 直接加载它，
+# 本地一切正常、别人装上才炸。判据与构建同源（build.mjs --check 用同一套参数在内存里重打）。
+#
+# 一次性启用（每个 clone 各做一次，core.hooksPath 是本地配置、不随仓库走）：
+#
+#     git config core.hooksPath .githooks
+#
+node build.mjs --check || {
+	echo ''
+	echo '提交被挡下：产物与源码不一致（清单见上）。重建后一起提交：'
+	echo '    npm run build && git add lib/'
+	echo '确实要绕过（例如兄弟仓正在改、你确认这次不一致与它有关）：git commit --no-verify'
+	exit 1
+}
