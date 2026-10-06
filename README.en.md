@@ -551,6 +551,14 @@ npm run typecheck
 rebuild before committing. `npm publish` runs `prepublishOnly` (rebuild + typecheck), so what goes
 out matches the source.
 
+Forgetting the rebuild is silent — everything is fine locally and only the person who installs it
+sees the breakage. There is a self-check for that (it re-bundles in memory with the same options and
+byte-compares against the committed `lib/`, writing nothing):
+
+```bash
+node build.mjs --check
+```
+
 ### e2e
 
 ```bash

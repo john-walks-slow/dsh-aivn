@@ -46,6 +46,39 @@ const check = (id, ok, note = '') => {
 	console.log(`${ok ? '✓' : '✗'} ${id} ${note}`);
 };
 
+/**
+ * 实例进程里带着几把 `DSH_AIVN_TTS_KEYS`——读 `/proc/<pid>/environ`，不猜。
+ *
+ * 这是本套件唯一的**环境前提**：S8/S12 断言「没配 key 时 `/aivn/play` 的 `voice` 必须是 false」，
+ * 而只要实例进程里有这个变量，环境兜底就会让它恒为 true，那两条必然假红。跑 voice 套件时
+ * 恰恰**必须**带上它，于是「刚跑完语音再跑设置」会得到两条看起来像产品坏了的红。
+ * 与其让人对着红去查产品，不如在动任何东西之前把原因说清楚。
+ */
+function instanceEnvKeys() {
+	try {
+		const { pid } = JSON.parse(readFileSync(join(E2E_HOME, 'instance.json'), 'utf8'));
+		const entry = readFileSync(`/proc/${pid}/environ`, 'utf8')
+			.split('\0')
+			.find((line) => line.startsWith('DSH_AIVN_TTS_KEYS='));
+		return entry ? entry.slice('DSH_AIVN_TTS_KEYS='.length).split(',').filter(Boolean).length : 0;
+	} catch {
+		return 0; // 读不到就当没有：这个前提是「说清楚」，不是新的失败来源
+	}
+}
+
+const envKeys = instanceEnvKeys();
+if (envKeys > 0) {
+	console.error(
+		[
+			`✗ 这个实例的进程里带着 DSH_AIVN_TTS_KEYS（${envKeys} 把），本套件要求没有它的实例：`,
+			'  S8/S12 断言「没配 key 时 voice 为 false」，环境变量兜底会把它顶成 true，两条必然假红。',
+			`  怎么办：cd ${ROOT} && dsh-e2e stop && dsh-e2e start --wait-ready（不要带该变量）后再跑；`,
+			'          要跑 voice 套件时才 export DSH_AIVN_TTS_KEYS。',
+		].join('\n'),
+	);
+	process.exit(2);
+}
+
 const patchText = () => (existsSync(PATCH) ? readFileSync(PATCH, 'utf8') : '');
 
 /** 把 patch 里 `- id: dsh-aivn` 那一段整块去掉（这一跑要从「没配」起步，结尾再原样写回）。 */

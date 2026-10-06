@@ -77,6 +77,21 @@ dsh-e2e stop
   provider 行（`settings.yaml` 首次启动被 import 后改名，冷启就没 provider 了），
   默认模型挑一个这台机器出得去的（列表里可能有地区受限的条目，会报
   `User location is not supported`）。细节见 README 的「开发」一节。
+- **环境前提**：`verify-settings.mjs` 要一个**没有** `DSH_AIVN_TTS_KEYS` 的实例（跑 `voice` 套件时
+  恰恰必须带上它）。带着变量跑设置套件时 S8/S12 必然假红——套件自己会在动任何东西之前读
+  `/proc/<pid>/environ` 把这条打印出来并以退出码 2 结束，见到那段话就 `dsh-e2e stop && start` 再来。
+
+## 产物与源码
+
+`lib/` 是受跟踪的构建产物，改了 `src/` 必须重建并一起提交。忘了重建的失败是静默的（本地正常、
+别人装上才炸），所以自查一条：
+
+```bash
+node build.mjs --check    # 用同一套构建参数在内存里重打一遍，与 lib/ 逐字节比对，不落盘
+```
+
+它会连带打印这次比对是在什么现场做的：仓库路径、HEAD、工作树是否干净、与上游差几笔、
+以及 `@aivn/core` / `@aivn/stage` 两个兄弟检出是否干净（打包会把它们的检出内容算进去）。
 
 ## 改名要连带改的地方
 

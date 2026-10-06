@@ -589,6 +589,13 @@ npm run build       # lib/index.js（宿主半边）+ lib/client.js（浏览器�
 npm run typecheck
 ```
 
+`lib/` 是**受跟踪的产物**，改完 `src/` 必须重建并一起提交。忘了重建时本地一切正常、别人装上才炸，
+所以有一条自查（用同一套构建参数在内存里重打一遍，与仓库里的 `lib/` 逐字节比对，不落盘）：
+
+```bash
+node build.mjs --check
+```
+
 `lib/` 是**跟踪的构建产物**：DSH 直接加载它，所以改完 `src/` 必须重建再提交。
 `npm publish` 前会跑 `prepublishOnly`（重建 + 类型检查），保证发出去的和源码一致。
 
