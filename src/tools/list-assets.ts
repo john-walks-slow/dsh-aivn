@@ -41,7 +41,11 @@ interface Row {
 	detail: string;
 }
 
-export function createListAssetsTool(ctx: PlayContext) {
+/**
+ * `can` 只用来决定**空清单时那句话**：配了生图就告诉它「没有可以出」，没配就说「要玩家手工放」。
+ * 工具本身两个角色都装、行为一样。
+ */
+export function createListAssetsTool(ctx: PlayContext, can: { image: boolean }) {
 	return defineTool({
 		name: 'list_assets',
 		description: DESCRIPTION,
@@ -62,9 +66,12 @@ export function createListAssetsTool(ctx: PlayContext) {
 			);
 
 			if (matched.length === 0) {
-				return rows.length === 0
-					? '素材清单是空的（assets/ 下还没有任何素材）。本阶段还没有生图，素材要玩家手工放进 assets/——缺素材就换一段能演的戏，用旁白交代。'
-					: `没有匹配「${args.query ?? ''}」${args.kind ? `且类目为 ${args.kind} ` : ''}的素材（共 ${rows.length} 条，换个词或去掉过滤再试）。`;
+				if (rows.length > 0) {
+					return `没有匹配「${args.query ?? ''}」${args.kind ? `且类目为 ${args.kind} ` : ''}的素材（共 ${rows.length} 条，换个词或去掉过滤再试）。`;
+				}
+				return can.image
+					? '素材清单是空的（assets/ 下还没有任何素材）。缺什么就用 generate_image 现出一张（立绘先出 neutral 定妆照）。'
+					: '素材清单是空的（assets/ 下还没有任何素材）。这个部署没配生图，素材要玩家手工放进 assets/——缺素材就换一段能演的戏，用旁白交代。';
 			}
 
 			const shown = matched.slice(0, LIST_LIMIT);

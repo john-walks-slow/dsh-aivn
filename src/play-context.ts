@@ -31,8 +31,8 @@ import {
 } from '@aivn/core';
 import { listAssets, readManifest } from './assets';
 import { loadPlaySync } from './play';
-import { PHASE1_CAPABILITIES, renderCraftParams, resolveCraft } from './craft';
-import { PLAYWRITER_TAIL } from './playwriter/prompt';
+import { assetCapabilitiesOf, renderCraftParams, resolveCraft } from './craft';
+import { playwriterTail } from './playwriter/prompt';
 
 /** 一次快照的存活时间：够覆盖一个 turn 的多个 step，又保证跨轮必重读。 */
 const TTL_MS = 1_000;
@@ -68,7 +68,7 @@ export interface PlaySnapshot {
  * 读一次剧目的全部上下文。目录不是剧目（没有 `play.json`）时给一份空快照——
  * 舞台那边会明说「还不是一座剧目」，剧作家这边注入空白即可，不该报错。
  */
-export function readPlaySnapshot(dir: string): PlaySnapshot {
+export function readPlaySnapshot(dir: string, can: { image: boolean } = { image: false }): PlaySnapshot {
 	const play = loadPlaySync(dir);
 	if (!play) return EMPTY;
 
@@ -92,7 +92,7 @@ export function readPlaySnapshot(dir: string): PlaySnapshot {
 		: '';
 
 	const craftFile = readText(join(dir, 'memory', 'always', 'craft.md')).trim();
-	const craft = `${renderCraftParams(resolveCraft(play.config.craft), PHASE1_CAPABILITIES)}（上面是${
+	const craft = `${renderCraftParams(resolveCraft(play.config.craft), assetCapabilitiesOf(can))}（上面是${
 		play.config.craft ? '这座剧目 `play.json` 的 `craft` 段' : '引擎默认口径，`play.json` 的 `craft` 段没写过'
 	}；改它用 \`set_craft\`。）${craftFile ? `\n\n${craftFile}` : ''}`;
 
@@ -113,12 +113,16 @@ export function readPlaySnapshot(dir: string): PlaySnapshot {
  * 注册在 agent scope（而不是全局）有两个后果，都是要的：只有剧作家的会话吃这套注入；
  * 同一个 scope 里 persona 的 `prefix` 与这里的段一起组装，宿主会按 order 排好。
  */
-export function registerPlayContext(agentCtx: Context, playDir: () => string): () => void {
+export function registerPlayContext(
+	agentCtx: Context,
+	playDir: () => string,
+	can: { image: boolean },
+): () => void {
 	let cache: { at: number; snapshot: PlaySnapshot } | null = null;
 	const snapshot = (): PlaySnapshot => {
 		const now = Date.now();
 		if (cache && now - cache.at < TTL_MS) return cache.snapshot;
-		const fresh = readPlaySnapshot(playDir());
+		const fresh = readPlaySnapshot(playDir(), can);
 		cache = { at: now, snapshot: fresh };
 		return fresh;
 	};
@@ -135,7 +139,7 @@ export function registerPlayContext(agentCtx: Context, playDir: () => string): (
 		section('aivn:play-memory-index', ORDER.memory, (s) => s.memoryIndex),
 		// 静态尾段（格式契约、记忆卡规则、引入新角色、演出契约）跟着动态段一起挂：
 		// 这几章只有剧作家要，而 persona 那一格装不下两段。位置紧接 A 区之后，与 AIVN 同序。
-		agentCtx.systemPrompt.section({ name: 'aivn:playwriter-tail', order: ORDER.tail, text: () => PLAYWRITER_TAIL }),
+		agentCtx.systemPrompt.section({ name: 'aivn:playwriter-tail', order: ORDER.tail, text: () => playwriterTail(can) }),
 		agentCtx.systemPrompt.context({ name: 'aivn:play-state', order: CONTEXT_ORDER, text: () => snapshot().state }),
 	];
 

@@ -135,10 +135,11 @@ const MEMORY_RULES = `## 记忆卡（memory/index/）
 /**
  * 引入台上还没有的新主体时的三条路（建档 / 立绘 / 临时角色）。
  *
- * 第 2 步在 AIVN 里是 generate_image（后台出图）；本阶段没有生图工具，改成
- * 「立绘要手工放进 assets/sprites/<立绘目录>/」——台上没有立绘的主体先别让它上台。
+ * 第 2 步按 `can.image` 分叉：配了生图后端就是 `generate_image`（同步等图、出图即入库），
+ * 没配就退回「立绘要手工放进 assets/sprites/<立绘目录>/」——台上没有立绘的主体先别让它上台。
  */
-const NEW_CHARACTER_RULES = `## 引入新角色
+function newCharacterRules(can: { image: boolean }): string {
+	return `## 引入新角色
 
 需要引入台上还没有的新主体时，按以下步骤：
 
@@ -154,15 +155,21 @@ const NEW_CHARACTER_RULES = `## 引入新角色
 - **改既有卡先 read、再用 edit 定点改**：整篇 write 会把你没提到的字段抹掉。
 - 玩家扮演的主角也是一张普通卡，id 固定 \`protagonist\`：要改主角设定就改它，别另建一张。
 
-**2. 立绘**：本剧目没有生图——立绘由玩家手工放进 \`assets/sprites/<立绘目录>/\`，
+**2. 立绘**：${
+		can.image
+			? `剧目里没有就当场要一张——\`generate_image\` 按 \`spriteId\`（主体 id）+ \`variant\` 出图（见《缺图怎么办》），
+回执回来之后 \`<actor id="xiaoyu" variant="smile">\` 就能用。一次只出一张，先出这一轮真要上台的那个差分。`
+			: `本剧目没有生图工具——立绘由玩家手工放进 \`assets/sprites/<立绘目录>/\`，
 文件名（去掉扩展名）就是 \`variant\` 名，\`<actor id="xiaoyu" variant="smile">\` 直接可用。
-台上还没有立绘的主体先别让它上台——改用旁白/台词交代，或只写有立绘的角色。
+台上还没有立绘的主体先别让它上台——改用旁白/台词交代，或只写有立绘的角色。`
+	}
 
 **3. 临时角色（一次性 NPC）**：只出声不出图也行，直接在 say 上写 name 属性：
 
     <say id="passerby" name="路人甲">你好啊。</say>
 
 name 只覆盖本句名牌，不写入角色表。只想出声、不上台的路人用这条就够了。`;
+}
 
 /** 演出契约：引擎认的硬规则，用户不可改（节奏与素材来源见《写作参数》，文风与禁忌见 craft.md）。 */
 const CONTRACT_RULES = `# 演出契约（引擎规则，不可改）
@@ -205,10 +212,40 @@ ${HOW_I_WORK}`;
  *
  * 《写作参数》不在这里：它按 `play.json` 的 `craft` 段每轮渲染，在 A 区里。
  */
-export const PLAYWRITER_TAIL = `${FORMAT_RULES}
+/**
+ * 缺图章：配了生图后端才出现（没配时工具也没注册，提示词里不能教它调一个不存在的工具）。
+ *
+ * 剧作家这边的出图是**同步**的（D3）：一次调用等到图落盘、当场入库，回执给最终路径。
+ * 所以这一章的重点不是「怎么发起」，而是「什么时候才值得占掉一轮的一半」。
+ */
+const IMAGE_CHAPTER = `# 缺图怎么办（generate_image）
+
+剧目里没有你要的背景 / 插图 / 立绘时，用 \`generate_image\` 当场要一张。它**同步等图**
+（70–140 秒，这一轮就停在那里），出图即入库，回执给最终路径——**回执回来之后**那一行剧本才引用得到它。
+
+- **先 \`list_assets\` 看一眼**：已有同名或有现成的同类素材时不要重出（出图会覆盖同名文件）。
+- **一轮的预算是 240 秒，一次出图占掉一半以上**：只为这一轮真的要引用的东西出图，别为「以后可能用得上」出。
+- 立绘按 \`spriteId\`（主体 id）+ \`variant\` 出；非 neutral 的差分自动垫该主体的 neutral 定妆照，
+  所以那个主体得先有 neutral。人物用 framing=full 或 half，猫与道具用 square。
+- 出图期间这一轮是停着的、玩家看到的是等待——不要一轮里连出好几张。
+- 抠底是自动的；用户说边上脏、发丝被啃，让搭台助手用 \`recut_sprite\` 重抠（画面不变），你别重新出图。`;
+
+/**
+ * 剧作家提示词的**后半**：舞台契约与写作规矩，全是静态文本，只有「要不要教出图」跟着能力位。
+ *
+ * 由 `registerPlayContext` 注册成 `aivn:playwriter-tail` 段（order 200），位置紧接动态的
+ * A 区之后。**只有剧作家装它**——搭台助手不写剧本，不需要格式契约。
+ *
+ * 《写作参数》不在这里：它按 `play.json` 的 `craft` 段每轮渲染，在 A 区里。
+ */
+export function playwriterTail(can: { image: boolean }): string {
+	return `${FORMAT_RULES}
 
 ${MEMORY_RULES}
 
-${NEW_CHARACTER_RULES}
+${newCharacterRules(can)}
 
-${CONTRACT_RULES}`;
+${can.image ? `${IMAGE_CHAPTER}
+
+` : ''}${CONTRACT_RULES}`;
+}

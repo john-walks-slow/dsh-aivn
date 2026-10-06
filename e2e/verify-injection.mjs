@@ -124,6 +124,16 @@ try {
 		!tools.includes('get_readiness') && !tools.includes('set_craft') && tools.includes('beat_done'),
 		'备料工具不在剧作家手里（收束口在）',
 	);
+	// 生图：工具面与 persona 必须一致（配没配后端两种实例都跑得过）
+	const hasImage = tools.includes('generate_image');
+	const hasChapter = headings.includes('# 缺图怎么办（generate_image）');
+	check(
+		'A14',
+		hasImage === hasChapter,
+		hasImage
+			? '配了生图后端：剧作家有 generate_image 且提示词里有《缺图怎么办》'
+			: '没配生图后端：剧作家没有 generate_image，提示词里也不提',
+	);
 
 	console.log('\n段序：');
 	for (const heading of headings) console.log(`   ${heading}`);

@@ -4,9 +4,9 @@
  * 逐行搬自 AIVN `apps/server/src/craftParams.ts`，只去掉那边对能力位与工坊侧的依赖：
  * 这里只需要「怎么渲染给剧作家看」与「补丁怎么合并」两件事。
  *
- * 能力位（`AssetCapabilities`）照旧参与渲染：本阶段没有生图、也没有跨剧目资源库，
- * 渲染时两位都给 false，于是四类素材来源的措辞自动落成「用剧目里已有的 / 用旁白交代」，
- * 不会教模型去调一个不存在的工具。
+ * 能力位（`AssetCapabilities`）照旧参与渲染：生图位跟着配置走、库位恒假，
+ * 于是四类素材来源的措辞自动落成「出图 / 用剧目里已有的 / 用旁白交代」——不会教模型去调
+ * 一个不存在的工具，也不会在没配生图时谈出图。
  */
 import {
 	CRAFT_AUDIO_SOURCES,
@@ -36,8 +36,13 @@ export interface AssetCapabilities {
 	library: boolean;
 }
 
-/** 本阶段的能力位：生图与资源库都还没有，措辞一律走「没有」那一支。 */
-export const PHASE1_CAPABILITIES: AssetCapabilities = { image: false, library: false };
+/**
+ * 按搭台助手的能力面算素材位：`image` 跟着配置走，`library` 恒假（应用级素材库永久不做），
+ * 于是四类素材来源里带库的那几支措辞永远走不到，生图那几支跟着真实后端开关。
+ */
+export function assetCapabilitiesOf(can: { image: boolean }): AssetCapabilities {
+	return { image: can.image, library: false };
+}
 
 /** 篇幅的措辞：给剧作家的是「写多长」。 */
 const BEAT_LENGTH_LABEL: Record<CraftBeatLength, string> = {

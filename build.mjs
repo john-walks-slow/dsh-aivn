@@ -1,7 +1,9 @@
 /**
  * 构建两半：
  *
- *   lib/index.js   — 宿主半边，Node ESM bundle，external 只有 @deepseek-ai/*。
+ *   lib/index.js   — 宿主半边，Node ESM bundle，external 是 @deepseek-ai/* 与 sharp
+ *                    （sharp 带原生模块，打进 bundle 之后加载即失败；它在 dependencies 里，
+ *                      运行时按包名解析，见 dev-dsh-plugin 技能那条「link 包的依赖要显式声明」）。
  *   lib/client.js  — 浏览器半边，lazy-CJS 包装成 window.__ModuleLoader__.load；
  *                    react 与 @deepseek-ai/* 保持 external，其余打进包里。
  *
@@ -21,7 +23,7 @@ await build({
 	platform: 'node',
 	target: 'node22',
 	outfile: 'lib/index.js',
-	external: ['@deepseek-ai/*'],
+	external: ['@deepseek-ai/*', 'sharp'],
 	sourcemap: false,
 	logLevel: 'info',
 });

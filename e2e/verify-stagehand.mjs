@@ -131,8 +131,33 @@ try {
 	check('S13', expects.every(has), `装上了 ${expects.join(' / ')}（实际：${tools.join(', ')}）`);
 	check('S14', !forbidden.some(has), `没有剧作家的工具与旧名 ${forbidden.join(' / ')}`);
 	check('S15', !has('list_voices') && !has('web_search'), '没配 key 时 list_voices / web_search 不注册');
+	// 生图 / 音乐：**工具面与 persona 必须一致**——要么都开（工具在、提示词教），要么都关
+	// （工具不在、走 fallback 章）。这一条不假设实例配没配后端，配了桩后端也一样跑得过。
+	const mediaTools = ['generate_image', 'commit_asset', 'recut_sprite', 'generate_bgm'];
+	const on = mediaTools.some(has);
+	const allOn = mediaTools.every(has);
+	check(
+		'S16',
+		on === allOn,
+		on
+			? `配了生图 / 音乐后端：${mediaTools.join(' / ')} 都在（实际：${tools.join(', ')}）`
+			: `没配生图 / 音乐后端时 ${mediaTools.join(' / ')} 一个都不注册`,
+	);
+	const styledTwoStep = prompt.includes('两步走：先出候选');
+	const musicChapter = headings.includes('# 配乐（generate_bgm）');
+	check(
+		'S17',
+		allOn
+			? styledTwoStep && prompt.includes('commit_asset') && musicChapter
+			: headings.includes('# 出图要点') &&
+					prompt.includes('现在**没有生图工具**') &&
+					!prompt.includes('commit_asset') &&
+					!prompt.includes('recut_sprite') &&
+					!musicChapter,
+		allOn ? 'persona 教两步出图与配乐（与工具面一致）' : 'persona 走没配生图的 fallback 章，且不提生图 / 配乐工具',
+	);
 
-	console.log('\n段序：');
+console.log('\n段序：');
 	for (const heading of headings) console.log(`   ${heading}`);
 	console.log(`\n工具：${tools.join(', ')}`);
 	console.log(`\n页面报错：${errors.length}`);

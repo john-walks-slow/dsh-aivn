@@ -55,6 +55,18 @@ dsh plugin --profile web add github:john-walks-slow/dsh-aivn
       keys: ["<your-exa-key>"]           # 多把可轮询；给了它搭台助手才有 web_search
       baseUrl: https://api.exa.ai        # 默认值
     shell: false                         # true = 给搭台助手放开 bash
+    image:                               # 配了它两个角色才会出图
+      format: gemini                     # gemini | openai | modelslab（接口格式，不是产品名）
+      baseUrl: http://127.0.0.1:38000    # 本机 flow2api；官方 API 或别的网关填它自己的地址
+      model: gemini-3.1-flash-image
+      size: 1K                           # 1K / 2K / 4K（K 大写），或字面像素 1536x1024
+      apiKey: ""                         # 本机网关不校验就留空（留空 = 不带鉴权头）
+      timeoutMs: 180000
+    music:                               # 配了它搭台助手才有 generate_bgm
+      baseUrl: http://127.0.0.1:38000
+      model: flow-music-lyria-3.5
+      apiKey: ""
+      timeoutMs: 240000
 ```
 
 | 配置项 | 默认 | 给了会怎样 | 环境变量兜底 |
@@ -63,6 +75,12 @@ dsh plugin --profile web add github:john-walks-slow/dsh-aivn
 | `tts.baseUrl` / `tts.model` / `tts.concurrency` | Fish 官方 / `s2.1-pro-free` / `2` | — | — |
 | `search.keys` | 空 | 搭台助手多一个 `web_search`（一次调用同时拿回结果与正文） | `DSH_AIVN_EXA_KEYS` |
 | `shell` | `false` | 搭台助手的预设里那一行 `tool-bash` 真装上（默认关，与 AIVN 的 `defaultOff` 同口径） | — |
+| `image.format` / `image.baseUrl` / `image.model` | — | **地址与模型都给齐**才有生图：搭台助手多 `generate_image` / `commit_asset` / `recut_sprite`，剧作家多一个**同步**的 `generate_image`。格式是接口协议形状，不是产品名 | — |
+| `image.size` | `1K` | 档位 `1K`/`2K`/`4K`（K 大写）或字面像素 `1536x1024`；gemini 格式只认档位，openai/modelslab 两种都收（modelslab 封顶 1024） | — |
+| `image.apiKey` / `image.timeoutMs` | 空 / `180000` | 本机网关不校验就把 key 留空（不带鉴权头）；出图慢就把超时调大 | — |
+| `music.baseUrl` / `music.model` | — | 都给齐才有 `generate_bgm`（只有 Gemini 形状，没有 `format`） | — |
+| `music.apiKey` / `music.timeoutMs` | 空 / `240000` | 同上；一首曲子实测约 84 秒 | — |
+| 抠底调参 | 见「素材生成」 | `DSH_AIVN_CUTOUT_TOLERANCE` / `_KEY_SMOOTH` / `_EDGE_BAND` / `_SPILL` / `_SOLID_RESIDUAL` 五个环境变量 | 同名环境变量 |
 
 key 两处都没有 = 那项能力停用：工具**不注册**、提示词里也不提。两个预设、一条 `/new-play` 命令、
 `/aivn` 路由都是固定的，不可配。**改配置要重启 dsh**：能力面在装载时定值（预设与工具行都按它拼）。
@@ -199,7 +217,7 @@ voice: 短句，少用形容词
 | id | 名字 | 干什么 |
 | --- | --- | --- |
 | `aivn-playwriter` | 剧作家 | 实时写 Stage DSL 的那位；它的输出被接进舞台 |
-| `aivn-stagehand` | 搭台助手 | 备料：写设定、角色卡、创作口径、挑音色、查资料（生图工具在下一阶段） |
+| `aivn-stagehand` | 搭台助手 | 备料：写设定、角色卡、创作口径、挑音色、出图与入库、配乐、查资料 |
 
 两个预设的行集同构：指令文件发现（`AGENTS.md`）+ persona（就是那份提示词）+ 文件工具 +
 文件检索。**搭台助手另加两样**：技能库（自带的 `skills/`，见下）与一行默认关的 `tool-bash`
@@ -258,17 +276,90 @@ voice: 短句，少用形容词
 | 工具 | 谁有 | 作用 |
 | --- | --- | --- |
 | `create_play` | 两个预设 | 把工作区立成一座新剧目：写 `play.json`（`id`/`title`/`opening`/`characters`）、`memory/always/premise.md` 与 `characters/<id>.md`。已经有 `play.json` 就报错 |
-| `list_assets` | 两个预设 | 列**这座剧目**的素材（`assets/` + `manifest.json`，外加 `characters/` 里的角色卡），可按类目与关键词过滤。**没有跨剧目的素材资源库**，也没有生图——列的就是这座剧目的全部家当 |
+| `list_assets` | 两个预设 | 列**这座剧目**的素材（`assets/` + `manifest.json`，外加 `characters/` 里的角色卡），可按类目与关键词过滤。**没有跨剧目的素材资源库**——列的就是这座剧目的全部家当 |
 | `beat_done` | 剧作家 | 交出这一轮的停止点：给 `options` = 选项面板；给 `placeholder` = 自由输入框；都不给 = 这一轮不设停止点。调用即是「本轮到此为止」 |
 | `update_state` | 剧作家 | 改剧目的运行状态：`affinity`（角色好感度增量，整数、`\|Δ\|≤5`）、`flags`、`scene`、`threads`。写进 `memory/always/state/` |
 | `get_readiness` | 搭台助手 | 开演条件自查：`play.json`、故事前提、角色卡张数、立绘、背景、素材条数。**没有硬门槛**，缺什么都能开演 |
 | `set_craft` | 搭台助手 | 改写 `play.json` 的 `craft` 段（每轮篇幅、停止点选项数、素材来源），见上 |
 | `list_voices` | 搭台助手（配了 `tts.keys` 才有） | 查 Fish 音色库挑音色：按语言 / 标签 / 标题关键词取窗口，本地按 `gender` 筛，按热度排序出前 25 条。挑好的 id 填进角色卡的 `voice` |
 | `web_search` | 搭台助手（配了 `search.keys` 才有） | 联网检索：一次调用同时拿回结果与正文。只查剧目之外的事实——设定、角色、剧情都在工作区文件里 |
+| `generate_image` | 搭台助手（配了生图才有） | 出**草稿**：背景 / 插图 / 立绘都能出，立绘自动抠底。一次出几张候选让用户挑，挑中的才入库 |
+| `commit_asset` | 搭台助手 | 把挑中的那张草稿正式入库：写 `assets/`、补素材表声明、记台账。**用户点头之后才调** |
+| `recut_sprite` | 搭台助手 | 拿立绘**入库时留的原片**原地重抠（画面一个像素不变、不烧配额），用于「图挺好、抠得脏」 |
+| `generate_bgm` | 搭台助手（配了音乐才有） | 生成一首 BGM 落 `assets/bgm/`；**同步等待**（约 84 秒），`name` 就是剧本里 `<scene bgm="…">` 引用的 id |
+| `generate_image` | 剧作家（配了生图才有） | 演出中缺图：**同步等图**（70–140 秒，这一轮停在那里）、出图即入库，回执给最终路径——回执回来之后那一行剧本才引用得到它 |
 
 `list_voices` / `web_search` 在没配 key 时**不注册**，提示词里也不提它们——不会教模型去调一个
 不存在的工具。文件工具（`read` / `write` / `edit` / `glob` / `grep` / `read_image`）由预设的行集提供，
 两个预设都有：搭台助手用 `read_image` 看画、看用户放进来的图。
+
+## 素材生成
+
+配了 `image` 之后，两个角色都能出图；**同一份实现、两种等待策略**：
+
+| | 搭台助手 | 剧作家 |
+| --- | --- | --- |
+| 流程 | **两步**：`generate_image` 出草稿 → 用户挑 → `commit_asset` 入库 | **一步**：`generate_image` 同步等图、出图即入库 |
+| 为什么要这样 | 一次出三张候选，没被挑中的不该在素材表里留下痕迹 | 演出中缺图就当场补，调用本身就声明了最终 id |
+
+剧作家这一侧是**同步**的（一次 70–140 秒，这一轮就停在那里）。AIVN 那边是后台排产 + 到货广播，
+插件是 DSH 会话模型、没有回合之外的注入通道，所以宁可等——至少回执说的是真话：模型拿到回执时，
+那个素材 id 确实已经在盘上、这一轮就引用得到。
+
+### 目录与台账
+
+```
+play/
+├── assets/                       ← 剧目素材，进 git
+│   ├── generated.json            ← 出图台账：每张图当初用的 prompt（只增，不覆盖别人的键）
+│   └── manifest.json             ← 素材描述与立绘呈现声明（framing / stature / title）
+└── media-cache/                  ← 中间物，不进 git，整目录删掉不心疼
+    ├── drafts/<草稿id>/{image.*, source.*, draft.json}
+    ├── sprite-sources/<主体id>/  ← 立绘抠底前的原片（recut_sprite 只认它）
+    └── tts/                      ← 语音缓存（内容寻址）
+```
+
+草稿留 7 天，由下一次出图顺手清掉。`.gitignore` 建议至少加一行 `media-cache/`
+（`assets/` 要进 git——那是剧目内容）。
+
+### 候选图怎么给用户看
+
+不新增 HTTP 路由：**回执与回复里贴 markdown 图片，路径是工作区内的绝对路径**
+（`![候选](/abs/path/to/play/media-cache/drafts/<id>/image.png)`）。DSH 的对话界面会把它渲染成
+内联预览（点开有大图），草稿与素材都在会话工作区（= 剧目根）里，所以这条路对草稿与入库后的
+素材一样有效。工具回执里直接给好这一行，persona 要求模型把它贴进回复——「出 3 张候选让用户挑」
+这条流程的前提就是用户真的看得见那三张。
+
+### 立绘：取景、体量与抠底
+
+- **取景 `framing`** 决定出图画幅与舞台摆位：`full` 9:16 / `half` 3:4 / `square` 1:1。
+  人物用 `full` 或 `half`，猫、道具这类非人主体用 `square`（「全身/半身」是给人形用的词）。
+  同一个主体要保持同一档，声明写进 `assets/manifest.json` 的 `<主体id>` 键。
+- **体量 `stature`**（`small` / `normal` / `large` / `huge`）只管台上站多大，与取景是两件事：
+  机甲是「全身取景 + 巨大」，猫是「方形取景 + 小」。
+- **抠底自动**：立绘出完会跑一遍色键抠底（`src/media/cutout.ts`，纯色底 + 全局色键 + 边缘覆盖率
+  反解），落成透明 PNG。抠不干净时**不要重新出图**——重画出来是另一张画，用 `recut_sprite`
+  拿留底原片原地重抠，五档调参对应五个环境变量：
+
+| 环境变量 | 默认 | 作用 |
+| --- | --- | --- |
+| `DSH_AIVN_CUTOUT_TOLERANCE` | `48` | 色键容差。**调大 = 抠得更狠**，也会连发丝一起啃掉 |
+| `DSH_AIVN_CUTOUT_SPILL` | `20` | 限色：压掉边缘残存的底色（发丝一根不少）。边上还有底色残留先调它 |
+| `DSH_AIVN_CUTOUT_EDGE_BAND` | `4` | 反解带宽，边缘出现硬白圈时加 |
+| `DSH_AIVN_CUTOUT_KEY_SMOOTH` | `0.8` | 色键降噪：源图 JPEG 环纹在轮廓上啃出缺口时加 |
+| `DSH_AIVN_CUTOUT_SOLID_RESIDUAL` | `48` | 实心判据。描边被吃掉时**调小**它 |
+
+### 三种生图格式差在哪
+
+| `format` | 端点 | 垫图 | 尺寸 |
+| --- | --- | --- | --- |
+| `gemini` | `/v1beta/models/{model}:generateContent` | ✅ 多张（`inlineData`，官方 / flow2api / cpa 都认） | 只认档位 `1K`/`2K`/`4K` |
+| `openai` | `/v1/images/generations` | ❌ 这个接口没有参考图入参，带垫图直接报错 | 字面 `WxH`（档位由插件算，守住官方上限） |
+| `modelslab` | `/images/text2img` 与 `/img2img` | ✅ 一张（先传 `base64_to_url` 换托管链接） | 单边封顶 1024，档位按长边顶满 |
+
+**垫图是角色一致性的唯一可靠手段**：非 `neutral` 的立绘自动垫该主体已入库的 `neutral` 定妆照
+（prompt 措辞锁不住脸）。所以同一个主体的差分顺序是：先出定妆照、挑一张入库，再派生别的差分。
+**哪个格式拿不到 2K，立绘的抠底锯齿就只能靠分辨率压**——要高质量立绘就用 `gemini`。
 
 ## 斜杠命令
 
@@ -326,12 +417,13 @@ voice: 短句，少用形容词
 
 ## 权限与兼容
 
-- **网络**：出网只有两处——配了 TTS key 时打 Fish Audio（`api.fish.audio` 或你配的 `baseUrl`，
-  音色库查询与语音合成共用），配了 `search.keys` 时打 Exa（`api.exa.ai` 或你配的 `baseUrl`）。
-  两项都没配就一个请求都不发。其余功能全在本地。
+- **网络**：出网只有四处——配了 TTS key 时打 Fish Audio（`api.fish.audio` 或你配的 `baseUrl`，
+  音色库查询与语音合成共用），配了 `search.keys` 时打 Exa（`api.exa.ai` 或你配的 `baseUrl`），
+  配了 `image` 时打生图后端，配了 `music` 时打音乐后端（后两者的地址完全由你配的 `baseUrl` 决定，
+  默认不预置任何厂商地址）。四项都没配就一个请求都不发。其余功能全在本地。
 - **文件**：读写在会话的工作目录（也就是那座剧目的目录）内。工具与 `/new-play` 只在你指定的
-  目录里建剧目文件；语音缓存写在 `<剧目>/media-cache/tts/`（内容寻址、可随时整目录删除）。
-  不碰工作目录以外的路径。
+  目录里建剧目文件；语音缓存、出图草稿、立绘留底原片写在 `<剧目>/media-cache/` 下
+  （都是中间物，可随时整目录删除）。不碰工作目录以外的路径。
 - **命令行**：`shell: false`（默认）时搭台助手那一行 `tool-bash` 是关的，它没有命令行；
   开成 `true` 才有——那时它能跑的东西不再受文件工具的路径约束，自己权衡。
 - **HTTP**：往 DSH 的 web server 注册 `/aivn/*`（剧目读写、素材、SSE 事件流、音频）。
@@ -394,7 +486,8 @@ dsh-e2e stop
   （备料工具归搭台助手、素材清单叫 `list_assets`）。
 - `stagehand`（`npm run e2e:stagehand`）——搭台助手：断言 persona 章节、《当前状态》注入
   （文件清单 + 就绪报告）、随包技能库两份都在技能清单里、工具面是搭台助手那一套
-  （且没有剧作家的收束口）。
+  （且没有剧作家的收束口）。e2e 实例**没配生图与音乐**，所以这里同时断言那两个能力的工具
+  **不在**工具清单里、persona 里也**不提**它们（未配后端时不谎报能力）。
 - `voice`（`dsh-e2e run e2e/verify-voice.mjs`）——真打 Fish Audio：断言 voice 帧到达、音频能取回
   且是真 MP3、**浏览器把它解成了 PCM 并真的有音源起播**（在页面里给 `AudioContext` /
   `decodeAudioData` / `AudioBufferSourceNode.start` 挂钩子，不是看帧猜的），以及语音总开关

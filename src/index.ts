@@ -23,6 +23,7 @@ import { installPresetTools } from './preset-tools';
 import { installStageRoutes } from './routes';
 import { installStageTap } from './stage-tap';
 import { createTts } from './tts';
+import { createMediaBackends } from './media/backends';
 import { resolveCapabilities } from './stagehand/capabilities';
 import { createExa } from './stagehand/exa';
 import { createVoiceCatalog } from './stagehand/voice-catalog';
@@ -75,6 +76,25 @@ export interface Config {
 		keys?: string[];
 		baseUrl?: string;
 	};
+	/** 生图后端。地址与模型都给齐才算配好——只给其一等于没有：工具不注册，persona 不提。 */
+	image?: {
+		/** 接口格式：`gemini`（官方 / flow2api / cpa）/ `openai`（官方与兼容网关）/ `modelslab`。 */
+		format?: 'gemini' | 'openai' | 'modelslab';
+		baseUrl?: string;
+		/** 不给就不带鉴权头（本机网关常常不校验）。 */
+		apiKey?: string;
+		model?: string;
+		/** 档位 `1K`/`2K`/`4K`（K 大写）或字面像素 `1536x1024`（openai / modelslab 用得上）。 */
+		size?: string;
+		timeoutMs?: number;
+	};
+	/** 音乐生成后端（只有 Gemini 形状）。地址与模型都给齐才算配好。 */
+	music?: {
+		baseUrl?: string;
+		apiKey?: string;
+		model?: string;
+		timeoutMs?: number;
+	};
 }
 
 /**
@@ -87,10 +107,18 @@ export interface Config {
  *           keys: ["<your-fish-key>"]
  *         search:
  *           keys: ["<your-exa-key>"]
+ *         image:
+ *           format: gemini
+ *           baseUrl: http://127.0.0.1:38000
+ *           model: gemini-3.1-flash-image
+ *           size: 1K
+ *         music:
+ *           baseUrl: http://127.0.0.1:38000
+ *           model: flow-music-lyria-3.5
  *         shell: false
  *
  * 不想把 key 写进配置文件的话留空，走环境变量（`DSH_AIVN_TTS_KEYS` / `DSH_AIVN_EXA_KEYS`，
- * 逗号分隔）。两处都没有 = 那项能力停用：`list_voices` / `web_search` 不注册，提示词里也不提。
+ * 逗号分隔）。没配的那一项能力就停用：对应工具不注册，提示词里也不提。
  */
 export const Config = z.object({
 	tts: z
@@ -108,6 +136,24 @@ export const Config = z.object({
 			baseUrl: z.string().default(DEFAULT_EXA_BASE_URL),
 		})
 		.default({}),
+	image: z
+		.object({
+			format: z.union([z.const('gemini'), z.const('openai'), z.const('modelslab')]).default('gemini'),
+			baseUrl: z.string().default(''),
+			apiKey: z.string().default(''),
+			model: z.string().default(''),
+			size: z.string().default('1K'),
+			timeoutMs: z.natural().default(180_000),
+		})
+		.default({}),
+	music: z
+		.object({
+			baseUrl: z.string().default(''),
+			apiKey: z.string().default(''),
+			model: z.string().default(''),
+			timeoutMs: z.natural().default(240_000),
+		})
+		.default({}),
 });
 
 export async function apply(ctx: Context, config: Config = {}): Promise<() => void> {
@@ -122,23 +168,28 @@ export async function apply(ctx: Context, config: Config = {}): Promise<() => vo
 	if (tts) ctx.logger.info('[dsh-aivn] 语音已启用（Fish Audio TTS）');
 	else ctx.logger.info('[dsh-aivn] 没配 TTS key，语音停用');
 
-	// 搭台助手的能力面：只留会变的三位，装载时定值（配置改了要重启 dsh，与 profile 里其它插件一致）。
+	// 搭台助手的能力面：只留会变的那几位，装载时定值（配置改了要重启 dsh，与 profile 里其它插件一致）。
+	const media = createMediaBackends({ image: config.image, music: config.music });
 	const capabilities = resolveCapabilities({
 		shell: config.shell ?? false,
 		ttsKeys,
 		exaKeys: configuredExaKeys(config),
+		image: media.image !== null,
+		music: media.music !== null,
 	});
 	const voices = createVoiceCatalog(ttsKeys, ttsBaseUrl);
 	const exa = createExa(configuredExaKeys(config), config.search?.baseUrl ?? DEFAULT_EXA_BASE_URL);
 	ctx.logger.info(
 		`[dsh-aivn] 搭台助手能力：音色库 ${capabilities.voice ? '开' : '关'}、联网检索 ${
 			capabilities.search ? '开' : '关'
-		}、命令行 ${capabilities.shell ? '开' : '关'}`,
+		}、生图 ${capabilities.image ? '开' : '关'}、配乐 ${capabilities.music ? '开' : '关'}、命令行 ${
+			capabilities.shell ? '开' : '关'
+		}`,
 	);
 
 	const disposers: Array<() => void> = [
 		installStageTap(ctx, hub, guard, injected, voice),
-		installPresetTools(ctx, hub, guard, { capabilities, voices, exa }),
+		installPresetTools(ctx, hub, guard, { capabilities, voices, exa, media }),
 		installBeatGuard(ctx, guard, injected),
 		installPlayCommands(ctx),
 		await registerPresets(ctx, { shell: capabilities.shell, capabilities }),

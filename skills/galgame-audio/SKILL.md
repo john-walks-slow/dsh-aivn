@@ -108,6 +108,16 @@ HowWorks Music 约 275 首。**AI 生成曲上架 Steam 需做 AI 内容披露�
 | OpenTracks / itch.io | 逐条页面下载；itch.io 有 butler CLI |
 | 爱给／淘声 | 登录受限 / 有防护，不宜自动化 |
 
+## 8.5 用 `generate_bgm` 出曲（配了音乐后端时）
+
+工具配了音乐后端才注册；它**同步等待**（一首约 175 秒的曲子实测 84 秒），所以先想清楚再调。
+
+- **一类场景一首**：别为同一情绪反复出；出之前先 `list_assets` 看 `bgm` 类目里已有什么。
+- **上游固定给约 176 秒、没有时长参数**：要它适合循环就在 prompt 里写 `seamless loop, no fade out`——循环意图只能靠提示词表达。
+- **prompt 写清四件事**：情绪（quiet / tense / bittersweet）、乐器（piano / strings / synth）、节奏（slow / mid-tempo）、用途（rainy afternoon scene）。
+- **落库后补一句适用场景**（素材表的描述）——剧作家挑曲子看的就是它，文件名看不出来。
+- 能从上面的免费源拿到现成的（尤其整部剧目需要十几首时）就别一律烧配额；AI 曲上架 Steam 需做 AI 内容披露。
+
 ## 9. 落地红线
 
 1. **授权会变，落地前逐条复核**：Pixabay 改约两次、OpenTracks 刚改名；以本站规则页为准。

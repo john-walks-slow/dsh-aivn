@@ -18,3 +18,5 @@ docs/research/
 
 # npm pack 的产物（临时）
 *.tgz
+# 素材链路离线套件的临时打包产物（e2e:media 跑完自己删）
+e2e/.media-check.mjs

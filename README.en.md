@@ -55,6 +55,18 @@ all out and everything still runs (those capabilities are simply absent):
       keys: ["<your-exa-key>"]           # with keys the stagehand also gets web_search
       baseUrl: https://api.exa.ai        # default
     shell: false                         # true = give the stagehand bash
+    image:                               # with this both roles can generate images
+      format: gemini                     # gemini | openai | modelslab (wire protocol, not a product)
+      baseUrl: http://127.0.0.1:38000    # local flow2api; point it at the official API or your gateway
+      model: gemini-3.1-flash-image
+      size: 1K                           # 1K / 2K / 4K (uppercase K), or literal pixels 1536x1024
+      apiKey: ""                         # empty = no auth header (local gateways often don't check)
+      timeoutMs: 180000
+    music:                               # with this the stagehand also gets generate_bgm
+      baseUrl: http://127.0.0.1:38000
+      model: flow-music-lyria-3.5
+      apiKey: ""
+      timeoutMs: 240000
 ```
 
 | Option | Default | What it enables | Env fallback |
@@ -63,6 +75,12 @@ all out and everything still runs (those capabilities are simply absent):
 | `tts.baseUrl` / `tts.model` / `tts.concurrency` | Fish official / `s2.1-pro-free` / `2` | — | — |
 | `search.keys` | empty | `web_search` for the stagehand (one call returns results and page text together) | `DSH_AIVN_EXA_KEYS` |
 | `shell` | `false` | The stagehand preset's `tool-bash` row actually mounts (off by default, same as AIVN's `defaultOff`) | — |
+| `image.format` / `image.baseUrl` / `image.model` | — | **baseUrl and model must both be set** for image generation: the stagehand gains `generate_image` / `commit_asset` / `recut_sprite`, the playwright a **synchronous** `generate_image`. `format` is the wire protocol, not a product name | — |
+| `image.size` | `1K` | Tier `1K`/`2K`/`4K` (uppercase K) or literal pixels `1536x1024`; gemini accepts tiers only, openai/modelslab accept both (modelslab caps at 1024) | — |
+| `image.apiKey` / `image.timeoutMs` | empty / `180000` | Leave the key empty for gateways that don't check it (no auth header is sent); raise the timeout if generation is slow | — |
+| `music.baseUrl` / `music.model` | — | Both must be set for `generate_bgm` (Gemini shape only, no `format`) | — |
+| `music.apiKey` / `music.timeoutMs` | empty / `240000` | Same as above; one track measured at ~84 s | — |
+| Cutout tuning | see "Asset generation" | `DSH_AIVN_CUTOUT_TOLERANCE` / `_KEY_SMOOTH` / `_EDGE_BAND` / `_SPILL` / `_SOLID_RESIDUAL`, five environment variables | same names |
 
 Keys in neither place = that capability is off: the tool is **not registered** and the prompt never
 mentions it. The two presets, the `/new-play` command and the `/aivn` routes are fixed and not
@@ -215,7 +233,7 @@ and not one byte of the rest of the file).
 | id | Name | What it does |
 | --- | --- | --- |
 | `aivn-playwriter` | playwright | The one that writes Stage DSL live; its output is piped into the stage |
-| `aivn-stagehand` | stage-hand assistant | Preps material: premise, character cards, creative guidelines, voice picking, research (image tools come in the next stage) |
+| `aivn-stagehand` | stage-hand assistant | Preps material: premise, character cards, creative guidelines, voice picking, image generation and committing, BGM, research |
 
 Both presets have the same set of entries: instruction-file discovery (`AGENTS.md`) + persona
 (that prompt file) + file tools + file search. **The stage-hand assistant gets two more**: the skill
@@ -288,19 +306,99 @@ the rest are role-specific:
 | Tool | Who has it | What it does |
 | --- | --- | --- |
 | `create_play` | both presets | Stands the workspace up as a new play: writes `play.json` (`id`/`title`/`opening`/`characters`), `memory/always/premise.md`, and `characters/<id>.md`. Errors out if `play.json` already exists |
-| `list_assets` | both presets | Lists **this play's** assets (`assets/` + `manifest.json`, plus character cards in `characters/`), filterable by kind and keyword. There is **no cross-play asset library** and no image generation — this is the whole inventory |
+| `list_assets` | both presets | Lists **this play's** assets (`assets/` + `manifest.json`, plus character cards in `characters/`), filterable by kind and keyword. There is **no cross-play asset library** — this is the whole inventory |
 | `beat_done` | playwright | Hands over this beat's stop point: pass `options` for an option panel, `placeholder` for a free-text input, neither for no stop point this beat. Calling it means "this beat ends here" |
 | `update_state` | playwright | Changes the play's runtime state: `affinity` (per-character affinity delta, an integer, `\|Δ\|≤5`), `flags`, `scene`, `threads`. Writes into `memory/always/state/` |
 | `get_readiness` | stage-hand assistant | Self-check before starting: `play.json`, story premise, character card count, sprites, backgrounds, asset count. **No hard gate** — you can start with anything missing |
 | `set_craft` | stage-hand assistant | Rewrites the `craft` section of `play.json` (beat length, stop-point options, asset sources), see above |
 | `list_voices` | stage-hand assistant (needs `tts.keys`) | Searches the Fish voice catalog: builds a window from language / tags / title keywords, filters `gender` locally, sorts by likes and shows the top 25. The id you pick goes into the card's `voice` |
 | `web_search` | stage-hand assistant (needs `search.keys`) | Web search: one call returns results and page text together. For facts **outside** the play — the setting, cast and plot all live in the workspace files |
+| `generate_image` | stage-hand assistant (needs `image`) | Produces **drafts**: backgrounds, CGs and sprites, with sprites cut out automatically. Generate a few candidates, let the user pick, commit only the chosen one |
+| `commit_asset` | stage-hand assistant | Commits the chosen draft for real: writes `assets/`, updates the asset sheet, records the ledger. **Only call it after the user says yes** |
+| `recut_sprite` | stage-hand assistant | Re-runs the cutout on the **original kept at commit time** (not a single pixel of the artwork changes, no quota spent) for "great picture, dirty edges" |
+| `generate_bgm` | stage-hand assistant (needs `music`) | Generates one BGM track into `assets/bgm/`; it **waits** (~84 s). `name` is the id your script references as `<scene bgm="…">` |
+| `generate_image` | playwright (needs `image`) | Missing art during a beat: **waits for the image** (70–140 s, the beat sits there), writes and commits it in one call, and returns the final path — the script line can reference it once the receipt is back |
 
 `list_voices` / `web_search` are **not registered** when their keys are absent, and the prompt
 never mentions them — the model is never taught to call a tool that does not exist. The file tools
 (`read` / `write` / `edit` / `glob` / `grep` / `read_image`) come from the preset rows and are
 present in both presets: the stage-hand assistant uses `read_image` to look at artwork and at
 images the user dropped in.
+
+## Asset generation
+
+With `image` configured both roles can generate images; they **share one implementation and differ
+only in waiting strategy**:
+
+| | stage-hand assistant | playwright |
+| --- | --- | --- |
+| Flow | **Two steps**: `generate_image` makes a draft → the user picks → `commit_asset` stores it | **One step**: `generate_image` waits, generates and commits |
+| Why | Three candidates, and the ones not picked must leave no trace in the asset sheet | Missing art mid-beat gets filled in place; the call itself declares the final id |
+
+The playwright side is **synchronous** (70–140 s, the beat sits there). AIVN queues it in the
+background and broadcasts on arrival; this plugin is a DSH session model with no out-of-turn
+injection channel, so it waits instead — at least the receipt tells the truth: by the time the
+model holds it, that asset id really is on disk and referenceable this beat.
+
+### Layout and ledger
+
+```
+play/
+├── assets/                       ← play content, goes into git
+│   ├── generated.json            ← generation ledger: the prompt each image was made from (append-only per key)
+│   └── manifest.json             ← asset descriptions and sprite presentation (framing / stature / title)
+└── media-cache/                  ← intermediates, never in git, safe to delete wholesale
+    ├── drafts/<draftId>/{image.*, source.*, draft.json}
+    ├── sprite-sources/<spriteId>/  ← pre-cutout originals (only `recut_sprite` reads these)
+    └── tts/                      ← speech cache (content-addressed)
+```
+
+Drafts live 7 days and are swept by the next generation. Add at least `media-cache/` to
+`.gitignore` (keep `assets/` tracked — that is play content).
+
+### How candidates reach the user
+
+No new HTTP route: **the receipt and the reply embed a Markdown image whose path is absolute inside
+the workspace** (`![candidate](/abs/path/to/play/media-cache/drafts/<id>/image.png)`). DSH's chat
+renders it as an inline preview (click for the full image), and since drafts and assets both live in
+the session workspace (= the play root) this works for committed assets just as well. The tool
+receipt hands over that line and the persona tells the model to paste it — "generate three
+candidates and let the user pick" only works if the user can actually see them.
+
+### Sprites: framing, stature, cutout
+
+- **`framing`** decides the generated aspect ratio and the on-stage placement: `full` 9:16 /
+  `half` 3:4 / `square` 1:1. Use `full` or `half` for people, `square` for non-human subjects
+  (cats, props) — "full body" / "half body" are human-shaped words. Keep one tier per subject; the
+  declaration lives under the `<spriteId>` key of `assets/manifest.json`.
+- **`stature`** (`small` / `normal` / `large` / `huge`) is only about how big the subject stands on
+  stage, independent of framing: a mech is "full framing + huge", a cat is "square framing + small".
+- **Cutout is automatic**: every sprite runs through a chroma-key cutout (`src/media/cutout.ts`:
+  flat key colour, global key, per-pixel edge coverage solve) and lands as a transparent PNG. When
+  the edges are dirty, **do not regenerate** — a new generation is a different picture; use
+  `recut_sprite` on the kept original. Its five knobs map to five environment variables:
+
+| Env var | Default | Effect |
+| --- | --- | --- |
+| `DSH_AIVN_CUTOUT_TOLERANCE` | `48` | Chroma-key tolerance. **Higher = cuts harder**, and eats hair strands too |
+| `DSH_AIVN_CUTOUT_SPILL` | `20` | Despill: removes residual key colour at the edges without losing a single strand. Reach for this first |
+| `DSH_AIVN_CUTOUT_EDGE_BAND` | `4` | Solve band width; widen when a hard white ring shows up |
+| `DSH_AIVN_CUTOUT_KEY_SMOOTH` | `0.8` | Key denoise; raise when JPEG ringing bites notches into the silhouette |
+| `DSH_AIVN_CUTOUT_SOLID_RESIDUAL` | `48` | Solid-colour test. **Lower** it when outlines get eaten |
+
+### How the three image formats differ
+
+| `format` | Endpoint | Reference images | Size |
+| --- | --- | --- | --- |
+| `gemini` | `/v1beta/models/{model}:generateContent` | ✅ several (`inlineData`; official API, flow2api and cpa all speak it) | tiers only: `1K`/`2K`/`4K` |
+| `openai` | `/v1/images/generations` | ❌ the endpoint has no reference-image input; passing one errors out | literal `WxH` (tiers are computed by the plugin, clamped to the official caps) |
+| `modelslab` | `/images/text2img` and `/img2img` | ✅ one (uploaded via `base64_to_url` first) | single side capped at 1024; tiers land on "long side to the cap" |
+
+**Reference images are the only reliable way to keep a character consistent**: a non-`neutral`
+sprite automatically gets that subject's committed `neutral` as its reference (prompt wording
+cannot lock a face). So the order per subject is: generate the neutral, commit one, then derive the
+other variants. And no format but `gemini` can reach 2K — cutout jaggies are only softened by
+resolution, so use `gemini` for high-quality sprites.
 
 ## Slash command
 
@@ -367,14 +465,17 @@ can't submit an input on the player's behalf.
 
 ## Permissions and compatibility
 
-- **Network**: outbound traffic has exactly two sources — Fish Audio (`api.fish.audio` or your
-  `baseUrl`, shared by catalog lookups and synthesis) when a TTS key is configured, and Exa
-  (`api.exa.ai` or your `baseUrl`) when `search.keys` is configured. With neither, not a single
-  request is sent. Everything else is local.
+- **Network**: outbound traffic has exactly four sources — Fish Audio (`api.fish.audio` or your
+  `baseUrl`, shared by catalog lookups and synthesis) when a TTS key is configured, Exa
+  (`api.exa.ai` or your `baseUrl`) when `search.keys` is configured, your image backend when
+  `image` is configured, and your music backend when `music` is configured (the latter two go
+  exactly where your `baseUrl` points; no vendor address is preconfigured). With none of them, not
+  a single request is sent. Everything else is local.
 - **Files**: reads and writes stay inside the session's working directory (that is, the play's
   directory). Tools and `/new-play` only create play files in the directory you point them at;
-  voice cache is written to `<play>/media-cache/tts/` (content-addressed, deletable as a whole at
-  any time). Paths outside the working directory are never touched.
+  voice cache, image drafts and pre-cutout originals are written under `<play>/media-cache/` (all
+  intermediates, deletable as a whole at any time). Paths outside the working directory are never
+  touched.
 - **Shell**: with `shell: false` (the default) the stage-hand assistant's `tool-bash` row stays off
   and it has no command line; setting it to `true` mounts it — from then on what it can run is no
   longer bounded by the file tools' path rules, so weigh that yourself.
@@ -449,7 +550,9 @@ Suites:
 - `stagehand` (`npm run e2e:stagehand`) — the stage-hand assistant: asserts the persona chapters,
   the "Current state" injection (file listing + readiness), that both bundled skills appear in the
   skill catalog, and that the tool surface is the stage-hand set (with none of the playwright's
-  beat-closing tools).
+  beat-closing tools). The e2e instance has **no image or music backend**, so this also asserts
+  those tools are **absent** from the tool list and that the persona never mentions them (an
+  unconfigured backend must never be advertised).
 - `voice` (`dsh-e2e run e2e/verify-voice.mjs`) — hits Fish Audio for real: asserts that voice
   frames arrive, the audio can be fetched and is a real MP3, **the browser decodes it to PCM and a
   source actually starts** (hooks are installed on `AudioContext` / `decodeAudioData` /
