@@ -103,8 +103,11 @@ dsh-e2e stop
   **别把图放进 `assets/`**：那是**剧目的**素材目录（`<剧目>/assets/…`），既会和 e2e 夹具撞名，
   也会被 `files` 一起打进包里。
 - `@aivn/core` 与 `@aivn/stage` 是**构建期依赖**（`file:` 指向兄弟仓库 `stage-ai`）：esbuild 把
-  它们打进 `lib/`，运行时不依赖——所以**消费者不需要它们**，只有从源码重建才需要（前置见 README
-  的「开发」一节）。发布前若想让新克隆也能直接构建，得先把这两个包发到 npm 再换成版本号。
+  它们打进 `lib/`，运行时不依赖——所以**消费者不需要它们**（`npm i` 只装 `dependencies`，这两个在
+  `devDependencies` 里），只有从源码重建才需要兄弟仓在位（前置见 README 的「开发」一节）。
+  **不必为此把这两个包发到 npm**：2026-10-06 查过，没有任何外部接收方需要它（诊断见 stage-ai 的
+  `docs/freeform/261006-dsh-aivn-distribution.md`）。真出现「要在没有兄弟仓的情况下从源码构建」的
+  接收方时，先走 `pnpm pack` + `vendor/` tarball 那条自包含的路，公网 npm 是最后手段。
 - 发布前跑一次隔离验证（**别碰线上 profile**）：
 
   ```bash
