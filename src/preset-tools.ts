@@ -17,7 +17,7 @@
  * 工具分三层（对齐 AIVN `TOOL_CATALOG` 的角色面）：
  *   - 基础：`validate_play`（刚写完剧目文件，问它写得对不对），**两个角色都装**——
  *     写文件的活两个角色都有，校验口就得两个角色都有；
- *   - 剧作家：`beat_done`（演出本身的收束口），配了生图后端另有同步的 `generate_image`；
+ *   - 剧作家：手里只有文件工具 + `validate_play`，配了生图后端另有同步的 `generate_image`；
  *   - 搭台助手：`set_stage_style`，加上按配置才装的 `list_voices` / `web_search` /
  *     `generate_image`（草稿）/ `commit_asset` / `recut_sprite` / `generate_bgm`。
  *
@@ -31,16 +31,19 @@
  * 注入《素材清单》与《角色表》，搭台助手的《当前状态》给文件清单，描述在它自己写过的
  * `manifest.json` 里）。为一个「read 一下就有」的视图多养一个工具面，只会让工具表更难记。
  *
- * 留下的是文件工具**做不到**的：引擎状态机（`beat_done`）、外部调用（`generate_image` /
- * `web_search` / `generate_bgm` / `list_voices`）、图像处理与台账（`commit_asset` /
- * `recut_sprite`），以及**写完要立刻推给已打开的舞台**的 `set_stage_style`。
+ * `beat_done` 也归这一条（2026-10-06 拆掉）：停止点回到剧本正文的 `<stop …/>` 标签（见
+ * `@aivn/core` 的 `STOP_TAG`），轮尾因此重新是助手消息——DSH 的「在新对话中分支」与舞台重建
+ * 都只认这种轮尾。
+ *
+ * 留下的是文件工具**做不到**的：外部调用（`generate_image` / `web_search` / `generate_bgm` /
+ * `list_voices`）、图像处理与台账（`commit_asset` / `recut_sprite`），以及**写完要立刻推给
+ * 已打开的舞台**的 `set_stage_style`。
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-agent';
 import type {} from '@deepseek-ai/dsh-agent-preset-registry';
 import type { SessionId } from '@deepseek-ai/dsh-session';
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools';
-import type { BeatGuard } from './beat-guard';
 import type { StageHub } from './hub';
 import type { MediaBackends } from './media/backends';
 import { registerPlayContext } from './play-context';
@@ -55,7 +58,6 @@ import { createWebSearchTool } from './stagehand/tools/web-search';
 import type { VoiceCatalog } from './stagehand/voice-catalog';
 import type { PlayContext } from './tools/context';
 import { createValidatePlayTool } from './tools/validate-play';
-import { createBeatDoneTool } from './playwriter/tools/beat-done';
 import { createSyncImageTool } from './playwriter/tools/generate-image';
 import { createCommitAssetTool } from './stagehand/tools/commit-asset';
 import { createGenerateBgmTool } from './stagehand/tools/generate-bgm';
@@ -95,12 +97,7 @@ export interface PresetToolsHost {
 	dispose(): void;
 }
 
-export function installPresetTools(
-	ctx: Context,
-	hub: StageHub,
-	guard: BeatGuard,
-	runtime: ToolRuntime,
-): PresetToolsHost {
+export function installPresetTools(ctx: Context, hub: StageHub, runtime: ToolRuntime): PresetToolsHost {
 	/** 每个 Agent 已装的工具、签名与它们所属的预设；WeakMap 让 Agent 走掉时不留登记。 */
 	const installed = new WeakMap<object, { signature: string; off: () => void }>();
 
@@ -118,7 +115,7 @@ export function installPresetTools(
 		if (current?.signature === signature) return;
 
 		current?.off();
-		installed.set(agent, { signature, off: install(ctx, hub, agent, preset, guard, runtime) });
+		installed.set(agent, { signature, off: install(ctx, hub, agent, preset, runtime) });
 	};
 
 	const onCreated = (payload: unknown): undefined => {
@@ -165,7 +162,6 @@ function install(
 	hub: StageHub,
 	agent: ToolAgent,
 	preset: string,
-	guard: BeatGuard,
 	runtime: ToolRuntime,
 ): () => void {
 	const deps = runtime.current;
@@ -177,9 +173,6 @@ function install(
 			const dir = agent.session?.header?.cwd;
 			if (!dir) throw new Error('这个会话还没有工作目录，取不到剧目根');
 			return dir;
-		},
-		beatClosed() {
-			guard.close(sessionId);
 		},
 		/**
 		 * 皮肤帧推给**同剧目**的每条会话流，而不是只推自己这条。
@@ -205,7 +198,6 @@ function install(
 	const offs: Array<() => void> = [];
 
 	if (preset === PLAYWRITER_PRESET) {
-		tools.push(createBeatDoneTool(play));
 		// 剧作家缺图：同步出图即入库（D3）。一次调用声明最终 id，没有「挑候选」这一步。
 		if (deps.capabilities.image) tools.push(createSyncImageTool(play, deps.media));
 	} else {

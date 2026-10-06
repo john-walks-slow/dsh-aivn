@@ -7,7 +7,7 @@
  *   消息收束（attempt end）时封口，未闭合的包裹标签自动闭合，所以一轮写到一半断了
  *   也不会把已经流出来的台词丢掉。
  * - `agent/status`：轮边界。剧作家起笔/停笔是画面「还在写字 / 写完了，等玩家」的唯一依据——
- *   `beat_done` 没给停止点的那一轮（no_stop）没有任何 IR 可看，边界就是它全部的信号。
+ *   `<stop/>`（自然演完）的那一轮没有任何 IR 可看，边界就是它全部的信号。
  *   不取消息边界（assistant-stream 的 end）是因为一轮里可以有多次消息收束（中途调工具），
  *   那会把一次演出误报成好几次收笔。
  * - `say` 那一束（`say_start` / `say_text` / `say_end`）：同一份 IR 顺手喂给语音管线。
@@ -15,8 +15,8 @@
  *   「seq = 所属 say 行 say_start 事件的序号，客户端据此关联行」）。
  * - `agent/inbox/inserted`：玩家的每一次输入。DSH 原生输入框与舞台的选肢/自由输入都经
  *   inbox 进 Agent，于是时间线上只有这一处落点，两条路既不会各写一条、也不会漏写。
- *   引擎自己投的那些（追收束、空「继续」）也走这条路，靠 `InjectedMessages` 按 id 摘出去——
- *   它们不是玩家说的话，摆上时间线就是替玩家编了一句台词。
+ *   引擎自己投的那些（开局指令、导演指令、空「继续」）也走这条路，靠 `InjectedMessages`
+ *   按 id 摘出去——它们不是玩家说的话，摆上时间线就是替玩家编了一句台词。
  * - 玩家的**第一条**消息：顺手把剧目的开局指令（`play.json` 的 `opening`）补进去，与玩家
  *   那一句同轮送到，见 `openPlay`。
  */
@@ -24,7 +24,6 @@ import type { Context } from '@deepseek-ai/cordis';
 import { StageDslParser, type StageEvent } from '@aivn/core';
 import type {} from '@deepseek-ai/dsh-agent';
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm';
-import type { BeatGuard } from './beat-guard';
 import type { StageHub } from './hub';
 import type { InjectedMessages } from './injected';
 import { loadPlaySync } from './play';
@@ -57,7 +56,6 @@ interface InboxPayload {
 export function installStageTap(
 	ctx: Context,
 	hub: StageHub,
-	guard: BeatGuard,
 	injected: InjectedMessages,
 	voice: VoiceHost,
 ): StageTap {
@@ -78,7 +76,6 @@ export function installStageTap(
 		if (!parser) {
 			parser = new StageDslParser((event) => {
 				const frame = hub.append(sessionId, event);
-				if (hasLines(event)) guard.noteLines(sessionId);
 				feedVoice(sessionId, event, frame.seq);
 			});
 			parsers.set(sessionId, parser);
@@ -115,7 +112,6 @@ export function installStageTap(
 	const onStatus = (payload: StatusPayload): void => {
 		const sessionId = payload.agent.id;
 		if (!isPlaywriter(sessionId)) return;
-		if (payload.status === 'running') guard.begin(sessionId);
 		hub.appendBeat(sessionId, payload.status === 'running' ? 'start' : 'end');
 	};
 
@@ -181,7 +177,6 @@ export function installStageTap(
 		parsers.delete(sessionId);
 		voices.delete(sessionId);
 		voice.disposeSession(sessionId);
-		guard.forget(sessionId);
 		injected.forget(sessionId);
 	};
 
@@ -214,20 +209,6 @@ export interface StageTap {
 	dispose(): void;
 	/** 这条会话的流式解析器与语音管线作废（会话被重投影了）。 */
 	forgetParser(sessionId: string): void;
-}
-
-/**
- * 这一帧算不算「台上真说了话」。
- *
- * 认文本增量（say / narrate / thought）而**不认控制指令**（scene / actor / sfx / cg）：
- * 只换了个背景、只调了一次立绘，舞台上仍然什么都没有，追收束去要一个停止点没有意义。
- * 与 AIVN `orchestrator.ts` 的 `beatHasLines` 同一个口径。
- */
-function hasLines(event: StageEvent): boolean {
-	if (event.kind === 'say_text' || event.kind === 'narrate_text' || event.kind === 'thought_text') {
-		return event.delta.trim() !== '';
-	}
-	return false;
 }
 
 /**

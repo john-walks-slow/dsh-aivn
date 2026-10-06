@@ -9,19 +9,12 @@
 import type { StageHub } from '../hub';
 
 export interface PlayContext {
-	/** 舞台事件中枢：工具产出的 IR（停止点）与其他事件走同一条流。 */
+	/** 舞台事件中枢：舞台层的 IR（皮肤帧等）与剧本文本解析出来的一致。 */
 	readonly hub: StageHub;
 	/** 会话 id；舞台 IR 流按它分频。 */
 	readonly sessionId: string;
 	/** 会话工作目录 = 剧目根。 */
 	playDir(): string;
-	/**
-	 * 本轮已经收束（`beat_done` 调过了，给不给停止点都算）。
-	 *
-	 * 只有 `beat_done` 需要调它：`beat-guard` 靠这个记号判断「模型是真收束了，
-	 * 还是写完正文忘了调工具」——忘了的那一轮才追一句把停止点要回来。
-	 */
-	beatClosed(): void;
 	/**
 	 * 把剧目皮肤推给所有正盯着这座剧目的舞台。
 	 *

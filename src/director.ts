@@ -212,7 +212,7 @@ function directorMessage(text: string): UserMessage {
  * 让剧作家停下来。
  *
  * `keepInbox` 保住排队的那几条（玩家刚排的提示不该被自己的打断吃掉），但 steering 要清：
- * 它们是为**旧内容**写的（追收束、上一句提示），留着会跟着新写的那一拍跑。
+ * 它们是为**旧内容**写的（上一句提示），留着会跟着新写的那一拍跑。
  */
 async function stop(agent: LiveAgent): Promise<void> {
 	if (agent.status === 'idle') {

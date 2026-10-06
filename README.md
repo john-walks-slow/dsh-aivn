@@ -372,6 +372,9 @@ voice: 短句，少用形容词
 ## Agent 工具
 
 工具跟着预设装、跟着预设卸。`validate_play` 两个预设都有；其余按角色分。
+**剧作家的停止点不是工具**：它是剧本正文最后一行的一个标签——`<stop options="甲 | 乙"/>`（选项面板）、
+`<stop placeholder="…"/>`（自由输入框）、`<stop/>`（这一段自然演完）。轮尾因此是一条助手消息，
+DSH 的「在新对话中分支」与舞台重建（只重放助手文本）都认得上。
 **模型用文件工具就能做的事一律没有**：`play.json`、`craft` 段、`memory/always/state/` 都是文件工具
 写出来的，写成什么样由提示词说清（见上「起一座新剧目」）；「这座剧目有什么素材」也一样——
 剧作家的 A 区每轮注入《素材清单》与《角色表》（id + 描述），搭台助手看《当前状态》的文件清单、
@@ -379,7 +382,6 @@ voice: 短句，少用形容词
 
 | 工具 | 谁有 | 作用 |
 | --- | --- | --- |
-| `beat_done` | 剧作家 | 交出这一轮的停止点：给 `options` = 选项面板；给 `placeholder` = 自由输入框；都不给 = 这一轮不设停止点。调用即是「本轮到此为止」 |
 | `validate_play` | 两个预设 | 剧目自查：`play.json` 读不读得出来（缺字段、坏 JSON 会给原因）、`craft` 里有没有引擎不认的取值、状态文件好不好、故事前提、角色卡张数、立绘、背景、素材条数。刚写过剧目文件之后调它。**没有硬门槛**，缺什么都能开演 |
 | `set_stage_style` | 搭台助手 | 写剧目根的 `theme.json`（舞台皮肤：台词条、选项卡、衬底、圆角、字体、主色），写完把全量皮肤推给同剧目已打开的舞台。三态：省略 = 不动、给值 = 改、`null` = 回默认；不带参数调用 = 看当前值。值格式与可设置的键见上 |
 | `list_voices` | 搭台助手（配了 `tts.keys` 才有） | 查 Fish 音色库挑音色：按语言 / 标签 / 标题关键词取窗口，本地按 `gender` 筛，按热度排序出前 25 条。挑好的 id 填进角色卡的 `voice` |
@@ -568,14 +570,14 @@ play/
 ## 开发
 
 **前置**：`@aivn/core` 与 `@aivn/stage` 现在走 `file:` 依赖，指向兄弟仓库
-`stage-ai`（后者要在 `.worktrees/dsh-vn-stage` 里带 `packages/stage`）：
+`stage-ai` 的 main 检出（两个包都在它的 `packages/` 下）：
 
 ```
 ~/projects/
 ├── dsh-aivn/            ← 本仓库
 └── stage-ai/
-    ├── packages/core/                  （@aivn/core）
-    └── .worktrees/dsh-vn-stage/packages/stage/   （@aivn/stage）
+    ├── packages/core/    （@aivn/core）
+    └── packages/stage/   （@aivn/stage）
 ```
 
 这两个包**只在构建期**用得到：esbuild 把它们打进 `lib/`，运行时不依赖。

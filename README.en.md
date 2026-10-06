@@ -316,9 +316,13 @@ the playwright gets the asset list and cast table injected into its A-section ev
 description), and the stage-hand assistant reads the file listing in "Current state" and
 `assets/manifest.json` when it wants descriptions.
 
+**The playwright's stop point is not a tool**: it is a tag on the last line of the script itself —
+`<stop options="A | B"/>` (option panel), `<stop placeholder="…"/>` (free-text input), `<stop/>`
+(this beat simply ends). The turn therefore ends on an assistant message, which is what DSH's
+"branch in a new conversation" and the stage rebuild (it replays assistant text only) both require.
+
 | Tool | Who has it | What it does |
 | --- | --- | --- |
-| `beat_done` | playwright | Hands over this beat's stop point: pass `options` for an option panel, `placeholder` for a free-text input, neither for no stop point this beat. Calling it means "this beat ends here" |
 | `validate_play` | both presets | Play self-check: whether `play.json` can be read (with the reason when a field is missing or the JSON is broken), whether `craft` holds values the engine does not recognise, whether the state files are sound, story premise, character card count, sprites, backgrounds, asset count. Call it right after writing play files. **No hard gate** — you can start with anything missing |
 | `list_voices` | stage-hand assistant (needs `tts.keys`) | Searches the Fish voice catalog: builds a window from language / tags / title keywords, filters `gender` locally, sorts by likes and shows the top 25. The id you pick goes into the card's `voice` |
 | `web_search` | stage-hand assistant (needs `search.keys`) | Web search: one call returns results and page text together. For facts **outside** the play — the setting, cast and plot all live in the workspace files |
@@ -523,14 +527,14 @@ can't submit an input on the player's behalf.
 ## Development
 
 **Prerequisites**: `@aivn/core` and `@aivn/stage` are `file:` dependencies for now, pointing at
-the sibling repo `stage-ai` (which needs `packages/stage` inside `.worktrees/dsh-vn-stage`):
+the `main` checkout of the sibling repo `stage-ai` (both packages live under its `packages/`):
 
 ```
 ~/projects/
 ├── dsh-aivn/            ← this repo
 └── stage-ai/
-    ├── packages/core/                  (@aivn/core)
-    └── .worktrees/dsh-vn-stage/packages/stage/   (@aivn/stage)
+    ├── packages/core/    (@aivn/core)
+    └── packages/stage/   (@aivn/stage)
 ```
 
 Those two packages are **build-time only**: esbuild bundles them into `lib/`, and nothing depends

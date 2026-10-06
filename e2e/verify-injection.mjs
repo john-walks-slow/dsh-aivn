@@ -116,13 +116,13 @@ try {
 	check('A9', prompt.includes('id: lin') && prompt.includes('id: zhou'), '《角色表》带的是两张卡的正文与 id');
 	check('A10', prompt.includes('veranda'), '《素材清单》带的是 assets/ 里真实的素材 id');
 	check('A11', !prompt.includes('不在这份提示词里'), '已经删掉阶段 1 那句「得你自己去读」');
-	// 工具面跟着角色走：剧作家有收束口与校验口，没有搭台助手那一套；
-	// 「只写一个文件」的工具一律没有——play.json / craft 段 / 状态文件都是文件工具写的。
+	// 工具面跟着角色走：剧作家只有校验口（停止点是剧本里的 <stop …/>，不是工具），
+	// 没有搭台助手那一套；「只写一个文件」的工具一律没有——play.json / craft 段 / 状态文件都是文件工具写的。
 	check('A12', !tools.includes('list_assets') && !tools.includes('list_library'), '素材清单不进工具面（旧名也不在）');
 	check(
 		'A13',
-		tools.includes('beat_done') && tools.includes('validate_play') && !tools.includes('set_stage_style'),
-		'收束口与校验口在（搭台助手那一套不在）',
+		tools.includes('validate_play') && !tools.includes('set_stage_style') && !tools.includes('beat_done'),
+		'校验口在、搭台助手那一套不在（停止点已回剧本，不再有 beat_done 工具）',
 	);
 	check(
 		'A13b',

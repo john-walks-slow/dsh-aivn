@@ -120,7 +120,7 @@ export function rebuildStage(
 			continue;
 		}
 		if (event.type !== 'user/message') continue;
-		// 玩家说过的话才上时间线。引擎自己投的（开局指令、追收束、继续、导演指令）不算——
+		// 玩家说过的话才上时间线。引擎自己投的（开局指令、继续、导演指令）不算——
 		// 与实时那一路同一个口径，见 `injected.ts`。
 		if (injected.claim(sessionId, message.id)) continue;
 		if (message.source.kind !== 'user') continue;

@@ -6,9 +6,9 @@
 
 | 路径 | 是什么 |
 | --- | --- |
-| `src/` | 宿主半边（Cordis 插件）：中枢、DSL 管线、路由、剧目脚手架、追收束 |
+| `src/` | 宿主半边（Cordis 插件）：中枢、DSL 管线、路由、剧目脚手架 |
 | `src/play-context.ts` | A 区注入：把前提 / 角色表 / 素材清单 / 写作参数 / 记忆索引 / 状态区挂进系统提示词 |
-| `src/playwriter/` | 剧作家预设、提示词与它专属的工具（`beat_done`，配了生图另有同步的 `generate_image`） |
+| `src/playwriter/` | 剧作家预设与提示词；它专属的工具只剩配了生图才有的同步 `generate_image`（停止点是剧本里的 `<stop …/>`，不是工具） |
 | `src/tools/` | 两个预设共用的工具与工具上下文（`validate_play` / `PlayContext`） |
 | `src/play-files.ts` | 《剧目文件》那一章：目录布局与 `play.json` / 角色卡的字段，**两个预设共用同一段文本**（写文件就是建剧目，没有「起剧目」工具） |
 | `src/client/` | 浏览器半边（React），挂在 `conversation.view` 槽 |
@@ -26,11 +26,13 @@
 3. **「当前是什么预设」只认活的组合**：`ctx.agentPresets.composedPreset(agent.ctx)` 是权威，
    `session.header.agentPreset` 只在创建那一刻为真。新会话界面是「先建会话、再选预设」，
    那条路只记事件、不改头——只读头会把整条舞台管线丢空。见 `src/session.ts` 的 `sessionPreset`。
-4. **剧作家漏调 `beat_done` 是常态，不是异常。** 快模型时不时把它写成正文里的一行
-   `<beat_done …/>`。`src/beat-guard.ts` 在 `agent/turn-stopping` 上追一句把停止点要回来——
-   删掉它，舞台会在半句台词之后停住、玩家没有可点的东西。追收束那一句与舞台的「继续」
-   都会落进 `agent/inbox/inserted`，得在 `src/injected.ts` 里按 `message.id` 登记摘除，
-   否则它们会变成玩家台词条上的一行（**别退回按正文比对**，改一个字就静默失效）。
+4. **停止点是剧本正文最后一行的一个标签**（`<stop options="甲 | 乙"/>` / `<stop placeholder="…"/>` /
+   `<stop/>`），不是工具调用——2026-10-06 从 `beat_done` 挪回来的，为的是让轮尾重新是助手消息
+   （DSH 的「在新对话中分支」与舞台重建只认这种轮尾）。标签由 `@aivn/core` 的解析器产出 IR，
+   所以**改语法要动 stage-ai 的 `packages/core` 并重建它的 `dist`**（dsh-aivn 吃的是 dist）。
+   引擎自己补的消息（开局指令、导演指令、舞台的「继续」）都会落进 `agent/inbox/inserted`，
+   得在 `src/injected.ts` 里按 `message.id` 登记摘除，否则它们会变成玩家台词条上的一行
+   （**别退回按正文比对**，改一个字就静默失效）。
    引擎自己补的消息想挤进**当前**那一轮只能用 `agent.inject`（落 `next-step`，整批认领）：
    `followup` 落 `next-turn`，而一轮只认领一条，第二条要等下一轮。开局指令就是这么补的
    （`stage-tap.ts` 的 `openPlay`，跟着玩家的第一条消息走）。

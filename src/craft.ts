@@ -61,10 +61,10 @@ const BEAT_LENGTH_DIRECTIVE: Record<CraftBeatLength, string> = {
  * 这一条只定「给了就是几条」。写成「每次给」会让它每轮都硬塞一组选项，narrative 再也收不了尾。
  */
 const STOP_OPTIONS_DIRECTIVE: Record<CraftStopOptions, string> = {
-	two: '有停止点时给 2 条互斥选项：beat_done(options=["…", "…"])。',
-	three: '有停止点时给 3 条互斥选项：beat_done(options=["…", "…", "…"])。',
-	four: '有停止点时给 4 条互斥选项：beat_done(options=["…", "…", "…", "…"])。',
-	free: '固定停在自由输入框：beat_done(placeholder="…")，不给 options。',
+	two: '有停止点时给 2 条互斥选项：<stop options="… | …"/>。',
+	three: '有停止点时给 3 条互斥选项：<stop options="… | … | …"/>。',
+	four: '有停止点时给 4 条互斥选项：<stop options="… | … | … | …"/>。',
+	free: '固定停在自由输入框：<stop placeholder="…"/>，不给 options。',
 };
 
 /**

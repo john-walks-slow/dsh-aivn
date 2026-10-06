@@ -4,8 +4,7 @@
  * 会话工作区即剧目：剧作家预设的会话写 DSL，`stage-tap` 把它解析成舞台 IR
  * 送进中枢，`routes` 把这条流按会话分频发给浏览器半边的「舞台」视图。
  * 剧作家本人（预设 + 提示词 + 工具）在 `playwriter/`，按预设装工具的装配在 `preset-tools.ts`，
- * 起剧目那一步在 `scaffold.ts`（Agent 走 `tools/create-play.ts`，人走 `commands.ts`），
- * 漏调 `beat_done` 的兜底在同轮追收束 `beat-guard.ts`。
+ * 起剧目那一步在 `commands.ts`（人走斜杠命令，Agent 自己写文件）。
  *
  * `agentPresets`（注册两个预设）与 `commands`（起剧目的斜杠命令）都是插件直接访问的 ctx 服务，
  * 必须写进 `inject`——漏了它运行时会抛 `cannot get property X without inject`。
@@ -16,7 +15,6 @@ import type { Context, Volatile } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
 import type {} from '@deepseek-ai/dsh-settings';
 import type {} from '@deepseek-ai/cordis-plugin-loader';
-import { BeatGuard, installBeatGuard } from './beat-guard';
 import { installPlayCommands } from './commands';
 import { Director } from './director';
 import { StageHub } from './hub';
@@ -197,8 +195,7 @@ function describeCapabilities(capabilities: Capabilities): string {
 
 export async function apply(ctx: Context, config: Config): Promise<() => void> {
 	const hub = new StageHub();
-	const guard = new BeatGuard();
-	/** 「引擎自己投的消息」的登记，追收束（`beat-guard`）与静默推进（`routes`）共用一份。 */
+	/** 「引擎自己投的消息」的登记，开局指令（`stage-tap`）与导演指令（`director`）共用一份。 */
 	const injected = new InjectedMessages();
 
 	const runtime = { revision: 0, current: buildRuntime(config) };
@@ -215,7 +212,7 @@ export async function apply(ctx: Context, config: Config): Promise<() => void> {
 		ctx.logger,
 	);
 
-	const tap = installStageTap(ctx, hub, guard, injected, voice);
+	const tap = installStageTap(ctx, hub, injected, voice);
 	// 导演的动作全是**会话层**的：提示投进下一轮，改写/重写往会话里加一条替换标记。
 	const director = new Director(hub, injected);
 	// 帧流的真相源是会话面：这条把「会话现在长什么样」重投影成一条帧流（回退、重写、分支、重启）。
@@ -229,12 +226,11 @@ export async function apply(ctx: Context, config: Config): Promise<() => void> {
 		pendingGuides: (sessionId) => director.snapshot(sessionId),
 	});
 
-	const tools = installPresetTools(ctx, hub, guard, runtime);
+	const tools = installPresetTools(ctx, hub, runtime);
 	const presets = await registerPresets(ctx, { shell: runtime.current.capabilities.shell });
 	const disposers: Array<() => void> = [
 		tap.dispose,
 		tools.dispose,
-		installBeatGuard(ctx, guard, injected),
 		installPlayCommands(ctx),
 		presets.dispose,
 		director.install(ctx),
