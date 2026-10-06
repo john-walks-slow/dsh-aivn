@@ -116,15 +116,19 @@ try {
 	check('A9', prompt.includes('id: lin') && prompt.includes('id: zhou'), '《角色表》带的是两张卡的正文与 id');
 	check('A10', prompt.includes('veranda'), '《素材清单》带的是 assets/ 里真实的素材 id');
 	check('A11', !prompt.includes('不在这份提示词里'), '已经删掉阶段 1 那句「得你自己去读」');
-	// 工具面跟着角色走：备料那两个（validate_play / set_craft）归搭台助手，剧作家不再有；
-	// 素材清单改名 list_assets 之后两个角色都有；「起剧目」工具已经取消——写文件就是建剧目。
+	// 工具面跟着角色走：剧作家有收束口与校验口，没有搭台助手那一套；
+	// 「只写一个文件」的工具一律没有——play.json / craft 段 / 状态文件都是文件工具写的。
 	check('A12', tools.includes('list_assets') && !tools.includes('list_library'), '素材清单叫 list_assets（旧名不在）');
 	check(
 		'A13',
-		!tools.includes('validate_play') && !tools.includes('set_craft') && tools.includes('beat_done'),
-		'备料工具不在剧作家手里（收束口在）',
+		tools.includes('beat_done') && tools.includes('validate_play') && !tools.includes('set_stage_style'),
+		'收束口与校验口在（搭台助手那一套不在）',
 	);
-	check('A13b', !tools.includes('create_play'), '没有「起剧目」工具（play.json 用文件工具写）');
+	check(
+		'A13b',
+		!['create_play', 'set_craft', 'update_state'].some((name) => tools.includes(name)),
+		'没有「只写一个文件」的工具（play.json / craft / 状态都走文件工具）',
+	);
 	// 剧作家也要知道东西放哪、字段什么形状：同一段《剧目文件》文本挂进它的提示词
 	check(
 		'A13c',

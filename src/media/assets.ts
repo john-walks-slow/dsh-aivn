@@ -203,7 +203,9 @@ export class PlayAssets {
 		const backend = this.imageBackend();
 		const spec = await this.resolve(target);
 		if (spec.kind === 'sprite') {
-			if (target.references?.length) {
+			// **只有差分**不吃显式垫图：它的身份基准恒为入库的 neutral 那张，换基准会与既有差分
+			// 不是同一个人。定妆照本身正是「拿一张既有图定妆」的入口，垫图照收（AIVN 同口径）。
+			if (spec.variant !== NEUTRAL && target.references?.length) {
 				throw new Error(
 					`立绘差分不吃显式垫图：身份基准恒为 ${spec.spriteId} 的 ${NEUTRAL} 定妆照` +
 						'（换基准会与既有差分不是同一个人）。要换基准就重出定妆照。',
@@ -499,17 +501,20 @@ export class PlayAssets {
 		const key = spec.spriteId;
 		await this.withManifest((current) => {
 			const level = current[key] ?? {};
+			// 立绘级取景以**定妆照**那一次为准：它是所有差分的垫图基准，一条 closeup 不该把基准带跑。
+			// 差分的取景写在自己的键上（下面那条覆盖），差多少写多少。
+			const neutral = spec.variant === NEUTRAL;
 			const next: Record<string, AssetMeta> = {
 				...current,
 				[key]: {
 					...level,
 					...(spec.title ? { title: spec.title } : {}),
-					...(spec.framing ? { framing: spec.framing } : {}),
-					...(spec.stature ? { stature: spec.stature } : {}),
+					...(neutral && spec.framing ? { framing: spec.framing } : {}),
+					...(neutral && spec.stature ? { stature: spec.stature } : {}),
 				},
 			};
 			// 差分与立绘级取景不同才写一条覆盖（否则键位重复、以后改一处忘另一处）。
-			if (spec.variant && spec.variant !== NEUTRAL && spec.framing && spec.framing !== level.framing) {
+			if (!neutral && spec.framing && spec.framing !== level.framing) {
 				const variantKey = `${spec.spriteId}/${spec.variant}`;
 				next[variantKey] = { ...next[variantKey], framing: spec.framing };
 			}

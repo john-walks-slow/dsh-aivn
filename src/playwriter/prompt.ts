@@ -8,9 +8,9 @@
  * 写作参数、记忆索引、世界状态。凡提示词里提到「自己去看」的地方，指的都是这些注入段，
  * 不是某个工具。
  *
- * 本阶段剧作家装得上的工具：`list_assets`、`beat_done`、`update_state`，加上 DSH 的文件工具
+ * 本阶段剧作家装得上的工具：`list_assets`、`validate_play`、`beat_done`，加上 DSH 的文件工具
  * （read / write / edit / glob / grep）。**提示词里出现的工具名不出这个集合**——
- * `validate_play` / `set_craft` 归搭台助手，`generate_image` / `import_asset` / 联网检索 / 技能库 /
+ * `set_stage_style` / `list_voices` / `web_search` 归搭台助手，`generate_image` / `import_asset` / 技能库 /
  * 限制级通道 / 记忆详情与归档检索都还没实现，对应的整章一律删掉，不留悬空承诺。
  */
 
@@ -113,7 +113,7 @@ bottom（贴地，默认）、center（居中悬空）、top（从上垂下）�
 - 想给一个自由回答的口子 → beat_done(placeholder="想对他说什么？")。
 - 这一段自然演完 → beat_done()，两个参数都不给。
 
-beat_done **独占一次工具调用**，不与 update_state、write / edit 等其他工具放在同一批里。
+beat_done **独占一次工具调用**，不与 write / edit 等其他工具放在同一批里。
 调完之后本轮就结束，不要再输出任何内容（没有停止点时也不要写收尾交代或过场说明）。`;
 
 /**
@@ -131,7 +131,21 @@ const MEMORY_RULES = `## 记忆卡（memory/index/）
 
 - **改既有卡先 read、再用 edit 定点改**，整篇 write 容易把没提到的内容抹掉。
 - 写具体可用的设定（地点长什么样、约定是什么），不写「待补充」。
-- 角色不在这里，走 \`characters/<id>.md\`（见《引入新角色》）；当前状态（场景/剧情线/好感度/旗标）走 \`update_state\`。`;
+- 角色不在这里，走 \`characters/<id>.md\`（见《引入新角色》）。
+
+## 世界状态（memory/always/state/）
+
+当前局势不是记忆卡，是三个文件——**你自己写，也是你自己读**：开写前 read 一遍当最新世界状态，
+有实质推进才改（别每轮都动）：
+
+    memory/always/state/scene.md      当前场景：地点、在场的人、时间（一两行，全文覆盖）
+    memory/always/state/threads.md    活跃剧情线与悬念（要点列表，全文覆盖）
+    memory/always/state/state.json    { "affinity": { "<角色 id>": 数字 }, "flags": { "名": 值 } }
+
+- 好感度写在 \`affinity\` 里，**键是角色 id**（\`characters/<id>.md\` 的文件名），值是 **0~100 的整数**；
+  每次推进的**变化量不超过 5**——先 read 现值，加上这一轮的变化再写回去，别把它写成别的意思。
+- 旗标写目标值（字符串/数字/布尔）。只动要改的键，别把整个 state.json 重写成你不确定的样子。
+- 写坏了不报错但会悄悄少几行：拿不准就调 \`validate_play\` 看一眼。`;
 
 /**
  * 引入台上还没有的新主体时的三条路（建档 / 立绘 / 临时角色）。
@@ -180,8 +194,8 @@ const CONTRACT_RULES = `# 演出契约（引擎规则，不可改）
 
 1. 指令先于台词：先铺场景/立绘，再写这一轮的台词。
 2. 角色情绪/表情变化时，用 actor 指令同步切换 variant 差分——say 的 mood 只是文字标注，不驱动立绘。
-3. 世界状态（当前场景、剧情线、好感度、旗标）落在 \`memory/always/state/\`，由 update_state 维护。
-   开写前 read 它，把它当作最新世界状态。
+3. 世界状态（当前场景、剧情线、好感度、旗标）落在 \`memory/always/state/\` 的三个文件里，
+   由你自己维护（格式见《记忆卡》那一章的「世界状态」）。开写前 read 它，把它当作最新世界状态。
 4. 玩家消息以「OOC」开头 = 导演指示，据此调整接下来的演出方向，但不要复述它、不要跳出戏外回应它；
    否则 = 其中某个角色（可能就是主角，也可能是别人）的行动、话语或心理，照字面意思演成该角色的言行。
    两种都不要在剧本里复述这段文字本身。

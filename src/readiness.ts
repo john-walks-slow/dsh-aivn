@@ -17,7 +17,8 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { listAssets } from './assets';
-import { loadPlaySync } from './play';
+import { CRAFT_ENUMS } from './craft';
+import { PLAY_FILE, loadPlaySync } from './play';
 
 const IMAGE = /\.(png|jpe?g|webp)$/i;
 
@@ -26,6 +27,10 @@ export interface PlayReadiness {
 	play: boolean;
 	/** 在但读不出来时的原因（引擎报的那句话）；读得出来或压根不在时为 undefined。 */
 	problem?: string;
+	/** `craft` 段里引擎不认的取值（会被静默当没写）；空数组 = 都认。 */
+	strayCraft: string[];
+	/** `memory/always/state/state.json` 读不出来或值不合规时的原因；没问题时为 undefined。 */
+	stateProblem?: string;
 	/** `memory/always/premise.md` 有内容（世界观前提的唯一真相源）。 */
 	premise: boolean;
 	/** `characters/*.md` 的张数。 */
@@ -47,10 +52,13 @@ export function readPlayReadiness(dir: string): PlayReadiness {
 		problem = error instanceof Error ? error.message : String(error);
 	}
 	const index = listAssets(dir);
+	const stateProblem = readStateProblem(dir);
 
 	return {
 		play,
 		...(problem === undefined ? {} : { problem }),
+		strayCraft: strayCraftValues(dir),
+		...(stateProblem === undefined ? {} : { stateProblem }),
 		premise: readText(join(dir, 'memory', 'always', 'premise.md')).trim() !== '',
 		characters: countCharacters(dir),
 		sprites: hasAnySprite(join(dir, 'assets', 'sprites')),
@@ -69,7 +77,11 @@ export function renderReadiness(r: PlayReadiness): string {
 		`- 立绘：${r.sprites ? '✓' : '缺（assets/sprites/<主体id>/）——没有立绘的主体不上台，改用旁白交代'}`,
 		`- 背景图：${r.background ? '✓' : '缺（assets/backgrounds/）——没有背景就落氛围底色，照样能演'}`,
 		`- 素材清单：${r.assets > 0 ? `${r.assets} 个文件` : '空'}——现在没有生图，素材要放进 assets/`,
-	].join('\n');
+		r.strayCraft.length > 0 ? `- 写作参数：这些取值引擎不认、会被当没写——${r.strayCraft.join('；')}` : null,
+		r.stateProblem ? `- 世界状态：${r.stateProblem}` : null,
+	]
+		.filter(Boolean)
+		.join('\n');
 }
 
 /** 立绘目录里有没有图：每个主体一个目录，任一目录里有一张就算齐备。 */
@@ -100,4 +112,58 @@ function readText(path: string): string {
 		if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
 		throw error;
 	}
+}
+
+/**
+ * `craft` 段里引擎不认的取值。
+ *
+ * 白名单外的值会被 `parsePlayConfig` **静默当没写**——以前这条路由 `set_craft` 的参数枚举挡着，
+ * 现在参数是模型用 edit 写进去的，只能在这里报出来。
+ */
+function strayCraftValues(dir: string): string[] {
+	const raw = readText(join(dir, PLAY_FILE));
+	if (!raw) return [];
+	let craft: unknown;
+	try {
+		craft = (JSON.parse(raw) as { craft?: unknown }).craft;
+	} catch {
+		return []; // 文件坏掉由 `problem` 那一行说，这里不重复报
+	}
+	if (typeof craft !== 'object' || craft === null) return [];
+
+	const root = craft as Record<string, unknown>;
+	const assets = (typeof root.assets === 'object' && root.assets !== null ? root.assets : {}) as Record<string, unknown>;
+	const slots: Array<[string, unknown, readonly string[]]> = [
+		['beatLength', root.beatLength, CRAFT_ENUMS.beatLength],
+		['stopOptions', root.stopOptions, CRAFT_ENUMS.stopOptions],
+		['assets.background', assets.background, CRAFT_ENUMS.background],
+		['assets.cg', assets.cg, CRAFT_ENUMS.cg],
+		['assets.sprite', assets.sprite, CRAFT_ENUMS.sprite],
+		['assets.audio', assets.audio, CRAFT_ENUMS.audio],
+	];
+	return slots
+		.filter(([, value, allowed]) => value !== undefined && value !== null && !allowed.includes(String(value)))
+		.map(([path, value, allowed]) => `craft.${path} = ${JSON.stringify(value)}（只认 ${allowed.join(' / ')}）`);
+}
+
+/**
+ * 状态文件的问题：`state.json` 不是 JSON、或好感度不是 0~100 的整数。
+ *
+ * 状态文件由剧作家自己写（`update_state` 删掉之后），注入的【状态】区会照读、坏的那几行悄悄少掉——
+ * 所以这里替它说出来。单次变化幅度（|Δ|≤5）没法从一份文件里看出来，那条只能靠提示词。
+ */
+function readStateProblem(dir: string): string | undefined {
+	const raw = readText(join(dir, 'memory', 'always', 'state', 'state.json'));
+	if (raw.trim() === '') return undefined;
+	let affinity: Record<string, unknown>;
+	try {
+		affinity = (JSON.parse(raw) as { affinity?: Record<string, unknown> }).affinity ?? {};
+	} catch (error) {
+		return `state.json 不是合法 JSON（${error instanceof Error ? error.message : String(error)}）——【状态】区会少几行`;
+	}
+	const bad = Object.entries(affinity).filter(
+		([, value]) => !Number.isInteger(value) || (value as number) < 0 || (value as number) > 100,
+	);
+	if (bad.length === 0) return undefined;
+	return `好感度只认 0~100 的整数，这几个不是：${bad.map(([id, value]) => `${id}=${JSON.stringify(value)}`).join('、')}`;
 }

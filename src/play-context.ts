@@ -100,7 +100,7 @@ export function readPlaySnapshot(dir: string, canImage: () => boolean = () => fa
 	const craftFile = readText(join(dir, 'memory', 'always', 'craft.md')).trim();
 	const craft = `${renderCraftParams(resolveCraft(play.config.craft), assetCapabilitiesOf({ image: canImage() }))}（上面是${
 		play.config.craft ? '这座剧目 `play.json` 的 `craft` 段' : '引擎默认口径，`play.json` 的 `craft` 段没写过'
-	}；改它用 \`set_craft\`。）${craftFile ? `\n\n${craftFile}` : ''}`;
+	}；想改就 edit 这一格。）${craftFile ? `\n\n${craftFile}` : ''}`;
 
 	return {
 		language,
@@ -338,8 +338,8 @@ function collectCards(root: string, dir = root, layer = ''): MemoryCard[] {
 /* ── 状态区 ─────────────────────────────────────────────────────────────── */
 
 /**
- * 【状态】区（物化成 user 角色快照）。来源是 `update_state` 写下的那三个文件：
- * `scene.md` / `threads.md` / `state.json`。
+ * 【状态】区（物化成 user 角色快照）。来源是剧作家自己写下的那三个文件：
+ * `scene.md` / `threads.md` / `state.json`（格式见剧作家提示词的《记忆卡》章）。
  */
 function renderState(dir: string, characterIds: readonly string[]): string {
 	const stateDir = join(dir, 'memory', 'always', 'state');
@@ -378,7 +378,7 @@ function renderState(dir: string, characterIds: readonly string[]): string {
 		.join('\n');
 
 	if (!body) return '';
-	return `【状态】\n${body}\n\n状态由 update_state 维护；有实质推进就更新它，别让它停在开头的零。`;
+	return `【状态】\n${body}\n\n状态就是上面三个文件，由你自己写：有实质推进就改它们，别让它停在开头的零。`;
 }
 
 /* ── 角色卡读盘 ─────────────────────────────────────────────────────────── */

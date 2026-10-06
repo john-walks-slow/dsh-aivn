@@ -15,6 +15,7 @@
  * `配乐`（`can.music`）、`命令行`（`can.shell`）、`联网检索`（`can.search`），
  * 设定流程第 3 步按 `can.image` 分叉。
  */
+import { CRAFT_ENUMS } from '../craft';
 import { PLAY_FILES } from '../play-files';
 import type { Capabilities } from './capabilities';
 
@@ -75,7 +76,8 @@ function setupFlow(can: Capabilities): string {
    一次性摆给用户看，等一句「可以 / 就这样」再落盘。${shellHint}
 ${imageStep}
 4. **落盘后同步记忆**：premise 写进 \`memory/always/premise.md\`，**创作口径写进
-   \`memory/always/craft.md\`**、**写作参数用 \`set_craft\`**（两者分别装什么见下面「剧目写作要点」）；
+   \`memory/always/craft.md\`**、**写作参数用 edit 写进 \`play.json\` 的 \`craft\` 段**
+   （两者分别装什么见下面「剧目写作要点」）；
    素材的描述补进 \`assets/manifest.json\`。不是只在对话里说一句。`;
 }
 
@@ -127,6 +129,26 @@ function assetGuide(can: Capabilities): string {
 }
 
 /**
+ * 写作参数那张表：取值直接从 core 的白名单渲染——提示词里再抄一份就是下一个会漂的地方。
+ */
+function craftTable(): string {
+	const row = (key: string, values: readonly string[], note: string): string =>
+		`| \`${key}\` | ${values.map((value) => `\`${value}\``).join(' / ')} | ${note} |`;
+	return [
+		'| 键 | 认的值 | 是什么 |',
+		'|---|---|---|',
+		row('beatLength', CRAFT_ENUMS.beatLength, '一轮写多长'),
+		row('stopOptions', CRAFT_ENUMS.stopOptions, '停止点给几条选项'),
+		row('assets.background', CRAFT_ENUMS.background, '背景从哪来'),
+		row('assets.cg', CRAFT_ENUMS.cg, '插图从哪来'),
+		row('assets.sprite', CRAFT_ENUMS.sprite, '立绘从哪来'),
+		row('assets.audio', CRAFT_ENUMS.audio, '音乐音效从哪来'),
+		'',
+		'\`library\` / \`library-first\` 那两个值本插件没有对应能力（没有跨剧目素材库），写了等于没写。',
+	].join('\n');
+}
+
+/**
  * 剧目写作要点：这一章最实，逐份文件说清「写在哪、写什么」。
  *
  * 音色那一段按 `can.voice` 收条件：没配 Fish key 时 `list_voices` 根本没注册，
@@ -143,11 +165,17 @@ function writingPoints(can: Capabilities): string {
 他想要什么、被什么困住。这是剧作家每一轮都要读的唯一真相源，含糊一句它就要自己编。
 
 **创作口径（\`memory/always/craft.md\`）**：散文口径——文风、人称与称呼习惯、禁忌、这个剧目
-特有的约定。**只装「用话说得清」的部分**：能结构化的（每轮篇幅、停止点选项数）走 \`set_craft\`
-写进 \`play.json\`，不要两边都写一遍。
+特有的约定。**只装「用话说得清」的部分**：能结构化的（每轮篇幅、停止点选项数）写进 \`play.json\`
+的 \`craft\` 段，不要两边都写一遍。
 
-**写作参数（\`set_craft\`）**：每轮篇幅、停止点选项数、素材来源四类。省略某个字段 = 保持现状，
-给 \`null\` = 恢复引擎默认。当前生效值在「写作参数」那段注入里，改之前先看一眼。
+**写作参数（\`play.json\` 的 \`craft\` 段）**：每轮篇幅、停止点选项数、素材来源四类。**用 \`edit\`
+定点改这一个键**，文件里其余字段一个字节都别动。不写某一项 = 走引擎默认（默认值日后改了它跟着改），
+要钉死就写进去。取值只认这几个：
+
+${craftTable()}
+
+写错的值引擎**静默当没写**——写完拿 \`validate_play\` 核一遍。当前生效值在注入的「写作参数」
+那段里，改之前先看一眼。
 
 **角色卡（\`characters/<id>.md\`）**：格式见《剧目文件》；内容上只写「这个人在戏里怎么动」——
 年龄、身份、关系、说话方式、在意什么。卡写得像小传，剧作家就演得出来。
@@ -156,8 +184,8 @@ function writingPoints(can: Capabilities): string {
 得到这一行），其余写详情。层（子目录）是自定的分组，比如 \`world\` / \`cast\` / \`items\`。
 卡是「剧作家翻得到、这次不必全读」的资料——地点规则、组织关系、专有名词都适合放这里。
 
-**\`play.json\`**：字段表见《剧目文件》。写作参数那一格（\`craft\`）用 \`set_craft\` 改，别手写——
-它有白名单与「省略 / \`null\`」两套语义。
+**\`play.json\`**：字段表见《剧目文件》。写作参数那一格（\`craft\`）用 edit 定点改——
+「不写 = 引擎默认」，取值表见上一段。
 
 **素材描述表（\`assets/manifest.json\`）**：键是素材 id（立绘差分写成 \`<主体id>/<差分名>\`），
 值是描述。别删别人写的键，也别把整张表重写一遍——它有两个写者（你与用户）。

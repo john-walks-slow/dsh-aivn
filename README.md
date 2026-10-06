@@ -131,6 +131,7 @@ memory/always/premise.md           世界观前提
 memory/always/craft.md             文风与禁忌（散文，只能拿话说）
 memory/always/state/scene.md       当下场景（剧作家自己写）
 memory/always/state/threads.md     未了线索（剧作家自己写）
+memory/always/state/state.json     好感度与旗标（同上：好感度是 0~100 的整数，键是角色 id）
 characters/<id>.md                 角色卡
 assets/backgrounds/…               背景
 assets/cg/…                        插图
@@ -223,7 +224,9 @@ voice: 短句，少用形容词
 手工放进 `assets/` 的那些。文风、禁忌、称呼习惯这类只能拿话说的口径写在
 `memory/always/craft.md`，不在 `play.json` 里。
 
-剧作家用 `set_craft` 工具改写这一段（只动 `craft` 一个键，文件里其余部分一个字节都不碰）。
+**这一段用 `edit` 定点改**（只动 `craft` 这一个键，文件里其余部分一个字节都不碰）。工具里没有
+`set_craft`：写文件就是写文件。写错的值引擎**静默当没写**——改完让搭台助手调 `validate_play`，
+它会把不认的取值报出来。
 
 ### theme.json：舞台皮肤
 
@@ -328,16 +331,15 @@ voice: 短句，少用形容词
 
 ## Agent 工具
 
-工具跟着预设装、跟着预设卸。`list_assets` 两个预设都有；其余按角色分。
-**没有「起剧目」工具**：`play.json` 是文件工具写出来的（见上「起一座新剧目」）。
+工具跟着预设装、跟着预设卸。`list_assets` 与 `validate_play` 两个预设都有；其余按角色分。
+**「只写一个文件」的工具一律没有**：`play.json`、`craft` 段、`memory/always/state/` 都是文件工具
+写出来的，写成什么样由提示词说清（见上「起一座新剧目」）。
 
 | 工具 | 谁有 | 作用 |
 | --- | --- | --- |
 | `list_assets` | 两个预设 | 列**这座剧目**的素材（`assets/` + `manifest.json`，外加 `characters/` 里的角色卡），可按类目与关键词过滤。**没有跨剧目的素材资源库**——列的就是这座剧目的全部家当 |
 | `beat_done` | 剧作家 | 交出这一轮的停止点：给 `options` = 选项面板；给 `placeholder` = 自由输入框；都不给 = 这一轮不设停止点。调用即是「本轮到此为止」 |
-| `update_state` | 剧作家 | 改剧目的运行状态：`affinity`（角色好感度增量，整数、`\|Δ\|≤5`）、`flags`、`scene`、`threads`。写进 `memory/always/state/` |
-| `validate_play` | 搭台助手 | 剧目自查：`play.json` 读不读得出来（缺字段、坏 JSON 会给原因）、故事前提、角色卡张数、立绘、背景、素材条数。刚写过剧目文件之后调它。**没有硬门槛**，缺什么都能开演 |
-| `set_craft` | 搭台助手 | 改写 `play.json` 的 `craft` 段（每轮篇幅、停止点选项数、素材来源），见上 |
+| `validate_play` | 两个预设 | 剧目自查：`play.json` 读不读得出来（缺字段、坏 JSON 会给原因）、`craft` 里有没有引擎不认的取值、状态文件好不好、故事前提、角色卡张数、立绘、背景、素材条数。刚写过剧目文件之后调它。**没有硬门槛**，缺什么都能开演 |
 | `set_stage_style` | 搭台助手 | 写剧目根的 `theme.json`（舞台皮肤：台词条、选项卡、衬底、圆角、字体、主色），写完把全量皮肤推给同剧目已打开的舞台。三态：省略 = 不动、给值 = 改、`null` = 回默认；不带参数调用 = 看当前值。值格式与可设置的键见上 |
 | `list_voices` | 搭台助手（配了 `tts.keys` 才有） | 查 Fish 音色库挑音色：按语言 / 标签 / 标题关键词取窗口，本地按 `gender` 筛，按热度排序出前 25 条。挑好的 id 填进角色卡的 `voice` |
 | `web_search` | 搭台助手（配了 `search.keys` 才有） | 联网检索：一次调用同时拿回结果与正文。只查剧目之外的事实——设定、角色、剧情都在工作区文件里 |

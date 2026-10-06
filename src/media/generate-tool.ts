@@ -10,6 +10,7 @@
  * 抠底参数不在这里：填它得先看过成图，而出图那一刻没人看过图。改抠底是看到脏边之后的事，
  * 走单独的 `recut_sprite`。
  */
+import { COMMON_SPRITE_VARIANTS } from '@aivn/core';
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 import type { AssetTarget, DraftedAsset, GeneratedAsset } from './assets';
 
@@ -35,7 +36,7 @@ export const IMAGE_PARAMETERS = {
 	variant: {
 		type: 'string',
 		description:
-			'立绘差分名（neutral / smile / sad / damaged / sleepy…）。不给按 neutral。**要几个差分就分几次调用**，' +
+			`立绘差分名（${COMMON_SPRITE_VARIANTS.join(' / ')}，也可以自己按状态取名）。不给按 neutral。**要几个差分就分几次调用**，` +
 			'每张写自己的 prompt（一批共用一个 prompt 只会出成同一张图）。非人主体同样用这个槽位，名字按状态取。',
 	},
 	references: {

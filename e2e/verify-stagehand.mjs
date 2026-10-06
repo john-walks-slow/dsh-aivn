@@ -11,7 +11,7 @@
  * 运行：dsh-e2e run e2e/verify-stagehand.mjs
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { clearPlay, seedPlay } from './lib/fixture.mjs';
 import {
@@ -93,6 +93,14 @@ async function capture(page, sessionDir) {
 }
 
 const fixture = seedPlay(WORKSPACE);
+
+// 再塞两个坏值——它们以前分别由 `set_craft` 的参数枚举与 `update_state` 挡着，那两个工具删掉之后，
+// 只有 `validate_play`（与共用同一份渲染的《当前状态》注入）报得出来。这一跑顺带当它的验收。
+const playPath = join(WORKSPACE, 'play.json');
+writeFileSync(playPath, `${JSON.stringify({ ...JSON.parse(readFileSync(playPath, 'utf8')), craft: { beatLength: 'mediumm' } }, null, 2)}\n`);
+const stateDir = join(WORKSPACE, 'memory', 'always', 'state');
+mkdirSync(stateDir, { recursive: true });
+writeFileSync(join(stateDir, 'state.json'), '{ "affinity": { "lin": 3 }\n');
 const browser = await launch();
 try {
 	const { page, errors } = await newPage(browser);
@@ -125,14 +133,16 @@ try {
 	check('S8', headings.includes('# 当前状态'), '有《当前状态》注入段');
 	check('S9', prompt.includes('play.json（') && prompt.includes('characters/lin.md（'), '文件清单列的是工作区里真实的文件与大小');
 	check('S10', prompt.includes('开演条件'), '带上了就绪报告');
+	check('S10b', prompt.includes('craft.beatLength') && prompt.includes('只认 short / medium / long'), '报出引擎不认的 craft 取值');
+	check('S10c', prompt.includes('state.json 不是合法 JSON'), '报出坏掉的状态文件');
 
 	// 技能库：两份自带技能都挂上（这一条同时证明 skill 行装载成功、包内路径算对了）
 	check('S11', prompt.includes('galgame-audio'), '技能清单里有 galgame-audio');
 	check('S12', prompt.includes('galgame-visual-craft'), '技能清单里有 galgame-visual-craft');
 
-	// 工具面：搭台助手那一套；剧作家的收束口一个都不在，起剧目那个工具已经没有名字可装
-	const expects = ['list_assets', 'validate_play', 'set_craft'];
-	const forbidden = ['beat_done', 'update_state', 'list_library', 'create_play', 'get_readiness'];
+	// 工具面：搭台助手那一套；剧作家的收束口一个都不在，「只写一个文件」的那几个也没有名字可装
+	const expects = ['list_assets', 'validate_play', 'set_stage_style'];
+	const forbidden = ['beat_done', 'list_library', 'create_play', 'get_readiness', 'set_craft', 'update_state'];
 	check('S13', expects.every(has), `装上了 ${expects.join(' / ')}（实际：${tools.join(', ')}）`);
 	check('S14', !forbidden.some(has), `没有剧作家的工具与旧名 ${forbidden.join(' / ')}`);
 	check('S15', !has('list_voices') && !has('web_search'), '没配 key 时 list_voices / web_search 不注册');
@@ -175,6 +185,7 @@ console.log('\n段序：');
 	console.log(`\n${results.filter((r) => r.ok).length}/${results.length} 通过`);
 } finally {
 	await browser.close();
+	rmSync(stateDir, { recursive: true, force: true });
 	clearPlay(WORKSPACE, fixture);
 }
 

@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { describeAsset, parseCharacterCard, type AssetMeta } from '@aivn/core';
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
-import { listAssets, readManifest } from '../assets';
+import { listAssets, readManifest, type AssetIndex } from '../assets';
 import type { PlayContext } from './context';
 
 /** 清单罗列的截断：一次把整个清单灌进上下文没有意义，够 agent 判断「有没有」就行。 */
@@ -106,7 +106,7 @@ async function collect(dir: string): Promise<Row[]> {
 		}
 	}
 
-	rows.push(...(await collectCharacters(dir, manifest)));
+	rows.push(...(await collectCharacters(dir, index)));
 	return rows;
 }
 
@@ -120,7 +120,7 @@ function mergeMeta(manifest: Record<string, AssetMeta>, stem: string, spriteDir:
 }
 
 /** 角色卡：卡不是素材文件，但「台上有些什么人」是同一类问题，一起报。 */
-async function collectCharacters(dir: string, manifest: Record<string, AssetMeta>): Promise<Row[]> {
+async function collectCharacters(dir: string, index: AssetIndex): Promise<Row[]> {
 	const root = join(dir, 'characters');
 	if (!existsSync(root)) return [];
 	const rows: Row[] = [];
@@ -129,7 +129,9 @@ async function collectCharacters(dir: string, manifest: Record<string, AssetMeta
 		const text = await readFile(join(root, name), 'utf8');
 		const card = parseCharacterCard(text);
 		const sprite = card.sprite ?? id;
-		const variants = Object.keys(manifest[`sprites/${sprite}`]?.variants ?? {});
+		// 差分清单从**目录**来（`assets/sprites/<立绘目录>/` 里的文件，`listAssets` 已经按类目归好）；
+		// 素材表里没有 `variants` 这个字段——以前那一版读的是个永远不存在的键，这一列恒空。
+		const variants = (index[`sprites/${sprite}`] ?? []).map((file: string) => file.replace(/\.[^.]+$/, ''));
 		rows.push({
 			id,
 			kind: 'characters',

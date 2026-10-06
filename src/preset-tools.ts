@@ -15,13 +15,19 @@
  * 两次都走同一个 `sync()`：装了哪套就卸哪套——工具跟着预设走，不跟着 Agent 走。
  *
  * 工具分三层（对齐 AIVN `TOOL_CATALOG` 的角色面）：
- *   - 基础：`list_assets`（手上有什么素材），**两个角色都装**；
- *   - 剧作家：`beat_done` / `update_state`（演出本身的收束口），配了生图后端另有同步的 `generate_image`；
- *   - 搭台助手：`validate_play` / `set_craft`，加上按配置才装的 `list_voices` / `web_search` /
+ *   - 基础：`list_assets`（手上有什么素材）与 `validate_play`（刚写完剧目文件，问它写得对不对），
+ *     **两个角色都装**——写文件的活两个角色都有，校验口就得两个角色都有；
+ *   - 剧作家：`beat_done`（演出本身的收束口），配了生图后端另有同步的 `generate_image`；
+ *   - 搭台助手：`set_stage_style`，加上按配置才装的 `list_voices` / `web_search` /
  *     `generate_image`（草稿）/ `commit_asset` / `recut_sprite` / `generate_bgm`。
  *
- * `validate_play`（原名 `get_readiness`）与 `set_craft` 从剧作家移到了搭台助手：AIVN 那边
- * 这两个能力就归工坊（`CATALOG_ROWS` 的 `readiness` 与 `files`），剧作家要的写作参数走 A 区注入现读。
+ * **「只写一个文件」的工具一律不装**（2026-10-06）：`create_play`（写 play.json / 前提 / 角色卡）、
+ * `set_craft`（写 play.json 的 craft 段）、`update_state`（写 memory/always/state/）都删了——
+ * DSH 的模型手里有 write / edit，写文件是它自己的事，「写成什么样」由提示词里的《剧目文件》
+ * 与《写作参数》说清，写错了由 `validate_play` 报出来。留下的是文件工具做不到的：
+ * 引擎状态机（`beat_done`）、外部调用（`generate_image` / `web_search` / `generate_bgm` /
+ * `list_voices`）、图像处理与台账（`commit_asset` / `recut_sprite`），以及**写完要立刻推给
+ * 已打开的舞台**的 `set_stage_style`。
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-agent';
@@ -39,7 +45,6 @@ import type { Exa } from './stagehand/exa';
 import { stagehandGuide } from './stagehand/prompt';
 import { createValidatePlayTool } from './stagehand/tools/validate-play';
 import { createListVoicesTool } from './stagehand/tools/list-voices';
-import { createSetCraftTool } from './stagehand/tools/set-craft';
 import { createSetStageStyleTool } from './stagehand/tools/set-stage-style';
 import { createWebSearchTool } from './stagehand/tools/web-search';
 import type { VoiceCatalog } from './stagehand/voice-catalog';
@@ -47,7 +52,6 @@ import { createListAssetsTool } from './tools/list-assets';
 import type { PlayContext } from './tools/context';
 import { createBeatDoneTool } from './playwriter/tools/beat-done';
 import { createSyncImageTool } from './playwriter/tools/generate-image';
-import { createUpdateStateTool } from './playwriter/tools/update-state';
 import { createCommitAssetTool } from './stagehand/tools/commit-asset';
 import { createGenerateBgmTool } from './stagehand/tools/generate-bgm';
 import { createDraftImageTool } from './stagehand/tools/generate-image';
@@ -191,18 +195,21 @@ function install(
 		},
 	};
 
-	// 基础层：两个字都装。
-	const tools: ToolDefinition[] = [createListAssetsTool(play, { image: deps.capabilities.image })];
+	// 基础层：两个字都装（写文件与校验口是一对）。
+	const tools: ToolDefinition[] = [
+		createListAssetsTool(play, { image: deps.capabilities.image }),
+		createValidatePlayTool(play),
+	];
 	const offs: Array<() => void> = [];
 
 	if (preset === PLAYWRITER_PRESET) {
-		tools.push(createBeatDoneTool(play), createUpdateStateTool(play));
+		tools.push(createBeatDoneTool(play));
 		// 剧作家缺图：同步出图即入库（D3）。一次调用声明最终 id，没有「挑候选」这一步。
 		if (deps.capabilities.image) tools.push(createSyncImageTool(play, deps.media));
 	} else {
 		// 搭台助手：AIVN 工坊那半边；`can` 决定哪几个装得上。
 		// `set_stage_style` 不门控：它只写剧目里的一个文件，不依赖任何后端配置。
-		tools.push(createValidatePlayTool(play), createSetCraftTool(play), createSetStageStyleTool(play));
+		tools.push(createSetStageStyleTool(play));
 		if (deps.capabilities.voice && deps.voices) tools.push(createListVoicesTool(deps.voices));
 		if (deps.capabilities.search && deps.exa) tools.push(createWebSearchTool(deps.exa));
 		if (deps.capabilities.image) {

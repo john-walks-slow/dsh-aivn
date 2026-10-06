@@ -131,6 +131,7 @@ memory/always/premise.md           world premise
 memory/always/craft.md             prose style and taboos (prose — only sayable in words)
 memory/always/state/scene.md       current scene (the playwright writes it)
 memory/always/state/threads.md     open threads (the playwright writes it)
+memory/always/state/state.json     affinity and flags (same: affinity is an integer 0–100, keyed by character id)
 characters/<id>.md                 character card
 assets/backgrounds/…               backgrounds
 assets/cg/…                        CGs
@@ -229,8 +230,10 @@ generation and no cross-play asset library, so all four asset kinds can only com
 put into `assets/` by hand. Rules that can only be stated in words — prose style, taboos, how
 characters address each other — go in `memory/always/craft.md`, not in `play.json`.
 
-The playwright rewrites this section with the `set_craft` tool (it touches only the `craft` key,
-and not one byte of the rest of the file).
+**Edit this section in place with `edit`** (touch only the `craft` key; not one byte of the rest of
+the file). There is no `set_craft` tool — writing a file is writing a file. The engine **silently
+ignores** values it doesn't recognise, so have the stage-hand assistant call `validate_play` after
+editing: it reports the ones that will be dropped.
 
 ## The two presets
 
@@ -304,18 +307,17 @@ file it just wrote on the next beat.
 
 ## Agent tools
 
-Tools are installed and removed with the preset. `list_assets` is on both;
-**there is no "create play" tool** — `play.json` is written with the file tools (see "Starting a
-new play" above);
+Tools are installed and removed with the preset. `list_assets` and `validate_play` are on both;
+**no tool exists whose only job is writing a file** — `play.json`, its `craft` section and
+`memory/always/state/` are written with the file tools, and the prompts say what shape they take
+(see "Starting a new play" above);
 the rest are role-specific:
 
 | Tool | Who has it | What it does |
 | --- | --- | --- |
 | `list_assets` | both presets | Lists **this play's** assets (`assets/` + `manifest.json`, plus character cards in `characters/`), filterable by kind and keyword. There is **no cross-play asset library** — this is the whole inventory |
 | `beat_done` | playwright | Hands over this beat's stop point: pass `options` for an option panel, `placeholder` for a free-text input, neither for no stop point this beat. Calling it means "this beat ends here" |
-| `update_state` | playwright | Changes the play's runtime state: `affinity` (per-character affinity delta, an integer, `\|Δ\|≤5`), `flags`, `scene`, `threads`. Writes into `memory/always/state/` |
-| `validate_play` | stage-hand assistant | Play self-check: whether `play.json` can be read (with the reason when a field is missing or the JSON is broken), story premise, character card count, sprites, backgrounds, asset count. Call it right after writing play files. **No hard gate** — you can start with anything missing |
-| `set_craft` | stage-hand assistant | Rewrites the `craft` section of `play.json` (beat length, stop-point options, asset sources), see above |
+| `validate_play` | both presets | Play self-check: whether `play.json` can be read (with the reason when a field is missing or the JSON is broken), whether `craft` holds values the engine does not recognise, whether the state files are sound, story premise, character card count, sprites, backgrounds, asset count. Call it right after writing play files. **No hard gate** — you can start with anything missing |
 | `list_voices` | stage-hand assistant (needs `tts.keys`) | Searches the Fish voice catalog: builds a window from language / tags / title keywords, filters `gender` locally, sorts by likes and shows the top 25. The id you pick goes into the card's `voice` |
 | `web_search` | stage-hand assistant (needs `search.keys`) | Web search: one call returns results and page text together. For facts **outside** the play — the setting, cast and plot all live in the workspace files |
 | `generate_image` | stage-hand assistant (needs `image`) | Produces **drafts**: backgrounds, CGs and sprites, with sprites cut out automatically. Generate a few candidates, let the user pick, commit only the chosen one |
