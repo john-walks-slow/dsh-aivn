@@ -27,6 +27,14 @@ export const MODULES = {
 		description: '台词语音：分句合成、voice 帧、音频取回、浏览器出声（要真 Fish key）',
 		suites: ['verify-voice'],
 	},
+	style: {
+		description: '剧目舞台皮肤：令牌白名单与防漂移、默认皮零变化、theme.json 落成、跨会话实时换装',
+		suites: ['verify-style'],
+	},
+	settings: {
+		description: '插件设置面：Plugins 页里的配置卡、写入落点、就地生效、密钥脱敏与清除',
+		suites: ['verify-settings'],
+	},
 };
 
 const rawArg = process.argv[2];

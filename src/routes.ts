@@ -23,6 +23,7 @@ import type { StageHub } from './hub';
 import type { InjectedMessages } from './injected';
 import { loadPlay } from './play';
 import { resolveAgent, sessionWorkspace } from './session';
+import { readPlayTheme, THEME_FILE } from './theme';
 import { TTS_CACHE_DIR, type VoiceHost } from './voice-host';
 
 const PREFIX = '/aivn';
@@ -76,7 +77,19 @@ async function handle(
 		// 上一个页面可能是被直接关掉的，没人补发 `{paused:false}`，那个泵会一直停着。
 		voice.control(sessionId, { paused: false });
 		// `voice` 决定舞台显不显示语音开关：没配 TTS Key 时整条语音链路都是关的。
-		sendJson(res, 200, play ? { dir: play.dir, config: play.config, voice: voice.available } : { dir: null, voice: false });
+		// `theme` 是剧目皮肤（空对象 = 默认皮）；文件坏了只记一行日志，照常给默认皮。
+		sendJson(
+			res,
+			200,
+			play
+				? {
+						dir: play.dir,
+						config: play.config,
+						voice: voice.available,
+						theme: readTheme(ctx, play.dir),
+					}
+				: { dir: null, voice: false },
+		);
 		return;
 	}
 	if (req.method === 'GET' && url.pathname === `${PREFIX}/assets`) {
@@ -113,6 +126,25 @@ async function handle(
 		return;
 	}
 	sendJson(res, 404, { error: `no such route: ${req.method} ${url.pathname}` });
+}
+
+/**
+ * 剧目皮肤：读 + 过读闸。
+ *
+ * 用户会手改这份文件，所以这里的口径是「丢坏键、留好键、记一行」——皮肤出问题不该把剧目
+ * 挡在门外。文件整个坏掉时同样按默认皮走。
+ */
+function readTheme(ctx: Context, dir: string): Record<string, string> {
+	try {
+		const { theme, dropped } = readPlayTheme(dir);
+		if (dropped.length > 0) {
+			ctx.logger.warn(`[dsh-aivn] ${THEME_FILE} 里这些键被忽略了：${dropped.join('；')}`);
+		}
+		return theme;
+	} catch (error) {
+		ctx.logger.warn(`[dsh-aivn] ${error instanceof Error ? error.message : String(error)}`);
+		return {};
+	}
 }
 
 function openStream(hub: StageHub, url: URL, req: IncomingMessage, res: ServerResponse): void {

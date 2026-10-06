@@ -41,50 +41,58 @@ dsh plugin --profile web add github:john-walks-slow/dsh-aivn
 - **客户端半边**（「AIVN」tab）挂在 `conversation.view` 槽上，需要 `dsh-web-app`。它在
   `package.json` 的 `dsh.client{platform:"web"}` 里声明，不走 Loader。
 
-可配的有五处——**语音**、**联网检索**、**生图**、**配乐**、**搭台助手的命令行**；都不配也能照常跑（只是那几项能力没有，对应工具不注册、提示词不提）：
+可配的有五处——**语音**、**联网检索**、**生图**、**配乐**、**搭台助手的命令行**；都不配也能照常跑（只是那几项能力没有，对应工具不注册、提示词不提）。
+
+两种改法，改完都**就地生效**（不用重启 dsh）：
+
+- **界面**（推荐）：侧边栏 **Plugins → dsh-aivn** 里的配置卡。分两段——P0 决定能力开不开（Key 与后端），P1 是默认就能用的口味项；顶部一行状态灯显示当前哪几项能力是开的。密钥只写不回显，卡片上另有「清除已存 Key」。
+- **配置文件**：profile 的 `cordis.patch.yml`。界面保存的也是这里边——两种改法落在同一份配置上。
 
 ```yaml
-- id: aivn
+- id: dsh-aivn
   name: dsh-aivn
   config:
-    tts:
-      keys: ["<your-fish-audio-key>"]   # 多把可轮询，摊免费额度
-      baseUrl: https://api.fish.audio    # 默认值，一般不用写
-      model: s2.1-pro-free               # 默认值
-      concurrency: 2                     # 同时合成的上限
-    search:
-      keys: ["<your-exa-key>"]           # 多把可轮询；给了它搭台助手才有 web_search
-      baseUrl: https://api.exa.ai        # 默认值
-    shell: false                         # true = 给搭台助手放开 bash
-    image:                               # 配了它两个角色才会出图
-      format: gemini                     # gemini | openai | modelslab（接口格式，不是产品名）
-      baseUrl: http://127.0.0.1:38000    # 本机 flow2api；官方 API 或别的网关填它自己的地址
-      model: gemini-3.0-pro-image
-      size: 1K                           # 1K / 2K / 4K（K 大写），或字面像素 1536x1024
-      apiKey: ""                         # 本机网关不校验就留空（留空 = 不带鉴权头）
-      timeoutMs: 180000
-    music:                               # 配了它搭台助手才有 generate_bgm
-      baseUrl: http://127.0.0.1:38000
-      model: flow-music-lyria-3.5
-      apiKey: ""
-      timeoutMs: 240000
+    ttsKeys: ["<your-fish-audio-key>"]     # 多把可轮询，摊免费额度（界面上逗号分隔）
+    ttsBaseUrl: https://api.fish.audio      # 默认值，一般不用写
+    ttsModel: s2.1-pro-free                 # 默认值
+    ttsConcurrency: 2                       # 同时合成的上限
+    searchKeys: ["<your-exa-key>"]          # 给了它搭台助手才有 web_search
+    searchBaseUrl: https://api.exa.ai       # 默认值
+    shell: false                            # true = 给搭台助手放开 bash
+    imageFormat: gemini                     # gemini | openai | modelslab（接口格式，不是产品名）
+    imageBaseUrl: http://127.0.0.1:38000    # 本机 flow2api；官方 API 或别的网关填它自己的地址
+    imageModel: gemini-3.0-pro-image
+    imageSize: 1K                           # 1K / 2K / 4K（K 大写），或字面像素 1536x1024
+    imageApiKey: ""                         # 本机网关不校验就留空（留空 = 不带鉴权头）
+    imageTimeoutMs: 180000
+    musicBaseUrl: http://127.0.0.1:38000
+    musicModel: flow-music-lyria-3.5
+    musicApiKey: ""
+    musicTimeoutMs: 240000
 ```
+
+**配置面是扁平的 17 个字段**（DSH 设置界面的控件只认顶层字段，嵌套写法它寻址不到）：
 
 | 配置项 | 默认 | 给了会怎样 | 环境变量兜底 |
 |---|---|---|---|
-| `tts.keys` | 空 | 舞台有语音开关，搭台助手多一个 `list_voices`（音色库与合成共用这池 key） | `DSH_AIVN_TTS_KEYS` |
-| `tts.baseUrl` / `tts.model` / `tts.concurrency` | Fish 官方 / `s2.1-pro-free` / `2` | — | — |
-| `search.keys` | 空 | 搭台助手多一个 `web_search`（一次调用同时拿回结果与正文） | `DSH_AIVN_EXA_KEYS` |
-| `shell` | `false` | 搭台助手的预设里那一行 `tool-bash` 真装上（默认关，与 AIVN 的 `defaultOff` 同口径） | — |
-| `image.format` / `image.baseUrl` / `image.model` | — | **地址与模型都给齐**才有生图：搭台助手多 `generate_image` / `commit_asset` / `recut_sprite`，剧作家多一个**同步**的 `generate_image`。格式是接口协议形状，不是产品名 | — |
-| `image.size` | `1K` | 档位 `1K`/`2K`/`4K`（K 大写）或字面像素 `1536x1024`；gemini 格式只认档位，openai/modelslab 两种都收（modelslab 封顶 1024） | — |
-| `image.apiKey` / `image.timeoutMs` | 空 / `180000` | 本机网关不校验就把 key 留空（不带鉴权头）；出图慢就把超时调大 | — |
-| `music.baseUrl` / `music.model` | — | 都给齐才有 `generate_bgm`（只有 Gemini 形状，没有 `format`） | — |
-| `music.apiKey` / `music.timeoutMs` | 空 / `240000` | 同上；一首曲子实测约 84 秒 | — |
+| `ttsKeys` | 空 | 舞台有语音开关，搭台助手多一个 `list_voices`（音色库与合成共用这池 key） | `DSH_AIVN_TTS_KEYS` |
+| `ttsBaseUrl` / `ttsModel` / `ttsConcurrency` | Fish 官方 / `s2.1-pro-free` / `2` | — | — |
+| `searchKeys` | 空 | 搭台助手多一个 `web_search`（一次调用同时拿回结果与正文） | `DSH_AIVN_EXA_KEYS` |
+| `searchBaseUrl` | `https://api.exa.ai` | 换代理 / 镜像时改 | — |
+| `shell` | `false` | 搭台助手的预设里那一行 `tool-bash` 真装上（默认关，与 AIVN 的 `defaultOff` 同口径）。**bash 是预设的「一行」，只对新建的搭台助手会话生效** | — |
+| `imageFormat` / `imageBaseUrl` / `imageModel` | — | **地址与模型都给齐**才有生图：搭台助手多 `generate_image` / `commit_asset` / `recut_sprite`，剧作家多一个**同步**的 `generate_image`。格式是接口协议形状，不是产品名 | — |
+| `imageSize` | `1K` | 档位 `1K`/`2K`/`4K`（K 大写）或字面像素 `1536x1024`；gemini 格式只认档位，openai/modelslab 两种都收（modelslab 封顶 1024） | — |
+| `imageApiKey` / `imageTimeoutMs` | 空 / `180000` | 本机网关不校验就把 key 留空（不带鉴权头）；出图慢就把超时调大 | — |
+| `musicBaseUrl` / `musicModel` | — | 都给齐才有 `generate_bgm`（只有 Gemini 形状，没有 `format`） | — |
+| `musicApiKey` / `musicTimeoutMs` | 空 / `240000` | 同上；一首曲子实测约 84 秒 | — |
 | 抠底调参 | 见「素材生成」 | `DSH_AIVN_CUTOUT_TOLERANCE` / `_KEY_SMOOTH` / `_EDGE_BAND` / `_SPILL` / `_SOLID_RESIDUAL` 五个环境变量 | 同名环境变量 |
 
 key 两处都没有 = 那项能力停用：工具**不注册**、提示词里也不提。两个预设、一条 `/new-play` 命令、
-`/aivn` 路由都是固定的，不可配。**改配置要重启 dsh**：能力面在装载时定值（预设与工具行都按它拼）。
+`/aivn` 路由都是固定的，不可配。
+
+改完的配置由 loader **原位提交**进运行中的引用，插件据此重建能力面：那一轮的工具装/卸、搭台助手
+提示词里门控的那几章、语音后端，**开着的会话下一轮就用新的**；唯一例外是 `shell`——它翻的是预设行集，
+已开着的会话保持原样，新建一个才吃到。
 
 > 开发期 `@aivn/core` 与 `@aivn/stage` 走 `file:` 依赖（指向 stage-ai 仓库）。发布版换成版本号。
 
@@ -213,6 +221,50 @@ voice: 短句，少用形容词
 
 剧作家用 `set_craft` 工具改写这一段（只动 `craft` 一个键，文件里其余部分一个字节都不碰）。
 
+### theme.json：舞台皮肤
+
+剧目根可以放一份 `theme.json`，改这座剧目的舞台外观：键就是 `@aivn/stage/stage.css` 里
+`.stage-root` 上的 CSS 变量名，值过白名单校验。**不放这份文件就是默认皮**——一个变量都不注，
+画面与从前逐像素一致。
+
+```json
+{
+  "--dialog-bg": "linear-gradient(178deg, rgb(16 14 20 / 0.94), rgb(8 7 10 / 0.96))",
+  "--dialog-ink": "#f4eee0",
+  "--stage-bg": "#0b0a12",
+  "--stage-radius": "6px",
+  "--accent": "#8a5cf6",
+  "--accent-ink": "#f7fbff",
+  "--font-ui": "\"Noto Serif CJK SC\", serif"
+}
+```
+
+十七个可设置的键，分五组：
+
+| 组 | 键 | 取值 |
+| --- | --- | --- |
+| 台词条 | `--dialog-bg` | 颜色，或 `linear-gradient(<0–360>deg, <颜色>, <颜色>)` |
+| | `--dialog-line`、`--dialog-ink`、`--dialog-ink-soft`、`--dialog-ink-thought`、`--dialog-ink-faint` | 颜色 |
+| | `--dialog-shadow` | `none`，或 `0 10px 30px rgb(0 0 0 / 0.45)` 这样的「x y 模糊 颜色」 |
+| 衬底与圆角 | `--stage-bg` | 颜色（图片未到或加载中露出的底） |
+| | `--stage-radius` | `0px`–`24px` |
+| | `--sprite-dim` | `0.2`–`1`（1 = 非发言人立绘完全不压暗） |
+| 选肢卡 | `--choice-bg`、`--choice-line`、`--choice-ink` | 颜色 |
+| 字体 | `--font-ui` | 逗号分隔的字体名，整串 ≤ 200 字符 |
+| 主色 | `--accent`、`--accent-ink`、`--accent-soft` | 颜色 |
+
+颜色写法：`#rgb` / `#rrggbb` / `#rrggbbaa` / `rgb()` / `rgba()` / `hsl()` / `hsla()`（空格与逗号两种
+参数语法都认）。不认颜色名、`var()`、`calc()`、`url()`——这条通道收的是**值**，不是 CSS 文本。
+
+两个入口：
+
+- **让搭台助手改**：把想要的基调说清楚，它调 `set_stage_style` 写文件，写完立刻把新皮肤推给
+  同一座剧目已经打开的舞台（不用刷新）。不给参数调用一次 = 看当前生效值与默认值对照。
+- **自己手改**：改完刷新页面或切一次会话生效（手改不广播）。
+
+白名单外的键与非法值，手改时只丢那一项，工具调用时整次拒绝（一个字节都不写）；文件整个坏掉时
+舞台回默认皮、剧目照常开演。
+
 ## 两个预设
 
 | id | 名字 | 干什么 |
@@ -282,6 +334,7 @@ voice: 短句，少用形容词
 | `update_state` | 剧作家 | 改剧目的运行状态：`affinity`（角色好感度增量，整数、`\|Δ\|≤5`）、`flags`、`scene`、`threads`。写进 `memory/always/state/` |
 | `get_readiness` | 搭台助手 | 开演条件自查：`play.json`、故事前提、角色卡张数、立绘、背景、素材条数。**没有硬门槛**，缺什么都能开演 |
 | `set_craft` | 搭台助手 | 改写 `play.json` 的 `craft` 段（每轮篇幅、停止点选项数、素材来源），见上 |
+| `set_stage_style` | 搭台助手 | 写剧目根的 `theme.json`（舞台皮肤：台词条、选项卡、衬底、圆角、字体、主色），写完把全量皮肤推给同剧目已打开的舞台。三态：省略 = 不动、给值 = 改、`null` = 回默认；不带参数调用 = 看当前值。值格式与可设置的键见上 |
 | `list_voices` | 搭台助手（配了 `tts.keys` 才有） | 查 Fish 音色库挑音色：按语言 / 标签 / 标题关键词取窗口，本地按 `gender` 筛，按热度排序出前 25 条。挑好的 id 填进角色卡的 `voice` |
 | `web_search` | 搭台助手（配了 `search.keys` 才有） | 联网检索：一次调用同时拿回结果与正文。只查剧目之外的事实——设定、角色、剧情都在工作区文件里 |
 | `generate_image` | 搭台助手（配了生图才有） | 出**草稿**：背景 / 插图 / 立绘都能出，立绘自动抠底。一次出几张候选让用户挑，挑中的才入库 |
@@ -378,7 +431,7 @@ play/
 | 路由 | 说明 |
 | --- | --- |
 | `GET /aivn/health` | `{ ok: true, plugin: "dsh-aivn" }` |
-| `GET /aivn/play?session=` | 这个会话的剧目：`{ dir, config, voice }`；不是剧目就是 `{ dir: null, voice: false }`。`voice` 说明宿主配没配 TTS，客户端据此决定显不显示语音开关 |
+| `GET /aivn/play?session=` | 这个会话的剧目：`{ dir, config, voice, theme }`；不是剧目就是 `{ dir: null, voice: false }`。`voice` 说明宿主配没配 TTS，客户端据此决定显不显示语音开关；`theme` 是剧目皮肤（CSS 变量名 → 值），空对象 = 默认皮 |
 | `GET /aivn/assets?session=` | `{ index, manifest }`；不是剧目 404 |
 | `GET /aivn/asset?session=&path=` | 剧目内的一件素材。`path` 是**相对剧目根**的路径（如 `assets/backgrounds/x.png`），越界 400 |
 | `GET /aivn/audio?session=&file=` | 一句台词的合成音频。文件名是 `sha1(模型 + 音色 id + 文本)`，内容寻址，所以可以长缓存 |
@@ -386,13 +439,17 @@ play/
 | `POST /aivn/input { session, text, silent? }` | 玩家的一次输入，投给剧作家。`silent: true` = 不算玩家说的话（舞台的「继续」走这条），仍然会作为一条 user 消息投出去 |
 | `POST /aivn/voice { session, enabled?, paused? }` | 语音总开关与客户端背压。`enabled: false` 让服务端停止分句合成（省额度），`paused` 是播放层积压时的临时背压 |
 
-`StageFrame` 有三种：
+`StageFrame` 有四种：
 
 ```ts
 { seq, kind: 'ir',   event: StageEvent }   // DSL 解析出的 IR
 { seq, kind: 'beat', state: 'start' | 'end' }  // 剧作家起笔 / 停笔
 { seq, kind: 'voice', lineSeq, phrase, state: 'started' | 'ready', url? }  // 语音
+{ seq, kind: 'style', theme: Record<string, string> }  // 剧目皮肤（全量快照，幂等）
 ```
+
+`style` 帧推给**同一座剧目**的所有会话流：写皮肤的是搭台助手，看舞台的是剧作家会话，
+只推自己那条流用户就得刷新才看得见。
 
 **语音跟着播放头的节奏走**：一句台词的音频要 2–5 秒才合成回来（Fish 免费模型的实测值），
 而舞台是手动推进的——停在这一句上的时间够长就听得到，点太快点过去的那一句会被丢弃
@@ -493,5 +550,10 @@ dsh-e2e stop
   且是真 MP3、**浏览器把它解成了 PCM 并真的有音源起播**（在页面里给 `AudioContext` /
   `decodeAudioData` / `AudioBufferSourceNode.start` 挂钩子，不是看帧猜的），以及语音总开关
   确实传到了宿主。跑之前要 export `DSH_AIVN_TTS_KEYS`。
+- `style`（`dsh-e2e run e2e/run.mjs style`）——剧目皮肤：先离线对表（白名单 17 键、取值校验、
+  读闸，以及令牌表与 `@aivn/stage/dist/stage.css` 的默认值逐键一致），再上真舞台：没有
+  `theme.json` 时一个变量都不注且计算样式等于默认皮；写一份皮肤后重挂会话，内联变量与计算样式
+  跟着变；文件里混进坏键只丢那一项。最后让**另一个会话里的搭台助手**调用 `set_stage_style`，
+  断言已打开的舞台不刷新就换装（跨会话广播）。
 
 截图落在 `e2e-artifacts/`（不进 git）。

@@ -25,6 +25,8 @@ export type BeatState = 'start' | 'end';
  *   `no_stop` 的轮（剧作家没给停止点就收笔）没有 IR 可看，边界是它唯一的信号。
  * - `voice`：语音。`lineSeq` 是**那一行 `say_start` 帧的 seq**（不是本帧的 seq）——
  *   客户端按它把音频挂回台词行上。
+ * - `style`：剧目皮肤。**全量快照**（不是增量）：重连补推时最后一条就是当前该用的那套，
+ *   幂等，不必关心中间改过几版。
  */
 export type StageFrame = StageFrameBody & { seq: number };
 
@@ -32,7 +34,8 @@ export type StageFrame = StageFrameBody & { seq: number };
 type StageFrameBody =
 	| { kind: 'ir'; event: StageEvent }
 	| { kind: 'beat'; state: BeatState }
-	| { kind: 'voice'; lineSeq: number; phrase: number; state: 'started' | 'ready'; url?: string };
+	| { kind: 'voice'; lineSeq: number; phrase: number; state: 'started' | 'ready'; url?: string }
+	| { kind: 'style'; theme: Record<string, string> };
 
 /** 一条挂着的 SSE 连接：响应 + 它的心跳。 */
 interface Client {
@@ -63,8 +66,12 @@ export class StageHub {
 		return this.push(sessionId, { kind: 'voice', ...voice });
 	}
 
-	private push(sessionId: string, frame: StageFrameBody): StageFrame {
-		const seq = (this.seqs.get(sessionId) ?? 0) + 1;
+	/** 收下一帧剧目皮肤（全量快照）。写完 `theme.json` 的一方负责推它，舞台据此换装。 */
+	appendStyle(sessionId: string, theme: Record<string, string>): StageFrame {
+		return this.push(sessionId, { kind: 'style', theme });
+	}
+
+	private push(sessionId: string, frame: StageFrameBody): StageFrame {		const seq = (this.seqs.get(sessionId) ?? 0) + 1;
 		this.seqs.set(sessionId, seq);
 		const framed: StageFrame = { seq, ...frame };
 

@@ -9,11 +9,17 @@
  * （`projectionsBySession[<id>].values.agentPreset`），而 tab 列是全局的——
  * `slots.entries('conversation.view')` 不按会话过滤，唯一的过滤口是注册/撤销条目本身。
  * 所以这里盯着「当前会话」现登记、现撤销：切到搭台助手的会话，tab 就不在。
+ *
+ * 另一处贡献是**插件配置卡**：注册进 Plugins 页的 `plugins.bundle.config`（按包名 keyed），
+ * 于是侧边栏 Plugins → dsh-aivn 里能直接改那 17 个字段，改完就地生效。
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client';
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client';
+import type {} from '@deepseek-ai/dsh-client-ui-settings/client';
+import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client';
 import hostCss from './host.css';
 import { injectCss } from './inject-css';
+import { AivnConfigCard, AivnConfigController, NS as CONFIG_NS } from './settings-card';
 import { StageView } from './stage-view';
 
 /**
@@ -45,12 +51,33 @@ interface ClientServices {
 /** 会进舞台管线的那个预设（宿主半边注册的 id）。 */
 const PLAYWRITER_PRESET = 'aivn-playwriter';
 
-export const inject = ['slots', 'sessions', 'uiSession'];
+export const inject = ['slots', 'sessions', 'uiSession', 'configForms'];
 
 export function apply(ctx: ClientContext): void {
 	// 与 DSH 宿主界面的接缝样式（藏掉舞台页签下的原生输入框），见 host.css。
 	injectCss('dsh-aivn/host.css', hostCss);
 	const services = ctx as unknown as ClientServices;
+
+	// 插件配置卡：宿主半边在服务 `dsh-aivn` 这个命名空间时才登记（插件停用/没装载时不出这张卡）。
+	// 作用域走 `configForms.get(条目 id)`，与 DSH 自己的设置页同一份实现。
+	const card = new AivnConfigController(ctx.configForms.get(CONFIG_NS), ctx.configForms.describe());
+	ctx.effect(() => () => card.dispose(), 'dsh-aivn:config card subscription');
+	ctx.effect(
+		() =>
+			ctx.configForms.whileServed([CONFIG_NS], () =>
+				ctx.slots.inject('plugins.bundle.config', () =>
+					ctx.slots.register(
+						{
+							name: 'plugins.bundle.config',
+							key: 'dsh-aivn',
+							inject: () => card.inject(),
+						},
+						AivnConfigCard,
+					),
+				),
+			),
+		'dsh-aivn:config card',
+	);
 
 	ctx.slots.inject('conversation.view', () =>
 		ctx.effect(() => {

@@ -60,7 +60,9 @@ type StageFrame =
 	| { seq: number; kind: 'ir'; event: StageEvent }
 	| { seq: number; kind: 'beat'; state: 'start' | 'end' }
 	/** `lineSeq` 是那一行 `say_start` 帧的 seq，不是本帧的 seq。 */
-	| { seq: number; kind: 'voice'; lineSeq: number; phrase: number; state: 'started' | 'ready'; url?: string };
+	| { seq: number; kind: 'voice'; lineSeq: number; phrase: number; state: 'started' | 'ready'; url?: string }
+	/** 剧目皮肤：全量快照（最后一条就是当前该用的那套），幂等。 */
+	| { seq: number; kind: 'style'; theme: Record<string, string> };
 
 interface PlayPayload {
 	/** 没有剧目时为 null。 */
@@ -68,6 +70,8 @@ interface PlayPayload {
 	config?: PlayConfig;
 	/** 宿主配了 TTS 才有语音：没有的时候连语音开关都不显示。 */
 	voice?: boolean;
+	/** 剧目皮肤：CSS 变量名 → 值。空/缺省 = 默认皮，一个变量都不注。 */
+	theme?: Record<string, string>;
 }
 
 interface AssetsPayload {
@@ -80,6 +84,29 @@ export interface StageViewProps {
 	sessionId?: string;
 }
 
+/**
+ * 剧目皮肤 → 一条作用域规则。
+ *
+ * **为什么不写成这一层的内联样式**：`@aivn/stage` 的舞台根本身就带 `.stage-root`
+ * （`StageTheater.tsx` 的根 div，提示条也各带一个），stage.css 在那两个元素上把 17 个变量
+ * 又声明了一遍——外层的内联变量会被更近的那层声明遮住，画面一个像素都不动
+ * （2026-10-06 e2e 实测：内联变量注上了、计算样式仍是默认值）。
+ *
+ * 选择器写两遍 `.stage-root` 是为了把优先级抬到 (0,3,0)：压过基线的 `.stage-root`（0,1,0），
+ * 也压过 stage.css 里那层 `html[data-stage-theme=…] .stage-root`（0,2,1，在 DSH 插件里今天
+ * 不命中，将来命中了也仍是「剧目声明过的键，主题无权改」）。
+ *
+ * 值是过完白名单的（颜色 / 受限渐变 / 长度 / 数字 / 字体栈，全都不含 `;`、`{`、`}`），
+ * 拼进声明串没有逃逸面；键只可能来自那份冻结的 17 键表。
+ */
+function themeCss(theme: Record<string, string>): string {
+	const vars = Object.entries(theme)
+		.map(([key, value]) => `${key}: ${value};`)
+		.join(' ');
+	if (vars === '') return '';
+	return `.aivn-stage-view.stage-root.stage-root, .aivn-stage-view .stage-root.stage-root { ${vars} }`;
+}
+
 export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 	const [builder] = useState(() => new ScriptBuilder());
 	const [revision, setRevision] = useState(0);
@@ -89,6 +116,8 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 	const [turbo, setTurbo] = useState(false);
 	const [play, setPlay] = useState<PlayPayload | null>(null);
 	const [assets, setAssets] = useState<AssetsPayload | null>(null);
+	/** 剧目皮肤（CSS 变量名 → 值）。空对象 = 默认皮：一个变量都不注，画面与从前逐像素一致。 */
+	const [theme, setTheme] = useState<Record<string, string>>({});
 	const [failed, setFailed] = useState<string | null>(null);
 	const [resetToken, setResetToken] = useState(0);
 	const toast = useToasts();
@@ -163,12 +192,14 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 		let cancelled = false;
 		setPlay(null);
 		setAssets(null);
+		setTheme({});
 		setFailed(null);
 		void (async () => {
 			try {
 				const info = (await getJson(`/aivn/play?session=${encodeURIComponent(sessionId)}`)) as PlayPayload;
 				if (cancelled) return;
 				setPlay(info);
+				setTheme(info.theme ?? {});
 				if (!info.dir) return;
 				const loaded = (await getJson(
 					`/aivn/assets?session=${encodeURIComponent(sessionId)}`,
@@ -250,6 +281,12 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 					setIsNoStop(!sawStop.current);
 					setLive(false);
 				}
+				return;
+			}
+
+			if (frame.kind === 'style') {
+				// 全量快照：直接换掉整套变量，不必比较增量（最后一条永远是最新的）。
+				setTheme(frame.theme);
 				return;
 			}
 
@@ -426,8 +463,12 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 
 	if (!index) return <Notice text="正在读取剧目素材…" />;
 
+	// 剧目皮肤见 `themeCss`：不能写在自己这一层的内联样式里（里面的舞台根会把变量再声明一遍）。
+	const themeVars = themeCss(theme);
+
 	return (
 		<div className="stage-root aivn-stage-view" style={{ height: '100%', minHeight: 0 }}>
+			{themeVars === '' ? null : <style data-aivn-theme>{themeVars}</style>}
 			<StageTheater
 				visual={playback.visual}
 				playback={playback}

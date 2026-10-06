@@ -21,17 +21,20 @@ export const TTS_CACHE_DIR = join('media-cache', 'tts');
 export class VoiceHost {
 	private readonly pipelines = new Map<string, VoicePipeline>();
 
+	/**
+	 * `tts` 与并发上限都取**访问器**而不是值：设置界面能在会话开着的时候把 key 补上或换掉，
+	 * 合成发生在这之后（下一句台词、下一轮预取）就该用新的那套，不必重挂插件。
+	 */
 	constructor(
-		private readonly tts: FishTts | null,
+		private readonly ttsOf: () => FishTts | null,
+		private readonly concurrencyOf: () => number,
 		private readonly hub: StageHub,
 		private readonly log: { warn(message: string): void },
-		/** 同时合成的上限（配置项，默认 2）。 */
-		private readonly concurrency: number = 2,
 	) {}
 
 	/** 配了 Key 才有语音：没有的时候客户端连语音开关都不显示。 */
 	get available(): boolean {
-		return this.tts !== null;
+		return this.ttsOf() !== null;
 	}
 
 	/**
@@ -41,14 +44,14 @@ export class VoiceHost {
 	 * 两条会话的剧作家同时写字时不能互相串。
 	 */
 	forSession(sessionId: string, playDir: string): VoicePipeline | null {
-		if (!this.tts) return null;
+		const tts = this.ttsOf();
+		if (!tts) return null;
 		const existing = this.pipelines.get(sessionId);
 		if (existing) return existing;
 
-		const tts = this.tts;
 		const outDir = join(playDir, TTS_CACHE_DIR);
 		const pipeline = new VoicePipeline({
-			concurrency: this.concurrency,
+			concurrency: this.concurrencyOf(),
 			voiceOf: (charId) => readVoiceMap(playDir).get(charId),
 			synth: async (text, voiceId) => {
 				const { file } = await tts.synthesize(text, voiceId, outDir);

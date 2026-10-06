@@ -68,7 +68,13 @@ export interface PlaySnapshot {
  * 读一次剧目的全部上下文。目录不是剧目（没有 `play.json`）时给一份空快照——
  * 舞台那边会明说「还不是一座剧目」，剧作家这边注入空白即可，不该报错。
  */
-export function readPlaySnapshot(dir: string, can: { image: boolean } = { image: false }): PlaySnapshot {
+/**
+ * 读一次快照。
+ *
+ * `canImage` 取的是**函数**而不是值：生图后端可以在会话开着的时候配好（设置界面里填
+ * 地址与模型），这一格决定《写作参数》里那几行素材来源说不说得出「可以出图」。
+ */
+export function readPlaySnapshot(dir: string, canImage: () => boolean = () => false): PlaySnapshot {
 	const play = loadPlaySync(dir);
 	if (!play) return EMPTY;
 
@@ -92,7 +98,7 @@ export function readPlaySnapshot(dir: string, can: { image: boolean } = { image:
 		: '';
 
 	const craftFile = readText(join(dir, 'memory', 'always', 'craft.md')).trim();
-	const craft = `${renderCraftParams(resolveCraft(play.config.craft), assetCapabilitiesOf(can))}（上面是${
+	const craft = `${renderCraftParams(resolveCraft(play.config.craft), assetCapabilitiesOf({ image: canImage() }))}（上面是${
 		play.config.craft ? '这座剧目 `play.json` 的 `craft` 段' : '引擎默认口径，`play.json` 的 `craft` 段没写过'
 	}；改它用 \`set_craft\`。）${craftFile ? `\n\n${craftFile}` : ''}`;
 
@@ -116,13 +122,13 @@ export function readPlaySnapshot(dir: string, can: { image: boolean } = { image:
 export function registerPlayContext(
 	agentCtx: Context,
 	playDir: () => string,
-	can: { image: boolean },
+	canImage: () => boolean,
 ): () => void {
 	let cache: { at: number; snapshot: PlaySnapshot } | null = null;
 	const snapshot = (): PlaySnapshot => {
 		const now = Date.now();
 		if (cache && now - cache.at < TTL_MS) return cache.snapshot;
-		const fresh = readPlaySnapshot(playDir(), can);
+		const fresh = readPlaySnapshot(playDir(), canImage);
 		cache = { at: now, snapshot: fresh };
 		return fresh;
 	};
@@ -139,7 +145,7 @@ export function registerPlayContext(
 		section('aivn:play-memory-index', ORDER.memory, (s) => s.memoryIndex),
 		// 静态尾段（格式契约、记忆卡规则、引入新角色、演出契约）跟着动态段一起挂：
 		// 这几章只有剧作家要，而 persona 那一格装不下两段。位置紧接 A 区之后，与 AIVN 同序。
-		agentCtx.systemPrompt.section({ name: 'aivn:playwriter-tail', order: ORDER.tail, text: () => playwriterTail(can) }),
+		agentCtx.systemPrompt.section({ name: 'aivn:playwriter-tail', order: ORDER.tail, text: () => playwriterTail({ image: canImage() }) }),
 		agentCtx.systemPrompt.context({ name: 'aivn:play-state', order: CONTEXT_ORDER, text: () => snapshot().state }),
 	];
 

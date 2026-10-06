@@ -12,8 +12,10 @@
  * 两个都在 dsh-base 那份 bundle 里（`cordis.patch.yml` 的 agent-presets / commands 行），
  * 任何一个 dsh-base 打底的剖面都拿得到。
  */
-import type { Context } from '@deepseek-ai/cordis';
+import type { Context, Volatile } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
+import type {} from '@deepseek-ai/dsh-settings';
+import type {} from '@deepseek-ai/cordis-plugin-loader';
 import { BeatGuard, installBeatGuard } from './beat-guard';
 import { installPlayCommands } from './commands';
 import { StageHub } from './hub';
@@ -22,18 +24,23 @@ import { registerPresets } from './playwriter/preset';
 import { installPresetTools } from './preset-tools';
 import { installStageRoutes } from './routes';
 import { installStageTap } from './stage-tap';
-import { createTts } from './tts';
-import { createMediaBackends } from './media/backends';
-import { resolveCapabilities } from './stagehand/capabilities';
-import { createExa } from './stagehand/exa';
-import { createVoiceCatalog } from './stagehand/voice-catalog';
+import { createTts, type FishTts } from './tts';
+import { createMediaBackends, type MediaBackends } from './media/backends';
+import { resolveCapabilities, type Capabilities } from './stagehand/capabilities';
+import { createExa, type Exa } from './stagehand/exa';
+import { createVoiceCatalog, type VoiceCatalog } from './stagehand/voice-catalog';
 import { VoiceHost } from './voice-host';
 
 export const name = 'dsh-aivn';
 
-/** 配的 key 优先，环境变量兜底（`DSH_AIVN_TTS_KEYS`，逗号分隔）。 */
+/** 一个字段的现值：`.volatile()` 之后拿到的是稳定引用，读一次才算数。 */
+function keysOf(value: Volatile<string[] | undefined> | undefined): string[] {
+	return (value?.get() ?? []).map((key) => key.trim()).filter((key) => key !== '');
+}
+
+/** 配置里的 key 优先，环境变量兜底（`DSH_AIVN_TTS_KEYS`，逗号分隔）。 */
 function configuredKeys(config: Config): string[] {
-	const fromConfig = (config.tts?.keys ?? []).map((key) => key.trim()).filter((key) => key !== '');
+	const fromConfig = keysOf(config.ttsKeys);
 	if (fromConfig.length > 0) return fromConfig;
 	return (process.env.DSH_AIVN_TTS_KEYS ?? '')
 		.split(',')
@@ -43,13 +50,14 @@ function configuredKeys(config: Config): string[] {
 
 /** 同上一套规矩，给联网检索用（`DSH_AIVN_EXA_KEYS`）。 */
 function configuredExaKeys(config: Config): string[] {
-	const fromConfig = (config.search?.keys ?? []).map((key) => key.trim()).filter((key) => key !== '');
+	const fromConfig = keysOf(config.searchKeys);
 	if (fromConfig.length > 0) return fromConfig;
 	return (process.env.DSH_AIVN_EXA_KEYS ?? '')
 		.split(',')
 		.map((key) => key.trim())
 		.filter((key) => key !== '');
 }
+
 export { PLAYWRITER_PRESET, STAGEHAND_PRESET } from './session';
 
 export const inject = ['agents', 'sessionController', 'agentPresets', 'commands', 'systemPrompt'];
@@ -60,140 +68,188 @@ const DEFAULT_TTS_MODEL = 's2.1-pro-free';
 /** Exa 检索端点（api.exa.ai 在墙外，由 DSH 进程的环境代理带出去）。 */
 const DEFAULT_EXA_BASE_URL = 'https://api.exa.ai';
 
+/**
+ * 配置面：**扁平**的 17 个字段，每一个都 `.volatile()`。
+ *
+ * 为什么扁平：DSH 设置界面的表单控件生成的写路径只有单段（`path: ['字段名']`），
+ * 嵌套字段（`tts.keys` 那样的）在界面上根本寻址不到。为什么全字段 volatile：
+ * volatile 是「改了不用重挂插件」的开关——配置改动经 loader 原位提交进这些引用，
+ * 并给拥有者发一条 `loader/volatile-update`，插件据此重建能力面。于是
+ * **改设置就地生效，不再需要改 `cordis.patch.yml` 再重启 dsh**。
+ *
+ * `role('secret')` 的四个字段（Fish / Exa / 生图 / 配乐 key）在设置界面上只写不回显：
+ * 描述与响应里全程脱敏，只报「配没配」。这四个字段**不带 default**——带了默认空串，
+ * 界面会永远显示「已配置」。
+ */
 export interface Config {
-	tts?: {
-		/** 一把或多把 Fish Audio key（多把轮询分摊额度）。也可以走环境变量。 */
-		keys?: string[];
-		baseUrl?: string;
-		model?: string;
-		/** 同时合成的上限：摊往返，又不把额度一次打空。 */
-		concurrency?: number;
-	};
+	/** 一把或多把 Fish Audio key（多把轮询分摊额度）。也可以走 `DSH_AIVN_TTS_KEYS`。 */
+	ttsKeys: Volatile<string[] | undefined>;
+	ttsBaseUrl: Volatile<string>;
+	ttsModel: Volatile<string>;
+	/** 同时合成的上限：摊往返，又不把额度一次打空。 */
+	ttsConcurrency: Volatile<number>;
 	/** 给搭台助手放开命令行（`bash`）。默认关，与 AIVN 那个 `defaultOff` 同口径。 */
-	shell?: boolean;
-	search?: {
-		/** 一把或多把 Exa key（多把轮询分摊免费额度）。也可以走环境变量。 */
-		keys?: string[];
-		baseUrl?: string;
-	};
-	/** 生图后端。地址与模型都给齐才算配好——只给其一等于没有：工具不注册，persona 不提。 */
-	image?: {
-		/** 接口格式：`gemini`（官方 / flow2api / cpa）/ `openai`（官方与兼容网关）/ `modelslab`。 */
-		format?: 'gemini' | 'openai' | 'modelslab';
-		baseUrl?: string;
-		/** 不给就不带鉴权头（本机网关常常不校验）。 */
-		apiKey?: string;
-		model?: string;
-		/** 档位 `1K`/`2K`/`4K`（K 大写）或字面像素 `1536x1024`（openai / modelslab 用得上）。 */
-		size?: string;
-		timeoutMs?: number;
-	};
-	/** 音乐生成后端（只有 Gemini 形状）。地址与模型都给齐才算配好。 */
-	music?: {
-		baseUrl?: string;
-		apiKey?: string;
-		model?: string;
-		timeoutMs?: number;
+	shell: Volatile<boolean>;
+	/** 一把或多把 Exa key。也可以走 `DSH_AIVN_EXA_KEYS`。 */
+	searchKeys: Volatile<string[] | undefined>;
+	searchBaseUrl: Volatile<string>;
+	/** 生图接口格式：`gemini`（官方 / flow2api / cpa）/ `openai`（官方与兼容网关）/ `modelslab`。 */
+	imageFormat: Volatile<'gemini' | 'openai' | 'modelslab'>;
+	/** 生图地址；与 `imageModel` 都给齐才算配好生图，只给其一等于没有。 */
+	imageBaseUrl: Volatile<string>;
+	imageApiKey: Volatile<string>;
+	imageModel: Volatile<string>;
+	/** 档位 `1K`/`2K`/`4K`（K 大写）或字面像素 `1536x1024`（openai / modelslab 用得上）。 */
+	imageSize: Volatile<string>;
+	imageTimeoutMs: Volatile<number>;
+	musicBaseUrl: Volatile<string>;
+	musicApiKey: Volatile<string>;
+	musicModel: Volatile<string>;
+	musicTimeoutMs: Volatile<number>;
+}
+
+export const Config = z.object({
+	// 两个数组密钥写成 `union([array, const(undefined)])`：schemastery 的数组默认是 `[]`，而脱敏边车
+	// 判的是「这个值存不存在」——空数组会让设置界面永远显示「已配置」（2026-10-06 e2e 实测）。
+	ttsKeys: z.union([z.array(z.string()), z.const(undefined)]).role('secret').volatile(),
+	ttsBaseUrl: z.string().default(DEFAULT_TTS_BASE_URL).volatile(),
+	ttsModel: z.string().default(DEFAULT_TTS_MODEL).volatile(),
+	ttsConcurrency: z.natural().default(2).volatile(),
+	shell: z.boolean().default(false).volatile(),
+	searchKeys: z.union([z.array(z.string()), z.const(undefined)]).role('secret').volatile(),
+	searchBaseUrl: z.string().default(DEFAULT_EXA_BASE_URL).volatile(),
+	imageFormat: z.union([z.const('gemini'), z.const('openai'), z.const('modelslab')]).default('gemini').volatile(),
+	// 地址与模型必须都给齐：只给其一既出不了图，界面上一眼又看不出「差什么」，所以在 UI 的
+	// 说明里写清「两个都给齐才算配好」。
+	imageBaseUrl: z.string().default('').volatile(),
+	imageApiKey: z.string().role('secret').volatile(),
+	imageModel: z.string().default('').volatile(),
+	imageSize: z.string().default('1K').volatile(),
+	imageTimeoutMs: z.natural().default(180_000).volatile(),
+	musicBaseUrl: z.string().default('').volatile(),
+	musicApiKey: z.string().role('secret').volatile(),
+	musicModel: z.string().default('').volatile(),
+	musicTimeoutMs: z.natural().default(240_000).volatile(),
+});
+
+/**
+ * 一次配置推导出来的全部运行期面。
+ *
+ * 里面的成员都是无状态 HTTP 包装（TTS / Exa / 音色表 / 生图与配乐后端），配置一变就整体重建，
+ * 零成本：在飞的请求握着旧实例跑完，没有中断。
+ */
+interface Runtime {
+	capabilities: Capabilities;
+	tts: FishTts | null;
+	/** 没配 key 时是 null（调用方据此不装 `list_voices`）。 */
+	voices: VoiceCatalog | null;
+	/** 同上，没配 Exa key 时是 null。 */
+	exa: Exa | null;
+	media: MediaBackends;
+}
+
+/** 从当前配置现算运行期面——每次调用都重新 `.get()`，所以拿到的一定是现值。 */
+function buildRuntime(config: Config): Runtime {
+	const ttsKeys = configuredKeys(config);
+	const exaKeys = configuredExaKeys(config);
+	const ttsBaseUrl = config.ttsBaseUrl.get() ?? DEFAULT_TTS_BASE_URL;
+	const media = createMediaBackends({
+		image: {
+			format: config.imageFormat.get(),
+			baseUrl: config.imageBaseUrl.get(),
+			apiKey: config.imageApiKey.get(),
+			model: config.imageModel.get(),
+			size: config.imageSize.get(),
+			timeoutMs: config.imageTimeoutMs.get(),
+		},
+		music: {
+			baseUrl: config.musicBaseUrl.get(),
+			apiKey: config.musicApiKey.get(),
+			model: config.musicModel.get(),
+			timeoutMs: config.musicTimeoutMs.get(),
+		},
+	});
+	return {
+		capabilities: resolveCapabilities({
+			shell: config.shell.get() ?? false,
+			ttsKeys,
+			exaKeys,
+			image: media.image !== null,
+			music: media.music !== null,
+		}),
+		tts: createTts(ttsKeys, ttsBaseUrl, config.ttsModel.get() ?? DEFAULT_TTS_MODEL),
+		voices: createVoiceCatalog(ttsKeys, ttsBaseUrl),
+		exa: createExa(exaKeys, config.searchBaseUrl.get() ?? DEFAULT_EXA_BASE_URL),
+		media,
 	};
 }
 
-/**
- * 配置面。写进 profile 的 `cordis.patch.yml`：
- *
- *     - id: aivn
- *       name: dsh-aivn
- *       config:
- *         tts:
- *           keys: ["<your-fish-key>"]
- *         search:
- *           keys: ["<your-exa-key>"]
- *         image:
- *           format: gemini
- *           baseUrl: http://127.0.0.1:38000
- *           model: gemini-3.0-pro-image
- *           size: 1K
- *         music:
- *           baseUrl: http://127.0.0.1:38000
- *           model: flow-music-lyria-3.5
- *         shell: false
- *
- * 不想把 key 写进配置文件的话留空，走环境变量（`DSH_AIVN_TTS_KEYS` / `DSH_AIVN_EXA_KEYS`，
- * 逗号分隔）。没配的那一项能力就停用：对应工具不注册，提示词里也不提。
- */
-export const Config = z.object({
-	tts: z
-		.object({
-			keys: z.array(z.string()).default([]),
-			baseUrl: z.string().default(DEFAULT_TTS_BASE_URL),
-			model: z.string().default(DEFAULT_TTS_MODEL),
-			concurrency: z.natural().default(2),
-		})
-		.default({}),
-	shell: z.boolean().default(false),
-	search: z
-		.object({
-			keys: z.array(z.string()).default([]),
-			baseUrl: z.string().default(DEFAULT_EXA_BASE_URL),
-		})
-		.default({}),
-	image: z
-		.object({
-			format: z.union([z.const('gemini'), z.const('openai'), z.const('modelslab')]).default('gemini'),
-			baseUrl: z.string().default(''),
-			apiKey: z.string().default(''),
-			model: z.string().default(''),
-			size: z.string().default('1K'),
-			timeoutMs: z.natural().default(180_000),
-		})
-		.default({}),
-	music: z
-		.object({
-			baseUrl: z.string().default(''),
-			apiKey: z.string().default(''),
-			model: z.string().default(''),
-			timeoutMs: z.natural().default(240_000),
-		})
-		.default({}),
-});
+/** 能力面写成一行摘要：装载时与每次配置变更后各记一次，日志里能对着看。 */
+function describeCapabilities(capabilities: Capabilities): string {
+	return (
+		`音色库 ${capabilities.voice ? '开' : '关'}、联网检索 ${capabilities.search ? '开' : '关'}、` +
+		`生图 ${capabilities.image ? '开' : '关'}、配乐 ${capabilities.music ? '开' : '关'}、` +
+		`命令行 ${capabilities.shell ? '开' : '关'}`
+	);
+}
 
-export async function apply(ctx: Context, config: Config = {}): Promise<() => void> {
+export async function apply(ctx: Context, config: Config): Promise<() => void> {
 	const hub = new StageHub();
 	const guard = new BeatGuard();
 	/** 「引擎自己投的消息」的登记，追收束（`beat-guard`）与静默推进（`routes`）共用一份。 */
 	const injected = new InjectedMessages();
-	const ttsKeys = configuredKeys(config);
-	const ttsBaseUrl = config.tts?.baseUrl ?? DEFAULT_TTS_BASE_URL;
-	const tts = createTts(ttsKeys, ttsBaseUrl, config.tts?.model ?? DEFAULT_TTS_MODEL);
-	const voice = new VoiceHost(tts, hub, ctx.logger, config.tts?.concurrency ?? 2);
-	if (tts) ctx.logger.info('[dsh-aivn] 语音已启用（Fish Audio TTS）');
+
+	const runtime = { revision: 0, current: buildRuntime(config) };
+	ctx.logger.info(`[dsh-aivn] 搭台助手能力：${describeCapabilities(runtime.current.capabilities)}`);
+	if (runtime.current.tts) ctx.logger.info('[dsh-aivn] 语音已启用（Fish Audio TTS）');
 	else ctx.logger.info('[dsh-aivn] 没配 TTS key，语音停用');
 
-	// 搭台助手的能力面：只留会变的那几位，装载时定值（配置改了要重启 dsh，与 profile 里其它插件一致）。
-	const media = createMediaBackends({ image: config.image, music: config.music });
-	const capabilities = resolveCapabilities({
-		shell: config.shell ?? false,
-		ttsKeys,
-		exaKeys: configuredExaKeys(config),
-		image: media.image !== null,
-		music: media.music !== null,
-	});
-	const voices = createVoiceCatalog(ttsKeys, ttsBaseUrl);
-	const exa = createExa(configuredExaKeys(config), config.search?.baseUrl ?? DEFAULT_EXA_BASE_URL);
-	ctx.logger.info(
-		`[dsh-aivn] 搭台助手能力：音色库 ${capabilities.voice ? '开' : '关'}、联网检索 ${
-			capabilities.search ? '开' : '关'
-		}、生图 ${capabilities.image ? '开' : '关'}、配乐 ${capabilities.music ? '开' : '关'}、命令行 ${
-			capabilities.shell ? '开' : '关'
-		}`,
+	// 访问器而不是值：语音合成发生在路由与舞台管线里，用的时候才取当前后端——
+	// 设置界面把 key 补上之后，下一句台词就出声，不用重挂插件（更不用重启 dsh）。
+	const voice = new VoiceHost(
+		() => runtime.current.tts,
+		() => config.ttsConcurrency.get() ?? 2,
+		hub,
+		ctx.logger,
 	);
 
+	const tools = installPresetTools(ctx, hub, guard, runtime);
+	const presets = await registerPresets(ctx, { shell: runtime.current.capabilities.shell });
 	const disposers: Array<() => void> = [
 		installStageTap(ctx, hub, guard, injected, voice),
-		installPresetTools(ctx, hub, guard, { capabilities, voices, exa, media }),
+		tools.dispose,
 		installBeatGuard(ctx, guard, injected),
 		installPlayCommands(ctx),
-		await registerPresets(ctx, { shell: capabilities.shell, capabilities }),
+		presets.dispose,
 	];
+
+	// 设置界面改完的值经 loader 原位提交进 `config` 的这些引用，这里重建运行期面：
+	// 工具面重扫（装上/卸下那一轮能力，换掉旧客户端实例），shell 翻转时重注册搭台助手预设。
+	ctx.on('loader/volatile-update', () => {
+		const before = runtime.current.capabilities;
+		runtime.current = buildRuntime(config);
+		runtime.revision += 1;
+		const after = runtime.current.capabilities;
+		ctx.logger.info(`[dsh-aivn] 配置已更新，能力：${describeCapabilities(after)}`);
+		tools.resync();
+		// `tool-bash` 是预设的**一行**（不是装在 Agent 上的工具），而活着的 Agent 保留它绑定那一刻
+		// 的那代行集——重注册只对之后新建的会话生效，已开着的搭台助手会话保持原样。
+		if (before.shell !== after.shell) {
+			ctx.logger.info(
+				'[dsh-aivn] shell 翻转：搭台助手预设已重注册，只对新建会话生效（已开着的会话保留原行集）',
+			);
+			void presets.restage(after.shell);
+		}
+	});
+
+	// 自带设置卡（浏览器半边注册在 Plugins 页的 dsh-aivn 上）：关掉自动生成的表单页，
+	// 免得同一个命名空间出现两份长得不一样的编辑器。settings 不在时这一支不跑，业务照常。
+	ctx.inject(['settings'], (settingsCtx) => {
+		settingsCtx.effect(
+			() => settingsCtx.settings.configure({ auto: false }, ctx.fiber),
+			'dsh-aivn:settings-ownership',
+		);
+	});
 
 	ctx.inject(['webServer'], (webCtx) => {
 		disposers.push(installStageRoutes(webCtx, hub, injected, voice));

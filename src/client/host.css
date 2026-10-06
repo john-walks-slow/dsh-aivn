@@ -18,3 +18,60 @@
 [data-conversation-content]:has(.aivn-stage-view) [data-composer-seat] {
 	display: none;
 }
+
+/**
+ * 插件配置卡（Plugins → dsh-aivn）的排布。
+ *
+ * 只做间距与那行能力状态灯的样子：表单控件、保存按钮、字段外框都由 DSH 自己的
+ * `SettingsForm` / `SettingsValueField` / `SettingsSecretField` 提供，这里不重画。
+ * 状态灯是这张卡独有的信息（配了哪几项能力），所以给一点点样式让它读得出开关。
+ */
+.aivn-config-lights {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: baseline;
+	margin: 0 0 8px;
+	font-size: 12px;
+}
+
+.aivn-config-lights > span[data-on] {
+	padding: 1px 6px;
+	border: 1px solid currentcolor;
+	border-radius: 999px;
+	opacity: 0.75;
+}
+
+.aivn-config-lights > span[data-on='true'] {
+	opacity: 1;
+}
+
+.aivn-config-lights-note {
+	border: 0;
+	font-size: 11px;
+	opacity: 0.6;
+}
+
+.aivn-config-secret {
+	display: flex;
+	gap: 8px;
+	align-items: flex-end;
+}
+
+.aivn-config-secret > :first-child {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.aivn-config-switch {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin: 12px 0;
+}
+
+.aivn-config-switch p {
+	margin: 0;
+	font-size: 12px;
+	opacity: 0.7;
+}

@@ -22,4 +22,12 @@ export interface PlayContext {
 	 * 还是写完正文忘了调工具」——忘了的那一轮才追一句把停止点要回来。
 	 */
 	beatClosed(): void;
+	/**
+	 * 把剧目皮肤推给所有正盯着这座剧目的舞台。
+	 *
+	 * 不能只推调用者自己那条流：`set_stage_style` 归搭台助手，而舞台（AIVN tab）
+	 * 开在剧作家会话上——工具在 A 会话写文件、舞台在 B 会话看画面，帧必须送到 B。
+	 * 判据取工作目录相同（工作区 = 剧目根），同一座剧目的两个会话都算。
+	 */
+	broadcastStyle(theme: Record<string, string>): void;
 }

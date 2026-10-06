@@ -31,13 +31,15 @@ import type { BeatGuard } from './beat-guard';
 import type { StageHub } from './hub';
 import type { MediaBackends } from './media/backends';
 import { registerPlayContext } from './play-context';
-import { PLAYWRITER_PRESET, STAGEHAND_PRESET, sessionPreset, type LiveAgent } from './session';
+import { PLAYWRITER_PRESET, STAGEHAND_PRESET, sessionPreset, sessionWorkspace, type LiveAgent } from './session';
 import type { Capabilities } from './stagehand/capabilities';
 import { registerStagehandContext } from './stagehand/context';
 import type { Exa } from './stagehand/exa';
+import { stagehandGuide } from './stagehand/prompt';
 import { createReadinessTool } from './stagehand/tools/get-readiness';
 import { createListVoicesTool } from './stagehand/tools/list-voices';
 import { createSetCraftTool } from './stagehand/tools/set-craft';
+import { createSetStageStyleTool } from './stagehand/tools/set-stage-style';
 import { createWebSearchTool } from './stagehand/tools/web-search';
 import type { VoiceCatalog } from './stagehand/voice-catalog';
 import { createPlayTool } from './tools/create-play';
@@ -65,21 +67,49 @@ export interface ToolDeps {
 	media: MediaBackends;
 }
 
-export function installPresetTools(ctx: Context, hub: StageHub, guard: BeatGuard, deps: ToolDeps): () => void {
-	/** 每个 Agent 已装的工具与它们所属的预设；WeakMap 让 Agent 走掉时不留登记。 */
-	const installed = new WeakMap<object, { preset: string; off: () => void }>();
+/**
+ * 运行期面的持有者。
+ *
+ * `revision` 每次配置变更 +1：工具对象在装配时就把 `media` / `exa` / `voices` 抓在手里
+ * （它们是无状态 HTTP 包装，换了 config 就得换实例），所以「重扫时是否要重装」按版本号判断，
+ * 而不去逐个比字段——少一处会忘的对照表。
+ */
+export interface ToolRuntime {
+	readonly revision: number;
+	readonly current: ToolDeps;
+}
+
+/** 预设工具的宿主面：`agent/created` 之外，配置变更时用它把在册会话重扫一遍。 */
+export interface PresetToolsHost {
+	/** 配置变了：在册会话的工具面重扫（装上/卸下那一轮能力，换掉旧的客户端实例）。 */
+	resync(): void;
+	dispose(): void;
+}
+
+export function installPresetTools(
+	ctx: Context,
+	hub: StageHub,
+	guard: BeatGuard,
+	runtime: ToolRuntime,
+): PresetToolsHost {
+	/** 每个 Agent 已装的工具、签名与它们所属的预设；WeakMap 让 Agent 走掉时不留登记。 */
+	const installed = new WeakMap<object, { signature: string; off: () => void }>();
 
 	const sync = (agent: ToolAgent): void => {
 		const preset = sessionPreset(ctx, String(agent.id));
 		const mine = preset !== undefined && PRESETS.has(preset);
 		const current = installed.get(agent);
-		if (current?.preset === preset) return;
+		if (!mine) {
+			current?.off();
+			installed.delete(agent);
+			return;
+		}
+
+		const signature = `${preset}@${runtime.revision}`;
+		if (current?.signature === signature) return;
 
 		current?.off();
-		installed.delete(agent);
-		if (!mine) return;
-
-		installed.set(agent, { preset, off: install(hub, agent, preset, guard, deps) });
+		installed.set(agent, { signature, off: install(ctx, hub, agent, preset, guard, runtime) });
 	};
 
 	const onCreated = (payload: unknown): undefined => {
@@ -96,9 +126,18 @@ export function installPresetTools(ctx: Context, hub: StageHub, guard: BeatGuard
 
 	const offCreated = ctx.on('agent/created', onCreated);
 	const offSelected = ctx.on('agent-preset/selected', onSelected);
-	return () => {
-		offCreated();
-		offSelected();
+	return {
+		resync() {
+			// 冷会话不在名册里（宿主重启后没恢复），也就没有工具面要改。
+			for (const agent of ctx.agents.list()) {
+				const tool = agent as ToolAgent;
+				if (tool.ctx && tool.id !== undefined) sync(tool);
+			}
+		},
+		dispose() {
+			offCreated();
+			offSelected();
+		},
 	};
 }
 
@@ -113,12 +152,14 @@ function safePlayDir(play: PlayContext): string {
 
 /** 把该预设的工具挂到这个 Agent 上，返回一次性卸掉全部的卸载器。 */
 function install(
+	ctx: Context,
 	hub: StageHub,
 	agent: ToolAgent,
 	preset: string,
 	guard: BeatGuard,
-	deps: ToolDeps,
+	runtime: ToolRuntime,
 ): () => void {
+	const deps = runtime.current;
 	const sessionId = String(agent.id);
 	const play: PlayContext = {
 		hub,
@@ -130,6 +171,23 @@ function install(
 		},
 		beatClosed() {
 			guard.close(sessionId);
+		},
+		/**
+		 * 皮肤帧推给**同剧目**的每条会话流，而不是只推自己这条。
+		 *
+		 * `set_stage_style` 是搭台助手的工具，舞台却开在剧作家会话上：只推自己的流，
+		 * 用户那边要刷新才看得见，等于白写「立即生效」。判据是工作目录相同——
+		 * 会话工作区就是剧目根，同目录即同剧目。
+		 */
+		broadcastStyle(theme) {
+			const dir = safePlayDir(play);
+			for (const other of ctx.agents.list()) {
+				const id = String(other.id);
+				// 判据走 `sessionWorkspace`（本插件其他取工作区的地方同一个访问器），
+				// 免得这里手抠 `session.header.cwd` 与它哪天分叉。
+				if (id !== sessionId && (dir === '' || sessionWorkspace(ctx, id) !== dir)) continue;
+				hub.appendStyle(id, theme);
+			}
 		},
 	};
 
@@ -143,7 +201,8 @@ function install(
 		if (deps.capabilities.image) tools.push(createSyncImageTool(play, deps.media));
 	} else {
 		// 搭台助手：AIVN 工坊那半边；`can` 决定哪几个装得上。
-		tools.push(createReadinessTool(play), createSetCraftTool(play));
+		// `set_stage_style` 不门控：它只写剧目里的一个文件，不依赖任何后端配置。
+		tools.push(createReadinessTool(play), createSetCraftTool(play), createSetStageStyleTool(play));
 		if (deps.capabilities.voice && deps.voices) tools.push(createListVoicesTool(deps.voices));
 		if (deps.capabilities.search && deps.exa) tools.push(createWebSearchTool(deps.exa));
 		if (deps.capabilities.image) {
@@ -166,16 +225,29 @@ function install(
 		// 只有剧作家的 scope 上有这些段：搭台助手不写剧本，不该看见舞台契约。
 		offs.push(
 			agent.ctx.effect(
-				() => registerPlayContext(agent.ctx, () => safePlayDir(play), { image: deps.capabilities.image }),
+				() => registerPlayContext(agent.ctx, () => safePlayDir(play), () => runtime.current.capabilities.image),
 				'dsh-aivn:play-context',
 			),
 		);
 	} else {
 		// 搭台助手看的是「当前状态」（文件清单 + 就绪 + 剧本语言），不是舞台契约。
+		// 能力位门控的那几章（生图/配乐/检索/命令行）挂成**函数文本**：每次组装现读运行期面，
+		// 于是设置界面刚补上的 key，已经开着的会话下一轮就看得见对应的章。
 		offs.push(
 			agent.ctx.effect(
 				() => registerStagehandContext(agent.ctx, () => safePlayDir(play)),
 				'dsh-aivn:stagehand-context',
+			),
+			agent.ctx.effect(
+				() =>
+					agent.ctx.systemPrompt.section({
+						name: 'aivn:stagehand-guide',
+						// persona 的前缀是 order 0、语言段是 100：40 落在两者之间，
+						// 与拆开之前的章序（身份 → 备料 → 能力 → 技能库）对得上。
+						order: 40,
+						text: () => stagehandGuide(runtime.current.capabilities),
+					}),
+				'dsh-aivn:stagehand-guide',
 			),
 		);
 	}

@@ -215,18 +215,42 @@ const SKILLS = `# 技能库
 系统提示词里那份技能清单是**做法速查**（出图、配乐、场景构图这类），动手前先按需加载全文，
 别凭印象写。清单里没有的事，就按这个剧目的实际情况办。`;
 
+/** 舞台皮肤：能改什么、怎么成组改、什么时候别动。工具细节由 `set_stage_style` 自己讲。 */
+const STYLE = `# 舞台样式（set_stage_style）
+
+\`set_stage_style\` 写剧目根的 \`theme.json\`，改台词条、名牌、停止点选项卡、舞台衬底、圆角、字体与主色，
+写完立刻推到已经打开的舞台。**用户要求换皮、或你们商量好了再动**——默认那套（浅纸面 + 暗画面）
+是设计过的，别顺手美化；它也不是表达情绪的手段，那是台词与配乐的事。
+
+- 台词条是一整套玻璃：底 / 描边 / 正文 / 旁白 / 独白 / 投影要一起看，换亮底就得把字色压深、投影改浅；
+  选项卡那组与它同层，只改一边会撕裂；\`accent\` 改了要配套 \`accent_ink\`。
+- 值只认颜色、\`linear-gradient(...)\`、\`0–24px\` 圆角、\`0.2–1\` 压暗、逗号分隔的字体栈这些形状。
+- 不带参数调用 = 看当前生效值；一次调用里任何一个键不合法，整次都不写进去。`;
+
 /**
- * 拼装。章序与 AIVN 的 `buildWorkshopPrompt` 对齐（对不上的三章见文件头注释）。
+ * 静态前缀：与配置无关的那几章（身份、起新剧目、职责边界、对话风格）。
+ *
+ * 它们进 persona 行的 `prefix`——那一段被 dsh-persona 在装载时烘焙成静态文本，
+ * 改了得重挂预设，所以这里只放**永不随配置变**的东西。
  */
-export function stagehandPrompt(can: Capabilities): string {
+export function stagehandStatic(): string {
+	return [IDENTITY, NEW_PLAY, RESPONSIBILITY, TALK].join('\n\n');
+}
+
+/**
+ * 能力位门控的那几章，**每次组装现读**（宿主半边挂成 `systemPrompt.section` 的函数文本）。
+ *
+ * 拆开的理由：设置界面把生图/配乐/检索/命令行的 key 补上之后，已经开着的搭台助手会话
+ * 下一轮就该看见对应的章——persona 那层是装载时烘焙死的，改不动。
+ *
+ * 章序与拆开前完全一致（静态前缀 + 这一段正好拼回原来的顺序），只是换了个装载位置。
+ */
+export function stagehandGuide(can: Capabilities): string {
 	return [
-		IDENTITY,
-		NEW_PLAY,
-		RESPONSIBILITY,
-		TALK,
 		setupFlow(can),
 		assetGuide(can),
 		writingPoints(can),
+		STYLE,
 		can.music ? MUSIC : '',
 		can.shell ? SHELL : '',
 		can.search ? SEARCH : '',
@@ -234,4 +258,11 @@ export function stagehandPrompt(can: Capabilities): string {
 	]
 		.filter((chapter) => chapter !== '')
 		.join('\n\n');
+}
+
+/**
+ * 整份提示词（静态 + 门控），给不需要拆开的地方用——e2e 与将来可能的整段注入。
+ */
+export function stagehandPrompt(can: Capabilities): string {
+	return [stagehandStatic(), stagehandGuide(can)].filter((chapter) => chapter !== '').join('\n\n');
 }

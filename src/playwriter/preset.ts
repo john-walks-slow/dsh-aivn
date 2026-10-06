@@ -15,8 +15,7 @@ import { fileURLToPath } from 'node:url';
 import type { Context } from '@deepseek-ai/cordis';
 import type { PresetDefinition } from '@deepseek-ai/dsh-agent-preset-registry';
 import { PLAYWRITER_PRESET, STAGEHAND_PRESET } from '../session';
-import type { Capabilities } from '../stagehand/capabilities';
-import { stagehandPrompt } from '../stagehand/prompt';
+import { stagehandStatic } from '../stagehand/prompt';
 import { PLAYWRITER_PROMPT } from './prompt';
 
 /** 与 dev 预设同一个预算：一次注入的指令文本上限。 */
@@ -92,30 +91,48 @@ export const PLAYWRITER_DEFINITION: PresetDefinition = {
 };
 
 /**
- * 注册两个预设，返回一次性卸载器。
+ * 搭台助手的预设定义。
  *
- * 搭台助手的行集按 `shell` 现拼：开着就真装 `tool-bash`，关着留一行 `disabled`（用户在预设列表里
- * 看得见这回事，但状态由插件配置说了算——预设是代码注册的，GUI 改不动它）。
+ * 行集里的 `tool-bash` 行由 `shell` 决定真装还是留一行 `disabled`；persona 用的是**静态前缀**
+ * （`stagehandStatic()`）——能力位门控的那几章由 `preset-tools.ts` 挂在这个 Agent 的
+ * `systemPrompt` 上现读，配置改了就换，不必重挂预设。
+ */
+function stagehandDefinition(shell: boolean): PresetDefinition {
+	return {
+		id: STAGEHAND_PRESET,
+		name: '搭台助手',
+		description: '备料的搭台助手：写设定、角色卡与创作口径，出品素材，把剧目准备好',
+		plugins: rows(stagehandStatic(), { bash: shell, skills: true }),
+	};
+}
+
+/** 预设的注册句柄：`restage` 用于 shell 翻转后的重注册（先卸再装）。 */
+export interface PresetRegistry {
+	/** 重注册搭台助手预设。只影响之后新建的会话，见 `restage` 的调用点注释。 */
+	restage(shell: boolean): Promise<void>;
+	dispose(): void;
+}
+
+/**
+ * 注册两个预设，返回注册句柄。
  *
  * `register` 是**急切装载**：它在这里就把行集挂起来，激活失败不抛异常，而是记在名册的可读诊断里
  * （GUI 的预设列表看得到哪一行不可用）。所以这一步 await 得到的是「已经挂好或已经知道坏在哪」。
  */
-export async function registerPresets(
-	ctx: Context,
-	opts: { shell: boolean; capabilities: Capabilities },
-): Promise<() => void> {
-	const stagehand: PresetDefinition = {
-		id: STAGEHAND_PRESET,
-		name: '搭台助手',
-		description: '备料的搭台助手：写设定、角色卡与创作口径，出素材，把剧目准备好（素材生成工具在下一阶段）',
-		plugins: rows(stagehandPrompt(opts.capabilities), { bash: opts.shell, skills: true }),
-	};
-	const disposers = [
-		await ctx.agentPresets.register(PLAYWRITER_DEFINITION),
-		await ctx.agentPresets.register(stagehand),
-	];
+export async function registerPresets(ctx: Context, opts: { shell: boolean }): Promise<PresetRegistry> {
+	let stagehandOff = await ctx.agentPresets.register(stagehandDefinition(opts.shell));
+	const playwriterOff = await ctx.agentPresets.register(PLAYWRITER_DEFINITION);
 	ctx.logger.info(`[dsh-aivn] presets registered: ${PLAYWRITER_PRESET}, ${STAGEHAND_PRESET}`);
-	return () => {
-		for (const dispose of disposers.splice(0)) void dispose();
+
+	return {
+		async restage(shell) {
+			// 同 id 重复注册会直接抛（`Duplicate agent preset`），先卸旧的。
+			stagehandOff();
+			stagehandOff = await ctx.agentPresets.register(stagehandDefinition(shell));
+		},
+		dispose() {
+			stagehandOff();
+			void playwriterOff();
+		},
 	};
 }

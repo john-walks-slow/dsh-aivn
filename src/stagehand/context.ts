@@ -14,6 +14,8 @@ import { languageLabel } from '@aivn/core';
 import type { Context } from '@deepseek-ai/cordis';
 import { loadPlaySync } from '../play';
 import { readPlayReadiness, renderReadiness } from '../readiness';
+import { countTheme } from '../style-tokens';
+import { readPlayTheme, THEME_FILE } from '../theme';
 
 /** 一次快照的存活时间：够覆盖一个 turn 的多个 step，又保证跨轮必重读。 */
 const TTL_MS = 1_000;
@@ -42,8 +44,26 @@ export function readStagehandSnapshot(dir: string): StagehandSnapshot {
 	const readiness = play ? renderReadiness(readPlayReadiness(dir)) : '';
 	return {
 		language,
-		state: `# 当前状态\n\n剧目文件：\n${listing}${readiness ? `\n\n${readiness}` : ''}`,
+		state: `# 当前状态\n\n剧目文件：\n${listing}\n\n${renderTheme(dir)}${readiness ? `\n\n${readiness}` : ''}`,
 	};
+}
+
+/**
+ * 皮肤现状一行。
+ *
+ * 文件清单里本来就有 `theme.json`，但那一行只说明它在；这里报「改了 0 个键 / N 个键」，
+ * 让模型动手前就知道现在是什么皮，不必先读一遍文件。文件坏了也只报一句，快照不因此炸掉。
+ */
+function renderTheme(dir: string): string {
+	try {
+		const { theme, dropped } = readPlayTheme(dir);
+		const count = countTheme(theme);
+		const state = count === 0 ? `${THEME_FILE} 无（默认皮）` : `${THEME_FILE} 改了 ${count} 个键`;
+		const dirty = dropped.length > 0 ? `（另有 ${dropped.length} 个键不合法，已忽略）` : '';
+		return `舞台皮肤：${state}${dirty}`;
+	} catch (error) {
+		return `舞台皮肤：${THEME_FILE} 读不了——${error instanceof Error ? error.message : String(error)}`;
+	}
 }
 
 /** 目录树一行一份文件：路径 + 大小。空目录不出现在清单里。 */
