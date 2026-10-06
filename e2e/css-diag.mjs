@@ -44,7 +44,7 @@ try {
 	await sendMessage(page, PLAY.opening);
 	await page.waitForTimeout(2_500);
 	console.log('tab 列表:', (await listTabs(page)).join(' / '));
-	console.log('切到舞台:', await openViewTabWhenReady(page, '舞台', 60_000));
+	console.log('切到 AIVN:', await openViewTabWhenReady(page, 'AIVN', 60_000));
 	const mounted = await waitFor(page, () => document.querySelector('.stage-root.aivn-stage-view') !== null, {
 		timeout: 30_000,
 		label: '舞台挂载',

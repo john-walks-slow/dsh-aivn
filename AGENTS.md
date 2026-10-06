@@ -68,6 +68,11 @@ dsh-e2e stop
   用 `zstd -dc` 解）、`voice`（台词语音，`verify-voice.mjs`，真打 Fish Audio，跑之前要 export
   `DSH_AIVN_TTS_KEYS`；它在页面里给 `AudioContext` / `decodeAudioData` / `AudioBufferSourceNode.start`
   挂钩子，断言的是「浏览器真的解出 PCM 并起播」，不是「帧到了」）。
+- **`rebuild` 是唯一不需要实例的套件**（`node e2e/run.mjs rebuild` 直接跑，不占 run 锁）：
+  `verify-rebuild.mjs` 用 esbuild 把 `verify-rebuild.ts` 打进内存/临时文件再跑，夹具里手写一份
+  转写，直接调**真实的** `rebuildStage()`，断言三种停止点形态在重投影之后都留得住。
+  舞台的真相源是会话面，凡是「回退 / 重写 / 分支 / 冷会话首开」会走重建的地方，新增的舞台语义
+  都该在这里补一条——真模型跑不出「这一拍用 `<stop/>` 收尾」，但转写可以手写。
 - 两个本地前提在 `.dsh-e2e-home/` 里（不在仓库里）：profile 的 `cordis.patch.yml` 要有可用的
   provider 行（`settings.yaml` 首次启动被 import 后改名，冷启就没 provider 了），
   默认模型挑一个这台机器出得去的（列表里可能有地区受限的条目，会报

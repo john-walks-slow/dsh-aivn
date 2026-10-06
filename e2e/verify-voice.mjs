@@ -171,7 +171,7 @@ try {
 		() => [...document.querySelectorAll('span[title]')].some((el) => (el.textContent ?? '').trim() === '剧作家'),
 		{ timeout: 30_000, label: '会话头回显预设名' },
 	);
-	check('V13', await openViewTabWhenReady(page, '舞台', 90_000), `舞台 tab 已选中（会话头回显：${Boolean(echoed)}）`);
+	check('V13', await openViewTabWhenReady(page, 'AIVN', 90_000), `AIVN tab 已选中（会话头回显：${Boolean(echoed)}）`);
 
 	/*
 	 * 舞台点一下 = 解锁：`onUnlock` 挂在舞台的点击与触屏上，不是一块遮罩。

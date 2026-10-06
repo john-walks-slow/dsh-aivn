@@ -31,6 +31,10 @@ export const MODULES = {
 		description: '剧目舞台皮肤：令牌白名单与防漂移、默认皮零变化、theme.json 落成、跨会话实时换装',
 		suites: ['verify-style'],
 	},
+	rebuild: {
+		description: '舞台重建：手写转写走真实 rebuildStage，三种停止点形态在重投影后都留得住（不需要实例、不占 run 锁）',
+		suites: ['verify-rebuild'],
+	},
 	director: {
 		description: '导演工具栏：提示（引导 / 打断）、改写 / 重写作废会话面、舞台 reset 重投影、分支会话重建',
 		suites: ['verify-director'],
