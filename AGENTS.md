@@ -98,7 +98,9 @@ node build.mjs --check                # 钩子跑的就是这条；手动排查�
 以及 `@aivn/core` / `@aivn/stage` 两个兄弟检出是否干净。判定强度分两档：宿主半边
 （`lib/index.js`）与兄弟仓无关，永远硬判；客户端半边（`lib/client.js`）把 `@aivn/stage`
 打进了包，只在兄弟检出干净时硬判，否则只警告（那时的不一致多半是别人正在改那只包）。
-钩子可以在确认无关时用 `git commit --no-verify` 绕过。
+钩子可以在确认无关时用 `git commit --no-verify` 绕过。注意 `core.hooksPath` 指向不存在的目录时
+git **静默跳过**（实测退出码 0，不报错）——所以`.githooks/` 是受跟踪的、别把它删掉或改路径，
+那等于把这道关卡无声地关掉。
 
 ## 改名要连带改的地方
 
