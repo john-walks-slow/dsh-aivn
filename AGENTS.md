@@ -78,6 +78,23 @@ dsh-e2e stop
   默认模型挑一个这台机器出得去的（列表里可能有地区受限的条目，会报
   `User location is not supported`）。细节见 README 的「开发」一节。
 
+## 改名要连带改的地方
+
+改一个用户可见的名字（页签、路由、工具名、依赖路径、目录）时，**同一笔提交里**要连带改掉这些
+引用点。少改一处不会报错，只会让某个套件「注定跑不起来」，然后被误判成别的原因：
+
+- **页签标签**：真相源是 `src/client/index.tsx` 注册会话视图时的 `label`（现在叫 `AIVN`）。
+  e2e 用 `openViewTabWhenReady(page, '<label>')` 等它，标签对不上就是一直等到超时。2026-10-06
+  查出 `e2e/verify-voice.mjs` 与 `e2e/css-diag.mjs` 还在等改名前的「舞台」——语音套件因此注定
+  失败，几周里一直被当成「没配 TTS key」。
+- **路由**：`src/routes.ts` 里 `PREFIX`（`/aivn`）下的路径，客户端与 e2e 两处都要跟着改。
+- **工具名**：`src/**/tools/*.ts` 里的 `name`，与 `e2e/verify-injection.mjs` 的工具面断言成对
+  （2026-10-06 拆掉 `beat_done` 改的就是这里）。
+- **依赖路径**：`package.json` 的 `file:` 依赖与 `package-lock.json` 要一起动。2026-10-06 有一笔
+  只改了前者，锁文件里留下一个已经消失的 `.worktrees/dsh-vn-stage/packages/stage` 条目。
+- **目录搬家**：搬的不只是 `.ts`/`.tsx`，样式与静态资源一起搬。`@aivn/stage` 抽包时就漏搬了一整套
+  `.choice*` 规则（选项卡片退化成浏览器默认按钮），补齐脚本在 stage-ai 的 `scripts/port-stage-css.py`。
+
 ## 发布
 
 - **双语 README**：`README.md`（中文，主体）+ `README.en.md`（英文）+ 顶部居中的语言切换。
