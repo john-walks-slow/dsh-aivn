@@ -14,12 +14,14 @@
  *   - `agent-preset/selected`：空白会话建好之后再选预设的那条路径。
  * 两次都走同一个 `sync()`：装了哪套就卸哪套——工具跟着预设走，不跟着 Agent 走。
  *
- * 工具分三层（对齐 AIVN `TOOL_CATALOG` 的角色面）：
- *   - 基础：`validate_play`（刚写完剧目文件，问它写得对不对），**两个角色都装**——
- *     写文件的活两个角色都有，校验口就得两个角色都有；
- *   - 剧作家：手里只有文件工具 + `validate_play`，配了生图后端另有同步的 `generate_image`；
- *   - 搭台助手：`set_stage_style`，加上按配置才装的 `list_voices` / `web_search` /
- *     `generate_image`（草稿）/ `commit_asset` / `recut_sprite` / `generate_bgm`。
+ * **两个预设装同一套 AIVN 工具**（2026-10-07 起）：不再有「某工具只给搭台助手」的分叉——
+ * 通用文件工具（read / write / edit / glob / grep）与技能库、shell 由预设的**行集**提供
+ * （见 `playwriter/preset.ts`），这里只装配 AIVN 自己的工具，清单以 `tool-catalog.ts` 为单一真相源：
+ *   - 基础：`validate_play`（刚写完剧目文件，问它写得对不对）、`set_stage_style`（皮肤）、
+ *     `cut`（抠底）、`import_asset`（登记一张图）；
+ *   - 按配置才装：`list_voices` / `web_search` / `generate_image`（纯生成候选）/
+ *     `generate_asset`（一键出图入库）/ `generate_bgm`。
+ *   - 两预设默认完全一致；按预设禁用走插件配置（`playwriterDisabledTools` / `stagehandDisabledTools`）。
  *
  * **模型用文件工具就能做的事一律不装**（2026-10-06）：`create_play`（写 play.json / 前提 / 角色卡）、
  * `set_craft`（写 play.json 的 craft 段）、`update_state`（写 memory/always/state/）都删了——
@@ -35,9 +37,11 @@
  * `@aivn/core` 的 `STOP_TAG`），轮尾因此重新是助手消息——DSH 的「在新对话中分支」与舞台重建
  * 都只认这种轮尾。
  *
- * 留下的是文件工具**做不到**的：外部调用（`generate_image` / `web_search` / `generate_bgm` /
- * `list_voices`）、图像处理与台账（`commit_asset` / `recut_sprite`），以及**写完要立刻推给
+ * 留下的是文件工具**做不到**的：外部调用（`generate_image` / `generate_asset` / `web_search` /
+ * `generate_bgm` / `list_voices`）、图像处理与台账（`cut` / `import_asset`），以及**写完要立刻推给
  * 已打开的舞台**的 `set_stage_style`。
+ *
+ * **注入仍按角色分**（与工具装配解耦）：剧作家挂 A 区（舞台契约），搭台助手挂《当前状态》。
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-agent';
@@ -52,17 +56,18 @@ import type { Capabilities } from './stagehand/capabilities';
 import { registerStagehandContext } from './stagehand/context';
 import type { Exa } from './stagehand/exa';
 import { stagehandGuide } from './stagehand/prompt';
+import { createCutTool } from './stagehand/tools/cut';
+import { createGenerateAssetTool } from './stagehand/tools/generate-asset';
+import { createGenerateBgmTool } from './stagehand/tools/generate-bgm';
+import { createGenerateImageTool } from './stagehand/tools/generate-image';
+import { createImportAssetTool } from './stagehand/tools/import-asset';
 import { createListVoicesTool } from './stagehand/tools/list-voices';
 import { createSetStageStyleTool } from './stagehand/tools/set-stage-style';
 import { createWebSearchTool } from './stagehand/tools/web-search';
 import type { VoiceCatalog } from './stagehand/voice-catalog';
+import { gateSatisfied, TOOL_CATALOG, type ToolSpec } from './tool-catalog';
 import type { PlayContext } from './tools/context';
 import { createValidatePlayTool } from './tools/validate-play';
-import { createSyncImageTool } from './playwriter/tools/generate-image';
-import { createCommitAssetTool } from './stagehand/tools/commit-asset';
-import { createGenerateBgmTool } from './stagehand/tools/generate-bgm';
-import { createDraftImageTool } from './stagehand/tools/generate-image';
-import { createRecutSpriteTool } from './stagehand/tools/recut-sprite';
 
 /** Agent 的运行时面：`LiveAgent` 再加上它自己的 scope ctx（工具注册在它上面）。 */
 type ToolAgent = LiveAgent & { readonly ctx: Context };
@@ -70,12 +75,45 @@ type ToolAgent = LiveAgent & { readonly ctx: Context };
 /** 本插件的两个预设——不在这个集合里的会话一个工具都不装。 */
 const PRESETS = new Set<string>([PLAYWRITER_PRESET, STAGEHAND_PRESET]);
 
-/** 装配要用的外部面：能力位与「配了才有」的几个客户端。 */
+/** 按预设禁用工具（用户配置）。空 = 两预设完全一致。 */
+export interface DisabledTools {
+	playwriter: ReadonlySet<string>;
+	stagehand: ReadonlySet<string>;
+}
+
+/** 按 catalog 的 id 造一个工具；参数就位由 `gateSatisfied` 保证。 */
+function buildTool(spec: ToolSpec, play: PlayContext, deps: ToolDeps): ToolDefinition {
+	switch (spec.id) {
+		case 'validate_play':
+			return createValidatePlayTool(play);
+		case 'set_stage_style':
+			return createSetStageStyleTool(play);
+		case 'generate_image':
+			return createGenerateImageTool(play, deps.media);
+		case 'cut':
+			return createCutTool(play, deps.media);
+		case 'import_asset':
+			return createImportAssetTool(play, deps.media);
+		case 'generate_asset':
+			return createGenerateAssetTool(play, deps.media);
+		case 'generate_bgm':
+			return createGenerateBgmTool(play, deps.media);
+		case 'list_voices':
+			return createListVoicesTool(deps.voices!);
+		case 'web_search':
+			return createWebSearchTool(deps.exa!);
+		default:
+			throw new Error(`[dsh-aivn] 未知工具：${spec.id}`);
+	}
+}
+
+/** 装配要用的外部面：能力位与「配了才有」的几个客户端，以及按预设的禁用集。 */
 export interface ToolDeps {
 	capabilities: Capabilities;
 	voices: VoiceCatalog | null;
 	exa: Exa | null;
 	media: MediaBackends;
+	disabled: DisabledTools;
 }
 
 /**
@@ -177,9 +215,8 @@ function install(
 		/**
 		 * 皮肤帧推给**同剧目**的每条会话流，而不是只推自己这条。
 		 *
-		 * `set_stage_style` 是搭台助手的工具，舞台却开在剧作家会话上：只推自己的流，
-		 * 用户那边要刷新才看得见，等于白写「立即生效」。判据是工作目录相同——
-		 * 会话工作区就是剧目根，同目录即同剧目。
+		 * 写皮肤的会话未必是开着舞台的那条：只推自己的流，用户那边要刷新才看得见，
+		 * 等于白写「立即生效」。判据是工作目录相同——会话工作区就是剧目根，同目录即同剧目。
 		 */
 		broadcastStyle(theme) {
 			const dir = safePlayDir(play);
@@ -193,30 +230,20 @@ function install(
 		},
 	};
 
-	// 基础层：两个角色都装（写文件与校验口是一对）。
-	const tools: ToolDefinition[] = [createValidatePlayTool(play)];
+	// 工具面从 catalog 派生：先过「配没配」的门控，再减去该预设的禁用集。
+	// 两个预设默认装同一套（禁用集默认空）；`cut` / `import_asset` / `validate_play` / `set_stage_style`
+	// 不门控——它们只读写剧目文件、跑抠底，不依赖生图后端。
+	const disabled = preset === PLAYWRITER_PRESET ? deps.disabled.playwriter : deps.disabled.stagehand;
+	const gateCaps = {
+		image: deps.capabilities.image,
+		music: deps.capabilities.music,
+		tts: deps.capabilities.voice,
+		search: deps.capabilities.search,
+	};
+	const tools = TOOL_CATALOG.filter((spec) => gateSatisfied(spec, gateCaps) && !disabled.has(spec.id)).map(
+		(spec) => buildTool(spec, play, deps),
+	);
 	const offs: Array<() => void> = [];
-
-	if (preset === PLAYWRITER_PRESET) {
-		// 剧作家缺图：同步出图即入库（D3）。一次调用声明最终 id，没有「挑候选」这一步。
-		if (deps.capabilities.image) tools.push(createSyncImageTool(play, deps.media));
-	} else {
-		// 搭台助手：AIVN 工坊那半边；`can` 决定哪几个装得上。
-		// `set_stage_style` 不门控：它只写剧目里的一个文件，不依赖任何后端配置。
-		tools.push(createSetStageStyleTool(play));
-		if (deps.capabilities.voice && deps.voices) tools.push(createListVoicesTool(deps.voices));
-		if (deps.capabilities.search && deps.exa) tools.push(createWebSearchTool(deps.exa));
-		if (deps.capabilities.image) {
-			tools.push(
-				// 两步：草稿先给用户挑，挑中的才入库。
-				createDraftImageTool(play, deps.media),
-				createCommitAssetTool(play, deps.media),
-				createRecutSpriteTool(play, deps.media),
-			);
-		}
-		// 配乐只给搭台助手：AIVN 那边也是（一首 84 秒，塞进演出回路等于整轮都在等）。
-		if (deps.capabilities.music) tools.push(createGenerateBgmTool(play, deps.media));
-	}
 
 	for (const tool of tools) {
 		offs.push(agent.ctx.effect(() => agent.ctx.tools.register(tool), `dsh-aivn:${tool.name}`));

@@ -1,9 +1,9 @@
 ---
-name: galgame-visual-craft
+name: aivn-visual-craft
 description: 视觉小说剧目的视觉规格与图单做法：画风锚点怎么定与写在哪、角色外形怎么锁死（头身比/五官/服装）、立绘差分布局与命名、背景与事件 CG 的画面约定，以及一套可直接粘贴给生图工具的提示词写法（有色细线、通透上色、破对称姿态、负面词黑名单）。当用户要定剧目画风、要一份立绘图单、或抱怨出图发油描边粗动作僵硬时使用。
 ---
 
-# galgame-visual-craft（立绘与 CG 的画面规格）
+# aivn-visual-craft（立绘与 CG 的画面规格）
 
 这份速查解决剧目里**图该长什么样、怎么描述**。图可以来自用户手绘/购买，也可以来自生图工具——
 两者要的都是同一件事：把画风、角色外形、这一张的画面说准。
@@ -132,18 +132,33 @@ Ultra-fine whisper-light colored outlines, clean translucent coloring, no thick 
 - 差分之间**只有要求变化的部分不同**：外形锚定必须逐张一致，否则同一角色看起来像两个人；
 - 立绘是**透明底**、全身、脚在画面底边；取景与在台上占多大由素材表的声明定，不用在剧本里调。
 
-## 七、用 `generate_image` 出图（配了生图后端时）
+## 七、出图与入库（`generate_asset` / `generate_image` / `cut` / `import_asset`）
 
-- **两步走**：`generate_image` 只出**草稿**（回执给 draftId 与候选图路径），把预览贴给用户挑，
-  他点头的那张才 `commit_asset` 入库。**没被挑中的候选不会在素材表里留下痕迹**。
-- **定妆照先定、一次出 3 张候选**：neutral 是这个主体所有差分的身份基准（差分自动垫它）。
-  还没有入库的 neutral 就出不了别的差分。
+两条路，按「要不要让用户挑」选：
+
+- **一键（`generate_asset`）**：出图 +（立绘）自动抠底 + 登记，一次到位。给 `kind`（background / cg / sprite）；
+  立绘再给 `spriteId` + `variant`，画幅跟着 `framing`（full / half / square）走。回执给最终路径，这一轮就能引用。
+  剧目后缀（色键底、身份锁、差分自动垫 neutral）只在**这条路**里由引擎自动拼——prompt 里别再写抠底与画幅。
+- **原子三件套（要挑候选 / 图来自别处 / 要重抠）**：
+  - `generate_image`：**纯生成**，只把 prompt 变成一张候选图（回执给图片路径与预览）。它不绑剧目目标、
+    不做色键底、不抠底——**通用出图，画幅用 `aspectRatio`（默认 16:9）**。要立绘就在这里自己把纯色底、
+    平涂、景别写进 prompt。
+  - `cut`：把纯色底候选抠成透明 PNG（`source` + 可选调参）；抠脏了对**同一张**重调再跑，别重新出图。
+  - `import_asset`：把一张图登记成素材（`source` 给剧目内路径 / 网址，`kind` 必填；立绘登记**已抠好的透明 PNG**，
+    再给 `spriteId` / `variant` / `framing` / `stature` / `description`；`original` 留抠底前原片以便重抠）。
+
+**候选流程**（定妆照）：`generate_image` 同一目标多调几次（prompt 各不同；定妆照都用 variant=neutral），
+预览一行一行贴给用户；他点头的那张再落位——背景 / 插图 `import_asset(kind=…, name=…)`，
+立绘 `cut` 后再 `import_asset(kind="sprite", spriteId=…, variant=…)`。**没被挑中的候选不会在素材表里留下痕迹。**
+
+- **外部来源**：别的工具出的图、下载的图（剧目内相对路径或 http(s) 网址）直接 `import_asset`；
+  立绘要透明底就先 `cut`。
+- **定妆照先定**：neutral 是这个主体所有差分的身份基准（差分自动垫它）。还没有入库的 neutral 就出不了别的差分
+  （`generate_asset` 会自动先补一张）。
 - **一张一张来**：一次调用只出一张图。要 3 张候选就在同一批里调 3 次（并行）。
 - **立绘取景与体量走参数**：`framing`（full / half / square）决定画幅与台上站位，同一主体保持同一档；
   `stature`（small / normal / large / huge）只管台上多大。人物 full 或 half，猫与道具 square，机甲 huge。
-- **prompt 里别写抠底与画幅**：引擎自动拼色键底、平涂与留白后缀，重复写会打架。
-- **出完贴给用户看**（回执里那行 markdown 图片）；抠底是自动的，用户说脏边就用 `recut_sprite`
-  原地重抠（画面一个像素不变），别重新出图。
+- **出完贴给用户看**（回执里那行 markdown 图片）；抠脏了用 `cut` 调参重抠（画面不变、不烧配额），别重新出图。
 
 ## 八、交付前自查
 

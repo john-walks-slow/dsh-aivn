@@ -80,6 +80,16 @@ function toolNames(events) {
 	return [];
 }
 
+/** 技能清单：DSH 把 `<available_skills>` 作为一条 user 角色的上下文消息投进来，不在系统提示词里。 */
+function skillCatalog(events) {
+	for (const event of events) {
+		const content = event.data?.content ?? event.data?.message?.content ?? [];
+		const text = content.map((block) => block.text ?? '').join('');
+		if (text.includes('<available_skills>')) return text;
+	}
+	return '';
+}
+
 const fixture = seedPlay(WORKSPACE);
 const browser = await launch();
 try {
@@ -105,6 +115,7 @@ try {
 	}
 
 	const headings = [...prompt.matchAll(/^#{1,2} .+$/gm)].map((m) => m[0]);
+	const catalog = skillCatalog(sessionEvents(sessionDir));
 	check('A3', prompt.length > 0, `系统提示词已写出（${prompt.length} 字）`);
 	check('A4', headings.includes('# 剧目设定'), `有《剧目设定》段（${headings.length} 个标题）`);
 	check('A5', headings.includes('# 角色表'), '有《角色表》段');
@@ -116,13 +127,16 @@ try {
 	check('A9', prompt.includes('id: lin') && prompt.includes('id: zhou'), '《角色表》带的是两张卡的正文与 id');
 	check('A10', prompt.includes('veranda'), '《素材清单》带的是 assets/ 里真实的素材 id');
 	check('A11', !prompt.includes('不在这份提示词里'), '已经删掉阶段 1 那句「得你自己去读」');
-	// 工具面跟着角色走：剧作家只有校验口（停止点是剧本里的 <stop …/>，不是工具），
-	// 没有搭台助手那一套；「只写一个文件」的工具一律没有——play.json / craft 段 / 状态文件都是文件工具写的。
+	// 工具面：两个预设装同一套 AIVN 工具（配没配后端两种实例都跑得过）。停止点是剧本里的
+	// `<stop …/>`，不是工具；「只写一个文件」的工具一律没有——play.json / craft 段 / 状态都是文件工具写的。
 	check('A12', !tools.includes('list_assets') && !tools.includes('list_library'), '素材清单不进工具面（旧名也不在）');
 	check(
 		'A13',
-		tools.includes('validate_play') && !tools.includes('set_stage_style') && !tools.includes('beat_done'),
-		'校验口在、搭台助手那一套不在（停止点已回剧本，不再有 beat_done 工具）',
+		tools.includes('validate_play') &&
+			tools.includes('set_stage_style') &&
+			tools.includes('skill') &&
+			!tools.includes('beat_done'),
+		'剧作家拿到与搭台助手同一套工具（校验口 / 皮肤 / 技能库都在，停止点已回剧本，不再有 beat_done）',
 	);
 	check(
 		'A13b',
@@ -135,15 +149,24 @@ try {
 		prompt.includes('# 剧目文件') && prompt.includes('initialScene') && prompt.includes('protagonist'),
 		'剧作家拿到《剧目文件》（布局 / play.json 字段 / 角色卡格式）',
 	);
-	// 生图：工具面与 persona 必须一致（配没配后端两种实例都跑得过）
+	// 技能库：三份随包技能（备料流程 + 视觉规格 + 音频选源）都进清单
+	check(
+		'A13d',
+		['aivn-play-setup', 'aivn-visual-craft', 'aivn-audio'].every((name) => catalog.includes(name)),
+		'剧作家的技能清单里有三份 aivn-* 技能',
+	);
+	// 生图：generate_image / generate_asset 跟着生图能力位；cut / import_asset 不门控，始终在。
 	const hasImage = tools.includes('generate_image');
-	const hasChapter = headings.includes('# 缺图怎么办（generate_image）');
+	const hasChapter = headings.includes('# 缺图怎么办（generate_asset / generate_image）');
 	check(
 		'A14',
-		hasImage === hasChapter,
+		tools.includes('cut') &&
+			tools.includes('import_asset') &&
+			tools.includes('generate_asset') === hasImage &&
+			hasImage === hasChapter,
 		hasImage
-			? '配了生图后端：剧作家有 generate_image 且提示词里有《缺图怎么办》'
-			: '没配生图后端：剧作家没有 generate_image，提示词里也不提',
+			? '配了生图后端：剧作家有 generate_image / generate_asset；cut / import_asset 不门控、始终在'
+			: '没配生图后端：剧作家没有 generate_image / generate_asset，但 cut / import_asset 仍在',
 	);
 
 	console.log('\n段序：');

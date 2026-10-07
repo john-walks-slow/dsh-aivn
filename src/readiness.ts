@@ -7,7 +7,6 @@
  *   - 素材靠手工放置（阶段 2 之前没有生图），所以多报一行「素材清单有几条」。
  *
  * **没有硬门槛**：缺什么都能开演。这份报告是给搭台助手与剧作家自己看的底数，不是闸门。
- *
  * `play.json` 在但读不出来时**不抛**，把那句原因报出来（`problem`）：剧目文件是模型自己写的，
  * 「哪一行写坏了」必须回到它手上，而不是变成一个把整轮打断的异常。
  *
@@ -41,6 +40,11 @@ export interface PlayReadiness {
 	background: boolean;
 	/** 素材清单条目数（背景/插图/立绘/音乐/音效全算）。 */
 	assets: number;
+	/**
+	 * 出图台账（`assets/generated.json`）里**登记指向不存在的文件**的条目 id。
+	 * 这种状态说明素材被挪走/删掉、或台账被手改坏了；空数组 = 都对得上。
+	 */
+	danglingAssets: string[];
 }
 
 export function readPlayReadiness(dir: string): PlayReadiness {
@@ -64,6 +68,7 @@ export function readPlayReadiness(dir: string): PlayReadiness {
 		sprites: hasAnySprite(join(dir, 'assets', 'sprites')),
 		background: hasAnyImage(join(dir, 'assets', 'backgrounds')),
 		assets: Object.values(index).reduce((total, files) => total + files.length, 0),
+		danglingAssets: danglingAssets(dir),
 	};
 }
 
@@ -79,6 +84,9 @@ export function renderReadiness(r: PlayReadiness): string {
 		`- 素材清单：${r.assets > 0 ? `${r.assets} 个文件` : '空'}——现在没有生图，素材要放进 assets/`,
 		r.strayCraft.length > 0 ? `- 写作参数：这些取值引擎不认、会被当没写——${r.strayCraft.join('；')}` : null,
 		r.stateProblem ? `- 世界状态：${r.stateProblem}` : null,
+		r.danglingAssets.length > 0
+			? `- 素材对账：台账里有登记但文件不在——${r.danglingAssets.join('、')}（用 \`import_asset\` 重新登记，或删掉台账那几条）`
+			: null,
 	]
 		.filter(Boolean)
 		.join('\n');
@@ -144,6 +152,30 @@ function strayCraftValues(dir: string): string[] {
 	return slots
 		.filter(([, value, allowed]) => value !== undefined && value !== null && !allowed.includes(String(value)))
 		.map(([path, value, allowed]) => `craft.${path} = ${JSON.stringify(value)}（只认 ${allowed.join(' / ')}）`);
+}
+
+/**
+ * 台账对账：`generated.json` 里每条登记都带一个剧目内 `path`，文件不在了就报出来。
+ *
+ * 只查「登记 → 文件」这一向（判据明确、不会误报）；反向的「文件在但没登记」有太多合法情形
+ * （用户手工放进 `assets/` 还没 import、音效等非本插件产物），不在这里报。
+ */
+function danglingAssets(dir: string): string[] {
+	const raw = readText(join(dir, 'assets', 'generated.json'));
+	if (raw.trim() === '') return [];
+	let ledger: Record<string, { path?: unknown }>;
+	try {
+		ledger = JSON.parse(raw) as Record<string, { path?: unknown }>;
+	} catch {
+		return []; // 台账坏掉不在这里报，别和「文件不见」混为一谈
+	}
+	if (typeof ledger !== 'object' || ledger === null) return [];
+	return Object.entries(ledger)
+		.filter(([, entry]) => {
+			const path = entry?.path;
+			return typeof path === 'string' && path.trim() !== '' && !existsSync(join(dir, path));
+		})
+		.map(([id]) => id);
 }
 
 /**

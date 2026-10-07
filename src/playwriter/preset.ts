@@ -5,9 +5,8 @@
  * 同一套写法，只是写在代码里。**绝对不要在本预设里再列一行 `dsh-aivn`**：宿主已经装了本插件，
  * 预设里再来一行会重复装一遍路由与事件订阅（它不在行的清单里，靠的是 profile 的 bundle patch）。
  *
- * 行集：指令文件发现 + persona + 文件工具；搭台助手另加技能库（自带的 `skills/`）与一行
- * 默认关的 shell。**剧作家不给技能库也不给 shell**——写戏、读文件用不上；AIVN 的 `read_skill`
- * 同样只给工坊。
+ * 行集：指令文件发现 + persona + 文件工具；**两个预设都装技能库（自带的 `skills/`）与一行
+ * 默认关的 shell**——剧作家单飞时也要会备料（画风、图单、选源），技能库是它按需查的做法速查。
  */
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -28,7 +27,7 @@ const DSH_HOME = process.env.DSH_HOME ?? join(homedir(), '.dsh');
  * 插件自带的技能库目录（`<package>/skills`）。
  *
  * 宿主半边是构建产物 `lib/index.js`，所以从它往上退一层就是包根。`includeDefaultRoots: false`
- * 是刻意的：技能清单直接进 system prompt，把宿主上那几十个本机运维技能一起塞给搭台助手
+ * 是刻意的：技能清单直接进 system prompt，把宿主上那几十个本机运维技能一起塞给 Agent
  * 只会淹掉这两份剧目做法（AIVN 的工坊 likewise 只看得到随包的这几份）。
  */
 const SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'skills');
@@ -36,11 +35,9 @@ const SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'skills')
 /**
  * 一个预设的行集。
  *
- * `bash` 给搭台助手留一行：`opts.bash === false` 时关着（注册器跳过 `disabled` 的行），
- * `true` 时真装——开与关都由插件配置 `shell` 决定（AIVN 那边这个能力也是 `defaultOff`，
- * 只是开关长在 Agent 设置页上）。剧作家不给这一项：它写戏、读文件，没有要 shell 做的事。
- *
- * `skills` 同理只给搭台助手：技能库是它备课时的做法速查。
+ * `bash` 给两个预设都留一行：`opts.bash === false` 时关着（注册器跳过 `disabled` 的行），
+ * `true` 时真装——开与关都由插件配置 `shell` 决定。`skills` 同理两个预设都装：技能库
+ * （`<package>/skills`）是备料时的做法速查，剧作家单飞时也要看得到。
  */
 /** 行集里的一行（`plugins` 是只读数组，装配时用可变数组攒，最后交出去当只读）。 */
 type PresetPlugin = PresetDefinition['plugins'][number];
@@ -83,12 +80,14 @@ function rows(prompt: string, opts: { bash?: boolean; skills?: boolean } = {}): 
 	return plugins;
 }
 
-export const PLAYWRITER_DEFINITION: PresetDefinition = {
-	id: PLAYWRITER_PRESET,
-	name: '剧作家',
-	description: '写 Stage DSL 的剧作家：实时为一部正在直播的视觉小说写剧本',
-	plugins: rows(PLAYWRITER_PROMPT),
-};
+function playwriterDefinition(shell: boolean): PresetDefinition {
+	return {
+		id: PLAYWRITER_PRESET,
+		name: '剧作家',
+		description: '写 Stage DSL 的剧作家：实时为一部正在直播的视觉小说写剧本',
+		plugins: rows(PLAYWRITER_PROMPT, { bash: shell, skills: true }),
+	};
+}
 
 /**
  * 搭台助手的预设定义。
@@ -108,7 +107,7 @@ function stagehandDefinition(shell: boolean): PresetDefinition {
 
 /** 预设的注册句柄：`restage` 用于 shell 翻转后的重注册（先卸再装）。 */
 export interface PresetRegistry {
-	/** 重注册搭台助手预设。只影响之后新建的会话，见 `restage` 的调用点注释。 */
+	/** 重注册两个预设。只影响之后新建的会话，见 `restage` 的调用点注释。 */
 	restage(shell: boolean): Promise<void>;
 	dispose(): void;
 }
@@ -121,14 +120,16 @@ export interface PresetRegistry {
  */
 export async function registerPresets(ctx: Context, opts: { shell: boolean }): Promise<PresetRegistry> {
 	let stagehandOff = await ctx.agentPresets.register(stagehandDefinition(opts.shell));
-	const playwriterOff = await ctx.agentPresets.register(PLAYWRITER_DEFINITION);
+	let playwriterOff = await ctx.agentPresets.register(playwriterDefinition(opts.shell));
 	ctx.logger.info(`[dsh-aivn] presets registered: ${PLAYWRITER_PRESET}, ${STAGEHAND_PRESET}`);
 
 	return {
 		async restage(shell) {
 			// 同 id 重复注册会直接抛（`Duplicate agent preset`），先卸旧的。
 			stagehandOff();
+			void playwriterOff();
 			stagehandOff = await ctx.agentPresets.register(stagehandDefinition(shell));
+			playwriterOff = await ctx.agentPresets.register(playwriterDefinition(shell));
 		},
 		dispose() {
 			stagehandOff();

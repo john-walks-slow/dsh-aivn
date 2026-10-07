@@ -1,51 +1,56 @@
 /**
- * `generate_image`（搭台助手形态）—— 出一张**草稿**。
+ * `generate_image` —— 生成一张图（**候选**）。纯生成，不绑剧目目标、不抠底、不登记。
  *
- * 与剧作家那份是同一个 schema 与同一份实现，只有等待策略与说明不同：这里只产草稿，
- * 「一次出三张候选让用户挑」这条流程要求没被挑中的候选不留痕迹，所以入库是显式的下一步
- * （`commit_asset`）。剧作家那边一次调用就声明了最终 id，走 `generate()` 一次做完。
+ * 想落成剧目素材：背景 / 插图直接 `import_asset`；立绘先 `cut` 抠底、再 `import_asset`。
+ * 想一条龙：用 `generate_asset`。三个工具职责单一、可组合（图也可以来自别的工具，只要能被 `import_asset` 登记）。
+ *
+ * 剧目感知的提示词配方（立绘的纯色键底、平涂、景别措辞、身份锁、垫已入库的 neutral）不在工具里，
+ * 在技能 `aivn-visual-craft` —— 出立绘前先按它写 prompt。
  */
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import type { MediaBackends } from '../../media/backends';
 import { playAssetsOf } from '../../media/assets';
-import {
-	draftResult,
-	IMAGE_PARAMETERS,
-	PROMPT_RULES,
-	REFERENCE_RULE,
-	textOutput,
-	toTarget,
-	type ImageArgs,
-} from '../../media/generate-tool';
+import { genericResult, textOutput } from '../../media/generate-tool';
 import type { PlayContext } from '../../tools/context';
 
 const DESCRIPTION = [
-	'出一张剧目素材的**草稿**：背景 kind=background / 事件插图 kind=cg / 立绘 kind=sprite。',
-	'背景与插图给 name（素材 id，剧本里引用的就是它）；立绘给 spriteId + variant（不给按 neutral）。',
-	'背景与插图一律 16:9 横构图；立绘的画幅跟着 framing 走，不用为了构图去改画幅。',
-	'立绘会自动抠底成透明 PNG（舞台把它叠在场景上，不抠底就是一块不透明矩形）。',
-	'**草稿不是素材**：图落在临时草稿区，回执给 draftId 与预览；要让它正式进剧目（写进 assets/ 与素材表），再调 `commit_asset`。',
-	'**要出多张候选**：同一目标多调几次本工具（每张 prompt 各不相同；定妆照候选就给同一个 variant=neutral），',
-	'把预览一起贴给用户，他挑中哪张就只 commit 那一张——没被挑中的候选不会在素材表里留下任何痕迹。',
-	'**定妆照（neutral）建议一次出 3 张候选让用户挑**，挑定并采用之后再据它派生其余差分。',
-	'非 neutral 的立绘会自动拿该主体**已入库的** neutral 定妆照做垫图，所以同一主体的差分是同一个人；',
-	'**该主体还没有入库的 neutral 时出不了别的差分**（草稿当不了身份基准）——先把 neutral 出了、采用一张。',
-	'一次调用只出一张图；要出多个候选或差分就在同一批里多次调用本工具，它们是并行的。',
-	'抠底不用你管（引擎自动抠）；用户说抠得不干净时用 `recut_sprite` 原地重抠，别重新出图。',
-	PROMPT_RULES,
-	REFERENCE_RULE,
+	'生成一张图（**候选**）：给一段英文画面描述，返回图片文件路径与预览。',
+	'**纯生成**——不绑定任何剧目目标、不抠底。落成素材另走 `cut`（立绘抠底）/ `import_asset`（登记）；要一条龙用 `generate_asset`。',
+	'画幅用 `aspectRatio`（默认 16:9）。**要立绘**：在 prompt 里写清纯色键底与景别/机位（配方见技能 `aivn-visual-craft`）；要跟某个角色保持一致，把它的立绘路径放进 `references`。',
+	'一次调用一张图；要几张候选就在一批里多调几次，挑中的那张再登记。',
+	'**出图要钱也要时间**（70–140 秒，这一轮停在那里）：只为真要用的图出。',
 ].join('\n');
 
-export function createDraftImageTool(ctx: PlayContext, media: MediaBackends) {
+export function createGenerateImageTool(ctx: PlayContext, media: MediaBackends) {
 	return defineTool({
 		name: 'generate_image',
 		description: DESCRIPTION,
-		parameters: IMAGE_PARAMETERS,
+		parameters: {
+			prompt: {
+				type: 'string',
+				required: true,
+				description: '英文画面描述：主体、姿势、机位、景别、环境与光影。立绘的纯色底/画风后缀按技能配方自己写。',
+			},
+			references: {
+				type: 'array',
+				items: { type: 'string', description: '主体 id / 剧目内相对路径 / http(s) 网址' },
+				description:
+					'垫图（最多 6 张，顺序即提示词里「第一张、第二张」）：给主体 id 会自动用它的立绘；给路径/网址直接当参考图。',
+			},
+			aspectRatio: {
+				type: 'string',
+				enum: ['16:9', '3:4', '1:1', '9:16', '4:3'],
+				description: '画幅，默认 16:9。',
+			},
+			style: { type: 'string', description: '画风锚点（可选），拼在 prompt 前面。' },
+		},
 		output: textOutput,
 		async execute(args) {
-			const { target, prompt } = toTarget(args as ImageArgs);
 			const assets = playAssetsOf(ctx.playDir(), media);
-			return draftResult(await assets.draft(target, prompt));
+			const prompt = args.style?.trim() ? `${args.style.trim()}, ${args.prompt.trim()}` : args.prompt.trim();
+			return genericResult(
+				await assets.createGeneric(prompt, { references: args.references, aspectRatio: args.aspectRatio }),
+			);
 		},
 	});
 }

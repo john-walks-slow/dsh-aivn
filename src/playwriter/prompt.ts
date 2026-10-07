@@ -8,10 +8,9 @@
  * 写作参数、记忆索引、世界状态。凡提示词里提到「自己去看」的地方，指的都是这些注入段，
  * 不是某个工具。
  *
- * 本阶段剧作家装得上的工具：`validate_play`，加上 DSH 的文件工具（素材靠 A 区注入的清单看）
- * （read / write / edit / glob / grep）。**提示词里出现的工具名不出这个集合**——
- * `set_stage_style` / `list_voices` / `web_search` 归搭台助手，`generate_image` / `import_asset` / 技能库 /
- * 限制级通道 / 记忆详情与归档检索都还没实现，对应的整章一律删掉，不留悬空承诺。
+ * 剧作家与搭台助手装的是**同一套工具**（见 `tool-catalog.ts` / `preset-tools.ts`）：文件工具 + 技能库 + 校验口 +
+ * 按配置才有的生图 / 配乐 / 音色 / 联网 / 皮肤（抠底与登记不门控）。**提示词里出现的工具名不出这个集合**——
+ * 限制级通道 / 记忆详情与归档检索还没实现，对应的整章一律删掉，不留悬空承诺。
  */
 
 import { PLAY_FILES } from '../play-files';
@@ -190,7 +189,7 @@ const MEMORY_RULES = `## 记忆卡（memory/index/）
 /**
  * 引入台上还没有的新主体时的三条路（建档 / 立绘 / 临时角色）。
  *
- * 第 2 步按 `can.image` 分叉：配了生图后端就是 `generate_image`（同步等图、出图即入库），
+ * 第 2 步按 `can.image` 分叉：配了生图后端就是 `generate_asset`（同步等图、一键出图即入库），
  * 没配就退回「立绘要手工放进 assets/sprites/<立绘目录>/」——台上没有立绘的主体先别让它上台。
  */
 function newCharacterRules(can: { image: boolean }): string {
@@ -212,7 +211,7 @@ function newCharacterRules(can: { image: boolean }): string {
 
 **2. 立绘**：${
 		can.image
-			? `剧目里没有就当场要一张——\`generate_image\` 按 \`spriteId\`（主体 id）+ \`variant\` 出图（见《缺图怎么办》），
+			? `剧目里没有就当场要一张——\`generate_asset\` 按 \`spriteId\`（主体 id）+ \`variant\` 一键出图入库（见《缺图怎么办》），
 回执回来之后 \`<actor id="xiaoyu" variant="smile">\` 就能用。一次只出一张，先出这一轮真要上台的那个差分。`
 			: `本剧目没有生图工具——立绘由玩家手工放进 \`assets/sprites/<立绘目录>/\`，
 文件名（去掉扩展名）就是 \`variant\` 名，\`<actor id="xiaoyu" variant="smile">\` 直接可用。
@@ -279,19 +278,23 @@ ${HOW_I_WORK}`;
  * 剧作家这边的出图是**同步**的（D3）：一次调用等到图落盘、当场入库，回执给最终路径。
  * 所以这一章的重点不是「怎么发起」，而是「什么时候才值得占掉一轮的一半」。
  */
-const IMAGE_CHAPTER = `# 缺图怎么办（generate_image）
+const IMAGE_CHAPTER = `# 缺图怎么办（generate_asset / generate_image）
 
-剧目里没有你要的背景 / 插图 / 立绘时，用 \`generate_image\` 当场要一张。它**同步等图**
-（70–140 秒，这一轮就停在那里），出图即入库，回执给最终路径——**回执回来之后**那一行剧本才引用得到它。
+剧目里没有你要的背景 / 插图 / 立绘时，当场要一张。出图**同步**（70–140 秒，这一轮就停在那里）；
+**一轮的预算是 240 秒，一次出图占掉一半以上**——只为这一轮真的要引用的东西出，别为「以后可能用得上」出。
 
+**默认走 \`generate_asset\`（一键）**：出图 +（立绘）自动抠底 + 登记，回执给最终路径——**回执回来之后**那一行剧本才引用得到它。
+
+- 背景 / 插图：\`generate_asset(kind="background", name="cafe", prompt="…")\`；
+  立绘：\`generate_asset(kind="sprite", spriteId="xiaoyu", variant="smile", framing="full", prompt="…")\`。
 - **先看 A 区的《素材清单》与《角色表》**：已有同名或有现成的同类素材时不要重出——同名时引擎会直接跳过并告诉你（它不覆盖旧图）。
-- **一轮的预算是 240 秒，一次出图占掉一半以上**：只为这一轮真的要引用的东西出图，别为「以后可能用得上」出。
-- 立绘按 \`spriteId\`（主体 id）+ \`variant\` 出；非 neutral 的差分自动垫该主体的 neutral 定妆照。
-  那个主体**一张立绘都还没有**时，引擎会先自动补一张 neutral 再出这张差分——回执里两张都给你，
-  记得两张都跟用户交代；但它**已经有别的差分、只缺 neutral** 时会被拒绝（那套差分是拿别的脸锚定的，
-  先单独要一张 neutral 让用户过目）。人物用 framing=full 或 half，猫与道具用 square。
+- 立绘非 neutral 的差分自动垫该主体的 neutral 定妆照。那个主体**一张立绘都还没有**时，引擎会先自动补一张 neutral 再出这张差分——回执里两张都给你，记得两张都跟用户交代；但它**已经有别的差分、只缺 neutral** 时会被拒绝（那套差分是拿别的脸锚定的，先单独要一张 neutral 让用户过目）。人物用 framing=full 或 half，猫与道具用 square。
 - 出图期间这一轮是停着的、玩家看到的是等待——不要一轮里连出好几张。
-- 抠底是自动的；用户说边上脏、发丝被啃，让搭台助手用 \`recut_sprite\` 重抠（画面不变），你别重新出图。`;
+
+**要精细控制时**用原子三件套（\`generate_image\` / \`cut\` / \`import_asset\`）：
+- **要让用户挑候选**（比如定妆照）：\`generate_image\` 只出一张候选（回执给图片路径），把预览贴给用户挑；他点头的那张再落位——背景/插图 \`import_asset(kind=…, name=…)\`，立绘先 \`cut\` 抠底再 \`import_asset(kind="sprite", spriteId=…, variant=…)\`。
+- **图来自别处**（用户给的、下载的、别的模型出的）：直接用 \`import_asset\`；立绘要透明底就先 \`cut\`。
+- **抠脏了**（边上脏、发丝被啃）：\`cut(source=…)\` 调参重抠（画面不变、只重跑抠底），别重新出图。`;
 
 /**
  * 剧作家提示词的**后半**：舞台契约与写作规矩，全是静态文本，只有「要不要教出图」跟着能力位。

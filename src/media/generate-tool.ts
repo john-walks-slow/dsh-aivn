@@ -1,14 +1,15 @@
 /**
- * `generate_image` 的共享部分：参数 schema、写 prompt 的硬约束、两种回执的组装。
+ * 图片工具共享的部件：`generate_asset`（一键）与 `generate_image`（纯生成候选）共用的
+ * 参数 schema、写 prompt 的硬约束、几种回执的组装。
  *
- * 两个角色**同一份 schema、同一份实现**，只有等待策略与 description 不同（AIVN `imageTool.ts`
- * 的同一约定）：
- * - 搭台助手：只出草稿（一次几张候选，用户挑一张），入库另走 `commit_asset`；
- * - 剧作家：同步等图、出图即入库（一次调用给最终 id）——插件没有「回合之外」的注入通道，
- *   所以不学 AIVN 的后台排产（那要靠到货广播）。
+ * 一步入库（`generate_asset`）：`generate()` 出图 +（立绘）抠底 + 登记，一次调用声明最终 id，
+ * 图一出来这一轮就引用得到；纯生成（`generate_image`）：只产候选，落位另走 `cut` / `import_asset`。
  *
- * 抠底参数不在这里：填它得先看过成图，而出图那一刻没人看过图。改抠底是看到脏边之后的事，
- * 走单独的 `recut_sprite`。
+ * 一次调用一张图（一次等待）——插件没有「回合之外」的注入通道，不学 AIVN 的后台排产
+ *（那要靠到货广播），出图一律同步等待。
+ *
+ * 抠底参数不在这里：`generate_asset` 用默认参数自动抠；要调参就先 `generate_image` 出候选、
+ * 看过图之后再 `cut` 对着同一张重抠。
  */
 import { COMMON_SPRITE_VARIANTS } from '@aivn/core';
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
@@ -20,7 +21,7 @@ export const IMAGE_PARAMETERS = {
 		type: 'string',
 		enum: ['background', 'cg', 'sprite'],
 		required: true,
-		description: '要出什么：背景 background / 事件插图 cg / 立绘 sprite。',
+		description: '要落成什么剧目素材：背景 background / 事件插图 cg / 立绘 sprite。',
 	},
 	name: {
 		type: 'string',
@@ -111,12 +112,13 @@ export const textOutput = {
 };
 
 export interface ImageArgs {
-	kind: 'background' | 'cg' | 'sprite';
+	kind?: 'background' | 'cg' | 'sprite';
 	name?: string;
 	spriteId?: string;
 	variant?: string;
 	references?: string[];
 	framing?: 'full' | 'half' | 'square';
+	aspectRatio?: '16:9' | '3:4' | '1:1' | '9:16' | '4:3';
 	stature?: 'small' | 'normal' | 'large' | 'huge';
 	title?: string;
 	style?: string;
@@ -128,7 +130,8 @@ export function toTarget(args: ImageArgs): { target: AssetTarget; prompt: string
 	const prompt = args.style?.trim() ? `${args.style.trim()}, ${args.prompt.trim()}` : args.prompt.trim();
 	return {
 		target: {
-			kind: args.kind,
+			// 调用方只在 `kind` 给出时才走这条路；通用出图（无 kind）走 `createGeneric`。
+			kind: args.kind!,
 			...(args.name?.trim() ? { name: args.name.trim() } : {}),
 			...(args.spriteId?.trim() ? { spriteId: args.spriteId.trim() } : {}),
 			...(args.variant?.trim() ? { variant: args.variant.trim() } : {}),
@@ -150,21 +153,17 @@ function cutoutNote(asset: { cutout?: { coverage: number; figureHeight: number }
 	return `\n${lines.join('')}`;
 }
 
-/** 搭台助手：只出草稿，回执里给 draftId 与预览（贴给用户挑）。 */
-export function draftResult(draft: DraftedAsset): string {
-	const label = draft.kind === 'sprite' ? '立绘草稿' : draft.kind === 'background' ? '背景草稿' : '插图草稿';
+/** `generate_image`（纯生成）的回执：给候选文件路径与预览，并说明下一步怎么登记。 */
+export function genericResult(image: DraftedAsset): string {
 	return [
-		`${label}已出：\`${draft.draftId}\`（${draft.aspect}）`,
-		`![候选图](${draft.absPath})`,
-		'**草稿还不是素材**：它在 media-cache/drafts/ 下，素材表里没有它。',
-		`采用它调 \`commit_asset(draftId="${draft.draftId}")\`；要换一张就再出一次候选。`,
-		'把上面那行 markdown 图片**贴进你的回复**给用户看（独占一段），他挑中哪张你再 commit 哪张。',
-	]
-		.join('\n')
-		.concat(cutoutNote(draft));
+		`图片已生成（候选）：\`${image.path}\`（${image.aspect}）`,
+		`![生成的图](${image.absPath})`,
+		'这是**候选图**，还没进剧目素材。落成素材：背景 / 插图直接 `import_asset(source=…, kind=…)`；',
+		'立绘先 `cut(source=…)` 抠底、再 `import_asset` 那张透明 PNG（kind=sprite, spriteId=…）。',
+	].join('\n');
 }
 
-/** 剧作家：同步出图即入库，回执里给最终 id 与图片。 */
+/** 一步入库（默认）：回执里给最终 id 与图片。 */
 export function generatedResult(asset: GeneratedAsset): string {
 	const label = asset.kind === 'sprite' ? '立绘' : asset.kind === 'background' ? '背景' : asset.kind === 'cg' ? '插图' : '素材';
 	const lines = [
@@ -180,5 +179,22 @@ export function generatedResult(asset: GeneratedAsset): string {
 			`![neutral](${asset.autoNeutral.absPath})`,
 		);
 	}
+	if (asset.sourcePath) {
+		lines.push('', `抠底前原片已留底：\`${asset.sourcePath}\`——日后抠脏了用它重抠（\`cut(source="…", output="${asset.path}")\`）。`);
+	}
 	return lines.join('\n').concat(cutoutNote(asset));
+}
+
+/** 「已经有了，别重出」的回执：把引用它的写法一并给出，省得模型再去查。 */
+export function existingNote(target: AssetTarget): string {
+	if (target.kind === 'sprite') {
+		const variant = target.variant ? ` variant="${target.variant}"` : '';
+		return (
+			`${target.spriteId} 的 ${target.variant ?? 'neutral'} 立绘剧目里已经有了，不用重出。` +
+			`直接 \`<actor id="${target.spriteId}"${variant}>\` 引用它；要另一张表情就换个 variant 再调。`
+		);
+	}
+	const label = target.kind === 'background' ? '背景' : '插图';
+	const tag = target.kind === 'background' ? `<scene bg="${target.name}">` : `<cg id="${target.name}">`;
+	return `剧目里已经有同名${label}，跳过生成，直接 ${tag} 引用 ${target.name}。`;
 }

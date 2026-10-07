@@ -39,48 +39,51 @@ dsh plugin --profile web add github:john-walks-slow/dsh-aivn
   `dsh-web-app`. It is declared under `dsh.client{platform:"web"}` in `package.json` and
   does not go through the Loader.
 
-Five things are configurable — **voice**, **web search**, **image generation**, **music**, and the
-**stagehand's shell**; leave them
+Six things are configurable — **voice**, **web search**, **image generation**, **music**, **shell**,
+and **per-preset tool disabling**; leave the first five
 all out and everything still runs (those capabilities are simply absent):
 
 ```yaml
 - id: aivn
   name: dsh-aivn
   config:
-    tts:
-      keys: ["<your-fish-audio-key>"]   # several keys rotate, spreading the free quota
-      baseUrl: https://api.fish.audio    # default; usually you don't need to set it
-      model: s2.1-pro-free               # default
-      concurrency: 2                     # cap on concurrent synthesis
-    search:
-      keys: ["<your-exa-key>"]           # with keys the stagehand also gets web_search
-      baseUrl: https://api.exa.ai        # default
-    shell: false                         # true = give the stagehand bash
-    image:                               # with this both roles can generate images
-      format: gemini                     # gemini | openai | modelslab (wire protocol, not a product)
-      baseUrl: http://127.0.0.1:38000    # local flow2api; point it at the official API or your gateway
-      model: gemini-3.0-pro-image
-      size: 1K                           # 1K / 2K / 4K (uppercase K), or literal pixels 1536x1024
-      apiKey: ""                         # empty = no auth header (local gateways often don't check)
-      timeoutMs: 180000
-    music:                               # with this the stagehand also gets generate_bgm
-      baseUrl: http://127.0.0.1:38000
-      model: flow-music-lyria-3.5
-      apiKey: ""
-      timeoutMs: 240000
+    ttsKeys: ["<your-fish-audio-key>"]     # several keys rotate, spreading the free quota (comma-separated in the UI)
+    ttsBaseUrl: https://api.fish.audio      # default; usually you don't need to set it
+    ttsModel: s2.1-pro-free                 # default
+    ttsConcurrency: 2                       # cap on concurrent synthesis
+    searchKeys: ["<your-exa-key>"]          # with keys both presets also get web_search
+    searchBaseUrl: https://api.exa.ai       # default
+    shell: false                            # true = give both presets bash
+    imageFormat: gemini                     # gemini | openai | modelslab (wire protocol, not a product)
+    imageBaseUrl: http://127.0.0.1:38000    # local flow2api; point it at the official API or your gateway
+    imageModel: gemini-3.0-pro-image
+    imageSize: 1K                           # 1K / 2K / 4K (uppercase K), or literal pixels 1536x1024
+    imageApiKey: ""                         # empty = no auth header (local gateways often don't check)
+    imageTimeoutMs: 180000
+    musicBaseUrl: http://127.0.0.1:38000
+    musicModel: flow-music-lyria-3.5
+    musicApiKey: ""
+    musicTimeoutMs: 240000
+    playwriterDisabledTools: ""             # per-preset tool disable (comma-separated); empty = identical presets
+    stagehandDisabledTools: ""
 ```
+
+**The config surface is 19 flat fields** (DSH's settings UI widgets only address top-level fields, so
+a nested shape cannot be found):
 
 | Option | Default | What it enables | Env fallback |
 |---|---|---|---|
-| `tts.keys` | empty | Voice toggle on the stage, plus `list_voices` for the stagehand (the voice catalog shares the synthesis key pool) | `DSH_AIVN_TTS_KEYS` |
-| `tts.baseUrl` / `tts.model` / `tts.concurrency` | Fish official / `s2.1-pro-free` / `2` | — | — |
-| `search.keys` | empty | `web_search` for the stagehand (one call returns results and page text together) | `DSH_AIVN_EXA_KEYS` |
-| `shell` | `false` | The stagehand preset's `tool-bash` row actually mounts (off by default, same as AIVN's `defaultOff`) | — |
-| `image.format` / `image.baseUrl` / `image.model` | — | **baseUrl and model must both be set** for image generation: the stagehand gains `generate_image` / `commit_asset` / `recut_sprite`, the playwright a **synchronous** `generate_image`. `format` is the wire protocol, not a product name | — |
-| `image.size` | `1K` | Tier `1K`/`2K`/`4K` (uppercase K) or literal pixels `1536x1024`; gemini accepts tiers only, openai/modelslab accept both (modelslab caps at 1024) | — |
-| `image.apiKey` / `image.timeoutMs` | empty / `180000` | Leave the key empty for gateways that don't check it (no auth header is sent); raise the timeout if generation is slow | — |
-| `music.baseUrl` / `music.model` | — | Both must be set for `generate_bgm` (Gemini shape only, no `format`) | — |
-| `music.apiKey` / `music.timeoutMs` | empty / `240000` | Same as above; one track measured at ~84 s | — |
+| `ttsKeys` | empty | Voice toggle on the stage, plus `list_voices` for both presets (the voice catalog shares the synthesis key pool) | `DSH_AIVN_TTS_KEYS` |
+| `ttsBaseUrl` / `ttsModel` / `ttsConcurrency` | Fish official / `s2.1-pro-free` / `2` | — | — |
+| `searchKeys` | empty | `web_search` for both presets (one call returns results and page text together) | `DSH_AIVN_EXA_KEYS` |
+| `searchBaseUrl` | `https://api.exa.ai` | Change it for a proxy / mirror | — |
+| `shell` | `false` | Both presets' `tool-bash` row actually mounts (off by default, same as AIVN's `defaultOff`); only affects new sessions | — |
+| `imageFormat` / `imageBaseUrl` / `imageModel` | — | **baseUrl and model must both be set** for `generate_image` / `generate_asset` (present in both presets); `cut` / `import_asset` do not need it. `format` is the wire protocol, not a product name | — |
+| `imageSize` | `1K` | Tier `1K`/`2K`/`4K` (uppercase K) or literal pixels `1536x1024`; gemini accepts tiers only, openai/modelslab accept both (modelslab caps at 1024) | — |
+| `imageApiKey` / `imageTimeoutMs` | empty / `180000` | Leave the key empty for gateways that don't check it (no auth header is sent); raise the timeout if generation is slow | — |
+| `musicBaseUrl` / `musicModel` | — | Both must be set for `generate_bgm` (Gemini shape only, no `format`) | — |
+| `musicApiKey` / `musicTimeoutMs` | empty / `240000` | Same as above; one track measured at ~84 s | — |
+| `playwriterDisabledTools` / `stagehandDisabledTools` | empty | Disable tools per preset (comma-separated tool names from the "Agent tools" list). Empty by default = the two presets are tool-for-tool identical | — |
 | Cutout tuning | see "Asset generation" | `DSH_AIVN_CUTOUT_TOLERANCE` / `_KEY_SMOOTH` / `_EDGE_BAND` / `_SPILL` / `_SOLID_RESIDUAL`, five environment variables | same names |
 
 Keys in neither place = that capability is off: the tool is **not registered** and the prompt never
@@ -253,10 +256,19 @@ default):
 
 `free` = always stop at the free-text input, with no option panel.
 
-**The four asset-source categories are intent only for now**: at this stage there is no image
-generation and no cross-play asset library, so all four asset kinds can only come from what you
-put into `assets/` by hand. Rules that can only be stated in words — prose style, taboos, how
-characters address each other — go in `memory/always/craft.md`, not in `play.json`.
+**The four asset-source categories are intent directives to the playwright**: the engine renders
+them into the playwright's "Writing parameters" section — e.g. `cg: off` tells it not to write
+`<cg>`, `background: generate` tells it to produce its own art. Two caveats:
+
+- **There is no cross-play asset library** (the app-level `library/` is permanently out of scope):
+  the "use the library" branch of `library` / `library-first` is unreachable and degrades to
+  "use what this play already has / generate".
+- **The generate branches also depend on an image backend being configured**: without one they are
+  rewritten to "use existing assets or narrate", so the playwright is never told to call a tool that
+  does not exist.
+
+Rules that can only be stated in words — prose style, taboos, how characters address each other —
+go in `memory/always/craft.md`, not in `play.json`.
 
 **Edit this section in place with `edit`** (touch only the `craft` key; not one byte of the rest of
 the file). There is no `set_craft` tool — writing a file is writing a file. The engine **silently
@@ -270,30 +282,30 @@ editing: it reports the ones that will be dropped.
 | `aivn-playwriter` | playwright | The one that writes Stage DSL live; its output is piped into the stage |
 | `aivn-stagehand` | stage-hand assistant | Preps material: premise, character cards, creative guidelines, voice picking, image generation and committing, BGM, research |
 
-Both presets have the same set of entries: instruction-file discovery (`AGENTS.md`) + persona
-(that prompt file) + file tools + file search. **The stage-hand assistant gets two more**: the skill
-library (its bundled `skills/`, see below) and a `tool-bash` row that stays off unless you set
-`shell: true`. The playwright gets neither — it writes and reads files, nothing more. **Neither
-preset lists a `dsh-aivn` entry** — the host already loads the plugin, and another entry would
-install the routes and event subscriptions twice.
+Both presets have the **same entries**: instruction-file discovery (`AGENTS.md`) + persona
+(that prompt file) + file tools + file search + the skill library (bundled `skills/`, see below)
++ a `tool-bash` row that stays off unless you set `shell: true`. **The tool surface is identical
+too** (see "Agent tools"); the only differences are persona, injected context, and the stage
+pipeline. **Neither preset lists a `dsh-aivn` entry** — the host already loads the plugin, and
+another entry would install the routes and event subscriptions twice.
 
 Only sessions on the playwright preset enter the stage pipeline. Nothing the stage-hand assistant
 says goes on stage.
 
-### Skill library (stage-hand assistant)
+### Skill library (both presets)
 
-The plugin ships two how-to references inside the package (`skills/`), mounted into stage-hand
-sessions:
+The plugin ships three how-to references inside the package (`skills/`), mounted into both presets:
 
 | Skill | What it covers |
 | --- | --- |
-| `galgame-audio` | Where to find free BGM / SFX, which licences allow commercial use, source picks for six BGM moods and common SFX categories, redistribution and AI-training red lines |
-| `galgame-visual-craft` | Where the art-style anchor goes, how to pin a character's looks (head-to-body ratio / face / outfit), variant layout and naming, how to write an art order, and ready-to-paste image prompts |
+| `aivn-play-setup` | The four-step setup for a new play or a settings change, and what each file holds (premise / craft.md / the craft block / character cards / memory cards / asset sheet), the `craft` values, and prep order |
+| `aivn-visual-craft` | Where the art-style anchor goes, how to pin a character's looks (head-to-body ratio / face / outfit), variant layout and naming, how to write an art order, and ready-to-paste image prompts |
+| `aivn-audio` | Where to find free BGM / SFX, which licences allow commercial use, source picks for six BGM moods and common SFX categories, redistribution and AI-training red lines |
 
 Only names and one-line descriptions go into the system prompt; the model loads the full text when
-one looks relevant — both are long and should not be read every beat. `includeDefaultRoots: false`
+one looks relevant — all three are long and should not be read every beat. `includeDefaultRoots: false`
 is deliberate: the dozens of host-ops skills installed on the machine have no business crowding
-the stage-hand assistant's catalog.
+these presets' catalog.
 
 ## Context injection
 
@@ -335,13 +347,13 @@ file it just wrote on the next beat.
 
 ## Agent tools
 
-Tools are installed and removed with the preset. `validate_play` is on both; the rest are
-role-specific. **No tool exists for anything the file tools already do** — `play.json`, its `craft`
-section and `memory/always/state/` are written with the file tools, and the prompts say what shape
-they take (see "Starting a new play" above). "What assets does this play have" is the same story:
-the playwright gets the asset list and cast table injected into its A-section every beat (id +
-description), and the stage-hand assistant reads the file listing in "Current state" and
-`assets/manifest.json` when it wants descriptions.
+Tools are installed and removed with the preset. **Both presets mount the same set** (the only
+difference you can opt into is the per-preset disable config below). **No tool exists for anything
+the file tools already do** — `play.json`, its `craft` section and `memory/always/state/` are written
+with the file tools, and the prompts say what shape they take (see "Starting a new play" above).
+"What assets does this play have" is the same story: the playwright gets the asset list and cast
+table injected into its A-section every beat (id + description), and the stage-hand assistant reads
+the file listing in "Current state" and `assets/manifest.json` when it wants descriptions.
 
 **The playwright's stop point is not a tool**: it is a tag on the last line of the script itself —
 `<stop options="A | B"/>` (option panel), `<stop placeholder="…"/>` (free-text input), `<stop/>`
@@ -350,37 +362,52 @@ description), and the stage-hand assistant reads the file listing in "Current st
 **The story's true ending uses `<ending/>` instead** (also a last-line tag, replacing that beat's `<stop>` —
 see "Endings and new game plus").
 
-| Tool | Who has it | What it does |
-| --- | --- | --- |
-| `validate_play` | both presets | Play self-check: whether `play.json` can be read (with the reason when a field is missing or the JSON is broken), whether `craft` holds values the engine does not recognise, whether the state files are sound, story premise, character card count, sprites, backgrounds, asset count. Call it right after writing play files. **No hard gate** — you can start with anything missing |
-| `list_voices` | stage-hand assistant (needs `tts.keys`) | Searches the Fish voice catalog: builds a window from language / tags / title keywords, filters `gender` locally, sorts by likes and shows the top 25. The id you pick goes into the card's `voice` |
-| `web_search` | stage-hand assistant (needs `search.keys`) | Web search: one call returns results and page text together. For facts **outside** the play — the setting, cast and plot all live in the workspace files |
-| `generate_image` | stage-hand assistant (needs `image`) | Produces **drafts**: backgrounds, CGs and sprites, with sprites cut out automatically. Generate a few candidates, let the user pick, commit only the chosen one |
-| `commit_asset` | stage-hand assistant | Commits the chosen draft for real: writes `assets/`, updates the asset sheet, records the ledger. **Only call it after the user says yes** |
-| `recut_sprite` | stage-hand assistant | Re-runs the cutout on the **original kept at commit time** (not a single pixel of the artwork changes, no quota spent) for "great picture, dirty edges" |
-| `generate_bgm` | stage-hand assistant (needs `music`) | Generates one BGM track into `assets/bgm/`; it **waits** (~84 s). `name` is the id your script references as `<scene bgm="…">` |
-| `generate_image` | playwright (needs `image`) | Missing art during a beat: **waits for the image** (70–140 s, the beat sits there), writes and commits it in one call, and returns the final path — the script line can reference it once the receipt is back |
+**Both presets mount the same set of AIVN tools** (the catalogue lives in `src/tool-catalog.ts`); the
+"gate" column marks tools registered only when the matching backend / key is configured.
+To disable tools per preset, use the plugin config `playwriterDisabledTools` / `stagehandDisabledTools`
+(comma-separated tool names; empty by default = the two presets are identical).
 
-`list_voices` / `web_search` are **not registered** when their keys are absent, and the prompt
-never mentions them — the model is never taught to call a tool that does not exist. The file tools
-(`read` / `write` / `edit` / `glob` / `grep` / `read_image`) come from the preset rows and are
-present in both presets: the stage-hand assistant uses `read_image` to look at artwork and at
-images the user dropped in.
+| Tool | Gate | What it does |
+| --- | --- | --- |
+| `validate_play` | — | Play self-check: whether `play.json` can be read (with the reason when a field is missing or the JSON is broken), whether `craft` holds values the engine does not recognise, whether the state files are sound, story premise, character card count, sprites, backgrounds, asset count, and whether the generation ledger holds entries pointing at missing files. Call it right after writing play files. **No hard gate** — you can start with anything missing |
+| `set_stage_style` | — | Writes the play-root `theme.json` (stage skin: dialog bar, choice cards, backdrop, radius, font, accent) and pushes the full skin to every open stage on the same play. Three states: omitted = keep, a value = set, `null` = reset; call with no args = read current |
+| `generate_image` | image backend | **Pure generation**: a description → one **candidate image** (the receipt gives the file path and a preview); it binds no play target, does no cutout and no registration. Aspect via `aspectRatio` (default 16:9); `references` may hold subject ids / play-relative paths / http(s) URLs. To make it an asset, follow up with `cut` / `import_asset` (or just use `generate_asset`) |
+| `cut` | — | **Cutout**: a flat-key-colour image → a transparent PNG (writes the output only, **never touches the source**). `source` is a play-relative path; with no `output` it lands in the candidate area. Five knobs below (`tolerance` / `spill` / `edgeBand` / `keySmooth` / `solidResidual`). Run it before registering a sprite; if the edges are dirty, re-run it **on the same source** with different knobs. **Independent of the image backend** |
+| `import_asset` | — | **Registers** an image as a play asset: writes `assets/`, updates the asset sheet (presentation + description), records the ledger — **no cutout**. `source` is a play-relative path or an http(s) URL; placement is **always explicit** — `kind` (background / cg / sprite) is required, and for a sprite `spriteId` / `variant` / `framing` / `stature` / `title`. A sprite must be an **already-cut transparent PNG** (run `cut` first for external art); `original` keeps the pre-cutout source for re-cutting. **Independent of the image backend** |
+| `generate_asset` | image backend | **One-shot**: generate + (sprite) cutout + register in a single call, returning the final asset path. Same placement args as `import_asset` (`kind` + `name` / `spriteId` / `variant` / `framing` / `stature`). **Only this path** gets the automatic key-colour background, identity lock and variant-leaning-on-neutral; if the asset already exists it is skipped |
+| `generate_bgm` | music backend | Generates one BGM track into `assets/bgm/`; it **waits** (~84 s). `name` is the id your script references as `<scene bgm="…">` |
+| `list_voices` | `tts.keys` | Searches the Fish voice catalog: builds a window from language / tags / title keywords, filters `gender` locally, sorts by likes and shows the top 25. The id you pick goes into the card's `voice` |
+| `web_search` | `search.keys` | Web search: one call returns results and page text together. For facts **outside** the play — the setting, cast and plot all live in the workspace files |
+
+`list_voices` / `web_search` / `generate_image` / `generate_asset` / `generate_bgm` are **not registered**
+when their keys / backends are absent, and the prompt never mentions them.
+**`validate_play` / `set_stage_style` / `cut` / `import_asset` are not gated**: they only read/write play
+files and run the cutout, never the image backend — so without image generation you can still bring in
+art from other tools, `cut` it and `import_asset` it. The file tools (`read` / `write` / `edit` /
+`glob` / `grep` / `read_image`) come from the preset rows and are present in both presets.
 
 ## Asset generation
 
-With `image` configured both roles can generate images; they **share one implementation and differ
-only in waiting strategy**:
+"**Where the pixels come from**" and "**how pixels become a play asset**" are two steps, and the tools
+are split as well:
 
-| | stage-hand assistant | playwright |
+- **One-shot (`generate_asset`)**: generate + (sprite) cutout + register in one go — the path for
+  "I just want a usable image".
+- **The atomic trio (`generate_image` / `cut` / `import_asset`)**: one job each, freely composable —
+  for producing candidates for the user to pick, for art from elsewhere (downloads / another model),
+  or for re-cutting on its own.
+
+| | one-shot (`generate_asset`) | atomic (`generate_image` → `cut` → `import_asset`) |
 | --- | --- | --- |
-| Flow | **Two steps**: `generate_image` makes a draft → the user picks → `commit_asset` stores it | **One step**: `generate_image` waits, generates and commits |
-| Why | Three candidates, and the ones not picked must leave no trace in the asset sheet | Missing art mid-beat gets filled in place; the call itself declares the final id |
+| Source | the configured image backend | a `generate_image` candidate / play-relative path / http(s) URL |
+| Play awareness | automatic key-colour background, identity lock, variant leaning on neutral, cutout | none: write the sprite's flat background into the prompt yourself and call `cut` separately |
+| Placement | explicit args (kind / subject / variant / framing / stature) | explicit `import_asset` args |
+| Commit | in one go | step by step: `cut` then `import_asset` |
 
-The playwright side is **synchronous** (70–140 s, the beat sits there). AIVN queues it in the
-background and broadcasts on arrival; this plugin is a DSH session model with no out-of-turn
-injection channel, so it waits instead — at least the receipt tells the truth: by the time the
-model holds it, that asset id really is on disk and referenceable this beat.
+Generation **waits synchronously** (70–140 s per image). "Generate a few candidates and let the user
+pick" = call `generate_image` several times and paste the previews; the chosen one is then placed
+(backgrounds / CGs straight into `import_asset`, sprites through `cut` first). **Unpicked candidates
+leave no trace in the asset sheet.**
 
 ### Layout and ledger
 
@@ -391,7 +418,7 @@ play/
 │   └── manifest.json             ← asset descriptions and sprite presentation (framing / stature / title)
 └── media-cache/                  ← intermediates, never in git, safe to delete wholesale
     ├── drafts/<draftId>/{image.*, source.*, draft.json}
-    ├── sprite-sources/<spriteId>/  ← pre-cutout originals (only `recut_sprite` reads these)
+    ├── sprite-sources/<spriteId>/  ← pre-cutout originals (`import_asset`'s `original` and auto-neutral land here; re-cutting reads them)
     └── tts/                      ← speech cache (content-addressed)
 ```
 
@@ -418,10 +445,12 @@ candidates and let the user pick" only works if the user can actually see them.
   derived from, and one closeup must not drag the whole subject's placement around.
 - **`stature`** (`small` / `normal` / `large` / `huge`) is only about how big the subject stands on
   stage, independent of framing: a mech is "full framing + huge", a cat is "square framing + small".
-- **Cutout is automatic**: every sprite runs through a chroma-key cutout (`src/media/cutout.ts`:
-  flat key colour, global key, per-pixel edge coverage solve) and lands as a transparent PNG. When
-  the edges are dirty, **do not regenerate** — a new generation is a different picture; use
-  `recut_sprite` on the kept original. Its five knobs map to five environment variables:
+- **Cutout**: a sprite must be a transparent PNG. Through `generate_asset` the engine cuts it
+  automatically (flat key colour, global key, per-pixel edge coverage solve — `src/media/cutout.ts`);
+  on the atomic path, call `cut` after `generate_image` produces a candidate. When the edges are
+  dirty, **do not regenerate** — a new generation is a different picture: re-run `cut` with different
+  knobs **on the same source** (the source lives under `media-cache/sprite-sources/<spriteId>/`, or
+  keep one via `import_asset`'s `original`). Its five knobs map to five environment variables:
 
 | Env var | Default | Effect |
 | --- | --- | --- |
@@ -625,14 +654,14 @@ Suites:
 - `injection` (`dsh-e2e run e2e/verify-injection.mjs`) — the playwright's context injection: reads
   the session log to assert that all six A-section blocks plus [State] made it into the system
   prompt, that their content comes from the fixture files rather than "go read it yourself", and
-  checks the tool surface (the prep tools belong to the stage-hand assistant; the asset list is
+  checks the tool surface (both presets mount the same set of AIVN tools; the asset list is
   not a tool at all — it is injected).
 - `stagehand` (`npm run e2e:stagehand`) — the stage-hand assistant: asserts the persona chapters,
-  the "Current state" injection (file listing + readiness), that both bundled skills appear in the
-  skill catalog, and that the tool surface is the stage-hand set (with none of the playwright's
-  beat-closing tools). The e2e instance has **no image or music backend**, so this also asserts
-  those tools are **absent** from the tool list and that the persona never mentions them (an
-  unconfigured backend must never be advertised).
+  the "Current state" injection (file listing + readiness), that all three bundled skills appear in
+  the skill catalog, and that the tool surface matches the playwright's (both presets mount the same
+  set). The e2e instance has **no image or music backend**, so this also asserts those tools are
+  **absent** from the tool list and that the persona never mentions them (an unconfigured backend
+  must never be advertised).
 - `voice` (`dsh-e2e run e2e/verify-voice.mjs`) — hits Fish Audio for real: asserts that voice
   frames arrive, the audio can be fetched and is a real MP3, **the browser decodes it to PCM and a
   source actually starts** (hooks are installed on `AudioContext` / `decodeAudioData` /

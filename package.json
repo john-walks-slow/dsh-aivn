@@ -1,7 +1,6 @@
 {
 	"name": "dsh-aivn",
-	"version": "0.1.0",
-	"private": true,
+	"version": "0.2.0",
 	"type": "module",
 	"description": "AIVN's stage engine inside DeepSeek Harness: a workspace is a play, the playwright preset writes Stage DSL, and a Stage tab in the conversation renders it live (backgrounds, sprites, dialog, stop-point choices, line-by-line TTS). dsh-aivn：把 AIVN 的舞台引擎装进 DSH——工作区就是一部剧目，剧作家预设写 Stage DSL，对话页的「舞台」tab 实时演出（背景、立绘、台词条、停止点选项、逐句语音）。",
 	"main": "./lib/index.js",
