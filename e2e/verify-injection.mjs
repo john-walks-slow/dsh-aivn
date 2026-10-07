@@ -28,7 +28,7 @@ import {
 } from './lib/boot.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const SLUG = `--${WORKSPACE.replace(/^\//, '').replace(/[/.]/g, '-')}--`;
+const SLUG = `--${WORKSPACE.replace(/^\//, '').replace(/\//g, '-')}--`;
 const SESSIONS = join(E2E_HOME, 'sessions', SLUG);
 
 const results = [];

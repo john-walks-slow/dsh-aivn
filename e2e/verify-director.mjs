@@ -76,7 +76,7 @@ async function waitUntil(probe, { timeout = 60_000, interval = 1_000, label = 'c
 
 /* —— 会话日志：与 verify-injection 同一套读法 —— */
 
-const SLUG = `--${WORKSPACE.replace(/^\//, '').replace(/[/.]/g, '-')}--`;
+const SLUG = `--${WORKSPACE.replace(/^\//, '').replace(/\//g, '-')}--`;
 const SESSIONS = join(E2E_HOME, 'sessions', SLUG);
 
 /** 会话目录名是 `session-<uuid>`；接口认的是那枚 uuid。 */

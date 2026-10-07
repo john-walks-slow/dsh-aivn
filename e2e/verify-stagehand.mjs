@@ -26,7 +26,7 @@ import {
 	sendMessage,
 } from './lib/boot.mjs';
 
-const SLUG = `--${WORKSPACE.replace(/^\//, '').replace(/[/.]/g, '-')}--`;
+const SLUG = `--${WORKSPACE.replace(/^\//, '').replace(/\//g, '-')}--`;
 const SESSIONS = join(E2E_HOME, 'sessions', SLUG);
 
 const results = [];
@@ -158,10 +158,10 @@ try {
 	check('S12', catalog.includes('aivn-visual-craft') && catalog.includes('aivn-play-setup'), '技能清单里有 aivn-visual-craft 与 aivn-play-setup');
 	// 门控规约 (i)：技能清单的 name+description 恒列，必须能力中立——不点名任何门控工具。
 	// 详见 AGENTS.md「提示词地图」。
-	const gatedTools = ['generate_asset', 'generate_image', 'generate_bgm', 'list_voices', 'web_search'];
+	const gatedToolNames = ['generate_asset', 'generate_image', 'generate_bgm', 'list_voices', 'web_search'];
 	check(
 		'S12b',
-		gatedTools.every((name) => !catalog.includes(name)),
+		gatedToolNames.every((name) => !catalog.includes(name)),
 		'技能清单（name+description）不点名门控工具（恒列内容不谎报能力）',
 	);
 

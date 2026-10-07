@@ -53,7 +53,7 @@ agent 提示词分三层，**每一类知识只有一个家**。改任何提示�
 
 | 层 | 载体 | 改完 | 生效 |
 | --- | --- | --- | --- |
-| **Skill** | `skills/aivn-play-setup/`、`aivn-visual-craft/`、`aivn-audio/` | 直接改 markdown | 宿主把 name+description 恒列进 `<available_skills>`，模型按需 `skill` 加载全文；**改完即生效** |
+| **Skill** | `skills/aivn-play-setup/`、`aivn-visual-craft/`、`aivn-audio/` | 直接改 markdown | 宿主把 name+description 恒列进技能清单（一条 `available_skills` 上下文消息），模型按需 `skill` 加载全文；**改完即生效** |
 | **persona + 注入段** | 硬编码 TS（下表） | `npm run build` 并提交 `lib/` | `persona.prefix` 装载时烘焙；`systemPrompt.section` 每轮现读 |
 | **运行期剧目文件** | `<剧目>/premise.md`、`craft.md`、`play.json`、`characters/*`、`memory/*`、`assets/manifest.json`、`theme.json` | 直接改 | 条件化渲染进 A 区注入；属「内容」，不是提示词本体 |
 

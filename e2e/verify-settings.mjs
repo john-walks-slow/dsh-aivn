@@ -34,7 +34,7 @@ const ARTIFACTS = join(ROOT, 'e2e-artifacts');
 mkdirSync(ARTIFACTS, { recursive: true });
 
 const PATCH = join(E2E_HOME, 'profiles', 'web', 'cordis.patch.yml');
-const SLUG = `--${WORKSPACE_DIR.replace(/^\//, '').replace(/[/.]/g, '-')}--`;
+const SLUG = `--${WORKSPACE_DIR.replace(/^\//, '').replace(/\//g, '-')}--`;
 const SESSIONS = join(E2E_HOME, 'sessions', SLUG);
 
 /** 测试用的一把假 key（不是真凭据；这个字符串只该出现在 profile 的配置文件里）。 */

@@ -26,7 +26,7 @@ import {
 	WORKSPACE as WORKSPACE_DIR,
 } from './lib/boot.mjs';
 
-const SLUG = `--${WORKSPACE_DIR.replace(/^\//, '').replace(/[/.]/g, '-')}--`;
+const SLUG = `--${WORKSPACE_DIR.replace(/^\//, '').replace(/\//g, '-')}--`;
 const SESSIONS = join(E2E_HOME, 'sessions', SLUG);
 const PLAY_FILE = join(WORKSPACE_DIR, 'play.json');
 
