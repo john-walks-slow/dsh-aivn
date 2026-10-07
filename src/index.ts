@@ -21,7 +21,7 @@ import { StageHub } from './hub';
 import { InjectedMessages } from './injected';
 import { EndingsLedger } from './ledger';
 import { registerPresets } from './playwriter/preset';
-import { installPresetTools } from './preset-tools';
+import { installPresetTools, type DisabledTools } from './preset-tools';
 import { installStageRoutes } from './routes';
 import { StageLog } from './stage-log';
 import { installStageTap } from './stage-tap';
@@ -89,7 +89,7 @@ export interface Config {
 	ttsModel: Volatile<string>;
 	/** 同时合成的上限：摊往返，又不把额度一次打空。 */
 	ttsConcurrency: Volatile<number>;
-	/** 给搭台助手放开命令行（`bash`）。默认关，与 AIVN 那个 `defaultOff` 同口径。 */
+	/** 给两个预设放开命令行（`bash`）。默认关，与 AIVN 那个 `defaultOff` 同口径。 */
 	shell: Volatile<boolean>;
 	/** 一把或多把 Exa key。也可以走 `DSH_AIVN_EXA_KEYS`。 */
 	searchKeys: Volatile<string[] | undefined>;
@@ -107,6 +107,9 @@ export interface Config {
 	musicApiKey: Volatile<string>;
 	musicModel: Volatile<string>;
 	musicTimeoutMs: Volatile<number>;
+	/** 按预设禁用的工具 id（逗号分隔，见 `src/tool-catalog.ts`）；默认空 = 两预设完全一致。 */
+	playwriterDisabledTools: Volatile<string>;
+	stagehandDisabledTools: Volatile<string>;
 }
 
 export const Config = z.object({
@@ -131,6 +134,8 @@ export const Config = z.object({
 	musicApiKey: z.string().role('secret').volatile(),
 	musicModel: z.string().default('').volatile(),
 	musicTimeoutMs: z.natural().default(240_000).volatile(),
+	playwriterDisabledTools: z.string().default('').volatile(),
+	stagehandDisabledTools: z.string().default('').volatile(),
 });
 
 /**
@@ -147,6 +152,13 @@ interface Runtime {
 	/** 同上，没配 Exa key 时是 null。 */
 	exa: Exa | null;
 	media: MediaBackends;
+	/** 按预设禁用的工具 id（从配置的逗号分隔串现算）。 */
+	disabled: DisabledTools;
+}
+
+/** 从逗号分隔串现算禁用集；空串 → 空集。 */
+function parseToolList(value: string | undefined): ReadonlySet<string> {
+	return new Set((value ?? '').split(',').map((name) => name.trim()).filter(Boolean));
 }
 
 /** 从当前配置现算运行期面——每次调用都重新 `.get()`，所以拿到的一定是现值。 */
@@ -182,6 +194,10 @@ function buildRuntime(config: Config): Runtime {
 		voices: createVoiceCatalog(ttsKeys, ttsBaseUrl),
 		exa: createExa(exaKeys, config.searchBaseUrl.get() ?? DEFAULT_EXA_BASE_URL),
 		media,
+		disabled: {
+			playwriter: parseToolList(config.playwriterDisabledTools.get()),
+			stagehand: parseToolList(config.stagehandDisabledTools.get()),
+		},
 	};
 }
 
@@ -202,7 +218,7 @@ export async function apply(ctx: Context, config: Config): Promise<() => void> {
 	const ledger = new EndingsLedger((message) => ctx.logger.warn(message));
 
 	const runtime = { revision: 0, current: buildRuntime(config) };
-	ctx.logger.info(`[dsh-aivn] 搭台助手能力：${describeCapabilities(runtime.current.capabilities)}`);
+	ctx.logger.info(`[dsh-aivn] 预设能力：${describeCapabilities(runtime.current.capabilities)}`);
 	if (runtime.current.tts) ctx.logger.info('[dsh-aivn] 语音已启用（Fish Audio TTS）');
 	else ctx.logger.info('[dsh-aivn] 没配 TTS key，语音停用');
 
@@ -245,7 +261,7 @@ export async function apply(ctx: Context, config: Config): Promise<() => void> {
 	];
 
 	// 设置界面改完的值经 loader 原位提交进 `config` 的这些引用，这里重建运行期面：
-	// 工具面重扫（装上/卸下那一轮能力，换掉旧客户端实例），shell 翻转时重注册搭台助手预设。
+	// 工具面重扫（装上/卸下那一轮能力，换掉旧客户端实例），shell 翻转时重注册两个预设。
 	ctx.on('loader/volatile-update', () => {
 		const before = runtime.current.capabilities;
 		runtime.current = buildRuntime(config);
@@ -254,10 +270,10 @@ export async function apply(ctx: Context, config: Config): Promise<() => void> {
 		ctx.logger.info(`[dsh-aivn] 配置已更新，能力：${describeCapabilities(after)}`);
 		tools.resync();
 		// `tool-bash` 是预设的**一行**（不是装在 Agent 上的工具），而活着的 Agent 保留它绑定那一刻
-		// 的那代行集——重注册只对之后新建的会话生效，已开着的搭台助手会话保持原样。
+		// 的那代行集——重注册只对之后新建的会话生效，已开着的会话保持原样。
 		if (before.shell !== after.shell) {
 			ctx.logger.info(
-				'[dsh-aivn] shell 翻转：搭台助手预设已重注册，只对新建会话生效（已开着的会话保留原行集）',
+				'[dsh-aivn] shell 翻转：两个预设已重注册，只对新建会话生效（已开着的会话保留原行集）',
 			);
 			void presets.restage(after.shell);
 		}

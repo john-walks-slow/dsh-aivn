@@ -18,6 +18,7 @@ import { SPRITE_FRAMING_SHOT } from '@aivn/core';
 import { PlayAssets } from '../src/media/assets';
 import { cutout } from '../src/media/cutout';
 import { playwriterTail } from '../src/playwriter/prompt';
+import { readPlayReadiness } from '../src/readiness';
 import { stagehandPrompt } from '../src/stagehand/prompt';
 import type { GeneratedImage, ImageBackend, ImageRequest } from '../src/media/image';
 import type { GeneratedMusic, MusicBackend } from '../src/media/music';
@@ -135,15 +136,16 @@ check(
 	'台账记下了这张图当初用的 prompt',
 );
 
-// 2. 重抠：不重新出图，覆盖同一张 PNG；台账里原来的出图 prompt 不许动
+// 2. 重抠：对留底原片重跑 cut（只重跑抠底、画面不变），覆盖同一张 PNG；台账不许动
 const ledgerBefore = JSON.parse(await readFile(join(dir, 'assets', 'generated.json'), 'utf8'));
-const recut = await assets.recut({ kind: 'sprite', spriteId: 'probe_girl' }, { tolerance: 56 });
+const keptSource = 'media-cache/sprite-sources/probe_girl/neutral.png';
+const recut = await assets.cutFile(keptSource, spriteAsset.path, { tolerance: 56 });
 const ledgerAfter = JSON.parse(await readFile(join(dir, 'assets', 'generated.json'), 'utf8'));
-check('M8', recut.cutout !== undefined && existsSync(recut.absPath), '原地重抠覆盖了同一张立绘');
+check('M8', recut.cutout.coverage > 0 && existsSync(spriteAsset.absPath), '重抠：对留底原片重跑 cut 覆盖同一张立绘');
 check(
 	'M8b',
-	ledgerAfter['probe_girl/neutral']?.prompt === ledgerBefore['probe_girl/neutral']?.prompt,
-	'重抠不改台账里原来的出图记录',
+	spriteAsset.sourcePath === keptSource && ledgerAfter['probe_girl/neutral']?.prompt === ledgerBefore['probe_girl/neutral']?.prompt,
+	'入库回执带出抠底前原片路径，且重抠不改台账',
 );
 
 // 3. 背景：草稿 + 入库
@@ -208,27 +210,74 @@ try {
 }
 check('M18', noRefs.includes('垫图'), '立绘差分拒绝显式垫图（身份基准恒为 neutral）');
 
+// 8b. import_asset：把一张图登记成素材（落位显式给；不依赖生图后端）
+const cand = await assets.draft({ kind: 'background', name: 'imported_cand' }, 'a cand bg');
+const importedCand = await assets.register(cand.path, { kind: 'background', name: 'imported_cand' });
+check(
+	'M18a',
+	importedCand.path === 'assets/backgrounds/imported_cand.png' && existsSync(importedCand.absPath),
+	`候选文件 register 入库（落位显式给）：${importedCand.path}`,
+);
+
+const srcBg = join(dir, 'assets', 'backgrounds', 'external_src.png');
+await writeFile(srcBg, await landscape(1600, 900));
+const importedExternal = await assets.register(
+	'assets/backgrounds/external_src.png',
+	{ kind: 'background', name: 'external_bg' },
+	{ description: '外部来源的背景' },
+);
+const manifestExt = JSON.parse(await readFile(join(dir, 'assets', 'manifest.json'), 'utf8'));
+check(
+	'M18b',
+	importedExternal.path === 'assets/backgrounds/external_bg.png' && manifestExt.external_bg?.description === '外部来源的背景',
+	'外部路径 register 并写下描述',
+);
+
+const srcSprite = join(dir, 'assets', 'external_sprite_src.png');
+await writeFile(srcSprite, await keyedSprite(1080, 1920));
+const extCut = await assets.cutFile('assets/external_sprite_src.png');
+await assets.register(
+	extCut.path,
+	{ kind: 'sprite', spriteId: 'ext_girl', variant: 'smile', framing: 'full' },
+	{ original: 'assets/external_sprite_src.png' },
+);
+check(
+	'M18c',
+	existsSync(join(dir, 'assets', 'sprites', 'ext_girl', 'smile.png')) &&
+		existsSync(join(dir, 'media-cache', 'sprite-sources', 'ext_girl', 'smile.png')),
+	'外部立绘：先 cut 抠底、再 register（original 留原片）',
+);
+
+const generic = await assets.createGeneric('a lone lighthouse at dusk', { aspectRatio: '1:1' });
+const genericRecord = JSON.parse(await readFile(join(dir, 'media-cache', 'drafts', generic.draftId, 'draft.json'), 'utf8'));
+check(
+	'M18d',
+	generic.kind === undefined && generic.aspect === '1:1' && existsSync(generic.absPath) && genericRecord.kind === undefined,
+	'通用出图不绑剧目目标（记录里没有 kind，画幅走 aspectRatio）',
+);
+
 // 9. persona 的能力位分叉：两侧都要验（配了后端 / 没配）
 const on = stagehandPrompt({ shell: false, voice: false, search: false, image: true, music: true });
 const off = stagehandPrompt({ shell: false, voice: false, search: false, image: false, music: false });
 check(
 	'M19',
-	on.includes('两步走：先出候选') &&
-	on.includes('commit_asset') &&
-	on.includes('recut_sprite') &&
+	on.includes('generate_asset') &&
+	on.includes('generate_image') &&
+	on.includes('import_asset') &&
+	on.includes('cut') &&
 	on.includes('立绘三档取景') &&
 	on.includes('# 配乐（generate_bgm）'),
-	'配了生图 / 音乐时 persona 教两步出图与配乐',
+	'配了生图 / 音乐时 persona 教一键 generate_asset、候选 generate_image 与配乐',
 );
 check(
 	'M20',
-	off.includes('现在**没有生图工具**') && !off.includes('commit_asset') && !off.includes('# 配乐（generate_bgm）'),
-	'没配时 persona 走 fallback，且不提那两个工具',
+	off.includes('现在**没有配生图后端**') && off.includes('import_asset') && !off.includes('# 配乐（generate_bgm）'),
+	'没配时 persona 走 fallback，用 import_asset 登记外部图',
 );
 check(
 	'M21',
-	playwriterTail({ image: true }).includes('# 缺图怎么办（generate_image）') &&
-		!playwriterTail({ image: false }).includes('# 缺图怎么办（generate_image）'),
+	playwriterTail({ image: true }).includes('# 缺图怎么办') &&
+		!playwriterTail({ image: false }).includes('# 缺图怎么办'),
 	'剧作家的缺图章跟着生图能力位出现 / 消失',
 );
 
@@ -566,6 +615,19 @@ const NO_SMOOTH = { keySmooth: 0 } as const;
 		`绿底 + 亮色前景：半覆盖像素反解回前景色且不残留底色（边缘 ${edge[3]}，实心 ${solid[3]}）`,
 	);
 }
+
+/* ── 17. 台账对账：登记指向不存在的文件要报出来 ── */
+
+await writeFile(
+	join(dir, 'assets', 'generated.json'),
+	`${JSON.stringify({ ghost: { kind: 'background', path: 'assets/backgrounds/ghost.png', prompt: '', createdAt: '' } }, null, 2)}\n`,
+);
+const readiness = readPlayReadiness(dir);
+check(
+	'M41',
+	readiness.danglingAssets.includes('ghost'),
+	`台账对账报出指向不存在文件的登记（${readiness.danglingAssets.join('、') || '无'}）`,
+);
 
 await rm(dir, { recursive: true, force: true });
 const passed = results.filter((r) => r.ok).length;

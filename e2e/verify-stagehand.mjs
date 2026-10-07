@@ -78,6 +78,16 @@ function toolNames(events) {
 	return [];
 }
 
+/** 技能清单：DSH 把 `<available_skills>` 作为一条 user 角色的上下文消息投进来，不在系统提示词里。 */
+function skillCatalog(events) {
+	for (const event of events) {
+		const content = event.data?.content ?? event.data?.message?.content ?? [];
+		const text = content.map((block) => block.text ?? '').join('');
+		if (text.includes('<available_skills>')) return text;
+	}
+	return '';
+}
+
 /** 等日志里出现系统提示词与那一轮的工具清单（都是第一个 step 开头写下的，不用等整轮演完）。 */
 async function capture(page, sessionDir) {
 	let prompt = '';
@@ -86,10 +96,12 @@ async function capture(page, sessionDir) {
 		const events = sessionEvents(sessionDir);
 		prompt = systemPrompt(events);
 		tools = toolNames(events);
-		if (prompt !== '' && tools.length > 0) break;
+		if (prompt !== '' && tools.length > 0) {
+			return { prompt, tools, catalog: skillCatalog(events) };
+		}
 		await page.waitForTimeout(2_000);
 	}
-	return { prompt, tools };
+	return { prompt, tools, catalog: skillCatalog(sessionEvents(sessionDir)) };
 }
 
 const fixture = seedPlay(WORKSPACE);
@@ -112,7 +124,7 @@ try {
 	check('S2', preset.picked && preset.current === '搭台助手', `座位已选为「搭台助手」（${preset.current ?? '无'}）`);
 
 	await sendMessage(page, '先别动手改任何东西：告诉我你现在能看到哪些文件，还缺什么。');
-	const { prompt, tools } = await capture(page, newestSession());
+	const { prompt, tools, catalog } = await capture(page, newestSession());
 
 	const headings = [...prompt.matchAll(/^#{1,2} .+$/gm)].map((m) => m[0]);
 	const has = (name) => tools.includes(name);
@@ -120,8 +132,13 @@ try {
 	// persona：工坊那几章在，舞台契约不在
 	check('S3', prompt.length > 0, `系统提示词已写出（${prompt.length} 字）`);
 	check('S4', headings.includes('# 职责边界'), '有《职责边界》章');
-	check('S5', headings.includes('# 设定流程（这是你的工作方式，不是可选建议）'), '有《设定流程》章');
-	check('S6', headings.includes('# 出图要点') && headings.includes('# 剧目写作要点'), '有《出图要点》与《剧目写作要点》');
+	// 备料流程已抽成随包 skill：persona 里不再有《设定流程》章，改由技能清单承载
+	check(
+		'S5',
+		!headings.includes('# 设定流程（这是你的工作方式，不是可选建议）') && prompt.includes('aivn-play-setup'),
+		'《设定流程》已抽成 skill（persona 里没有该章，技能清单里有 aivn-play-setup）',
+	);
+	check('S6', headings.includes('# 出图要点'), '有《出图要点》章（《剧目写作要点》已并入 skill）');
 	check('S7', !headings.includes('# 演出契约') && !headings.includes('# 剧本格式（Stage DSL，必须严格遵守）'), '没有剧作家的舞台契约（两套注入不串）');
 	// 舞台 tab 只给剧作家会话：搭台助手这一侧连 tab 都不该出现（2026-10-06 用户要求）
 	const tabs = await page.evaluate(() =>
@@ -136,9 +153,9 @@ try {
 	check('S10b', prompt.includes('craft.beatLength') && prompt.includes('只认 short / medium / long'), '报出引擎不认的 craft 取值');
 	check('S10c', prompt.includes('state.json 不是合法 JSON'), '报出坏掉的状态文件');
 
-	// 技能库：两份自带技能都挂上（这一条同时证明 skill 行装载成功、包内路径算对了）
-	check('S11', prompt.includes('galgame-audio'), '技能清单里有 galgame-audio');
-	check('S12', prompt.includes('galgame-visual-craft'), '技能清单里有 galgame-visual-craft');
+	// 技能库：三份自带技能都挂上（这一条同时证明 skill 行装载成功、包内路径算对了）
+	check('S11', catalog.includes('aivn-audio'), '技能清单里有 aivn-audio');
+	check('S12', catalog.includes('aivn-visual-craft') && catalog.includes('aivn-play-setup'), '技能清单里有 aivn-visual-craft 与 aivn-play-setup');
 
 	// 工具面：搭台助手那一套；剧作家的收束口一个都不在，「只写一个文件」的那几个也没有名字可装
 	const expects = ['validate_play', 'set_stage_style'];
@@ -146,30 +163,29 @@ try {
 	check('S13', expects.every(has), `装上了 ${expects.join(' / ')}（实际：${tools.join(', ')}）`);
 	check('S14', !forbidden.some(has), `没有旧名工具 ${forbidden.join(' / ')}`);
 	check('S15', !has('list_voices') && !has('web_search'), '没配 key 时 list_voices / web_search 不注册');
-	// 生图 / 音乐：**工具面与 persona 必须一致**——要么都开（工具在、提示词教），要么都关
-	// （工具不在、走 fallback 章）。这一条不假设实例配没配后端，配了桩后端也一样跑得过。
-	const mediaTools = ['generate_image', 'commit_asset', 'recut_sprite', 'generate_bgm'];
-	const on = mediaTools.some(has);
-	const allOn = mediaTools.every(has);
+	// cut / import_asset 不门控（只读写文件与抠底），始终在；generate_image / generate_asset / generate_bgm
+	// 配了后端才有——生图那两个同开同关。这一条不假设实例配没配后端，配了桩后端也一样跑得过。
+	const alwaysTools = ['cut', 'import_asset'];
+	const gatedTools = ['generate_image', 'generate_asset', 'generate_bgm'];
+	const gatedOn = gatedTools.filter(has);
+	const allImageOn = has('generate_image') && has('generate_asset');
+	const allOn = gatedOn.length === gatedTools.length;
 	check(
 		'S16',
-		on === allOn,
-		on
-			? `配了生图 / 音乐后端：${mediaTools.join(' / ')} 都在（实际：${tools.join(', ')}）`
-			: `没配生图 / 音乐后端时 ${mediaTools.join(' / ')} 一个都不注册`,
+		alwaysTools.every(has) && (gatedOn.length === 0 || allOn) && has('generate_image') === has('generate_asset'),
+		`cut / import_asset 始终在；generate_image / generate_asset 同开同关（实际：${tools.join(', ')}）`,
 	);
-	const styledTwoStep = prompt.includes('两步走：先出候选');
+	const namedOneStep = prompt.includes('generate_asset');
 	const musicChapter = headings.includes('# 配乐（generate_bgm）');
 	check(
 		'S17',
-		allOn
-			? styledTwoStep && prompt.includes('commit_asset') && musicChapter
+		allImageOn
+			? namedOneStep && prompt.includes('import_asset') && musicChapter
 			: headings.includes('# 出图要点') &&
-					prompt.includes('现在**没有生图工具**') &&
-					!prompt.includes('commit_asset') &&
-					!prompt.includes('recut_sprite') &&
+					prompt.includes('现在**没有配生图后端**') &&
+					prompt.includes('import_asset') &&
 					!musicChapter,
-		allOn ? 'persona 教两步出图与配乐（与工具面一致）' : 'persona 走没配生图的 fallback 章，且不提生图 / 配乐工具',
+		allImageOn ? 'persona 教一键 generate_asset 与配乐（与工具面一致）' : 'persona 走没配生图的 fallback 章，用 import_asset 登记外部图',
 	);
 	// 没有「起剧目」工具了，字段与布局必须真在提示词里（两个预设共用同一段文本）
 	check(

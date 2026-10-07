@@ -30,7 +30,7 @@ export function installPlayCommands(ctx: Context): () => void {
 				const lines = [`已把 ${result.dir} 立成剧目《${title}》（id: ${result.id}）。`];
 				if (result.kept.length > 0) lines.push(`已经有、这份没动：${result.kept.join('、')}`);
 				lines.push(`新写下：${result.written.join('、')}`);
-				lines.push('接下来切到「舞台」页签就能开演；想先补设定与角色卡就找搭台助手。');
+				lines.push('接下来切到「舞台」页签就能开演；想先补设定与角色卡，直接说就行（两个预设都能备料，也可以切到搭台助手专门备料）。');
 				return { kind: 'success', text: lines.join('\n') };
 			} catch (error) {
 				return { kind: 'error', text: error instanceof Error ? error.message : String(error) };

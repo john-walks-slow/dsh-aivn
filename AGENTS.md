@@ -8,7 +8,8 @@
 | --- | --- |
 | `src/` | 宿主半边（Cordis 插件）：中枢、DSL 管线、路由、剧目脚手架 |
 | `src/play-context.ts` | A 区注入：把前提 / 角色表 / 素材清单 / 写作参数 / 记忆索引 / 状态区挂进系统提示词 |
-| `src/playwriter/` | 剧作家预设与提示词；它专属的工具只剩配了生图才有的同步 `generate_image`（停止点是剧本里的 `<stop …/>`，不是工具） |
+| `src/playwriter/` | 剧作家预设与提示词（停止点是剧本里的 `<stop …/>`，不是工具） |
+| `src/tool-catalog.ts` | AIVN 工具面的单一真相源（工具名、职责、开启门控）；装配与提示词工具表都从它派生 |
 | `src/tools/` | 两个预设共用的工具与工具上下文（`validate_play` / `PlayContext`） |
 | `src/play-files.ts` | 《剧目文件》那一章：目录布局与 `play.json` / 角色卡的字段，**两个预设共用同一段文本**（写文件就是建剧目，没有「起剧目」工具） |
 | `src/client/` | 浏览器半边（React），挂在 `conversation.view` 槽 |

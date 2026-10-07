@@ -1,5 +1,5 @@
 /**
- * 搭台助手的能力面（`can`）。
+ * 预设的能力面（`can`）。
  *
  * AIVN 的能力面是**用户逐剧目勾**的（`play.json` 的 `agents.<role>.capabilities` + Agent 设置页），
  * 所以那边每轮拼提示词时都得现算。插件没有那个设置面：能力面由**预设行集**与**插件配置**决定，
@@ -21,7 +21,7 @@ export interface Capabilities {
 	voice: boolean;
 	/** 联网检索（`web_search`）：配了 Exa key 才有。 */
 	search: boolean;
-	/** 生图（`generate_image` / `commit_asset` / `recut_sprite`）：配了后端才有。 */
+	/** 生图（`generate_image` / `generate_asset`）：配了后端才有。`cut` / `import_asset` 只读文件与抠底，不门控。 */
 	image: boolean;
 	/** 配乐（`generate_bgm`）：配了后端才有。 */
 	music: boolean;

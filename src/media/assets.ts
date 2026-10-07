@@ -10,16 +10,17 @@
  *       把原片搬进 `media-cache/sprite-sources/`（重抠的前提）。
  *
  * 两个入口共用这一份实现：
- * - **搭台助手两步**：`generate_image` 只产草稿（一次出几张候选、用户挑一张），挑中的才 `commit_asset`；
- * - **剧作家一步**：`generate()` = `draft` + `commit` 一次做完（那边的 id 是调用时就定下的，
- *   没有「让用户在候选里挑」这回事）。
+ * - **原子流**：`generate_image` 只产候选（纯生成，不绑定剧目目标、不抠底）；`cut` 抠底；
+ *   `import_asset` 把一张图 `register` 入库（背景/插图直接登记，立绘登记已抠好的透明 PNG）；
+ * - **一步入库**：`generate()` = `ensureNeutral` + `draft` + `commit` 一次做完（`generate_asset` 用它；
+ *   调用时就声明了最终 id，没有「让用户在候选里挑」这回事）。
  *
  * 抽成可注入的纯类（`dir` + 后端 + 调参），不在模块里握任何全局状态：插件按会话工作目录现建。
  */
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, extname, join } from 'node:path';
+import { dirname, extname, join, relative } from 'node:path';
 import {
 	DEFAULT_SPRITE_FRAMING,
 	DEFAULT_SPRITE_STATURE,
@@ -151,7 +152,8 @@ export interface AssetTarget {
 /** 一张草稿：图已经出好（立绘也抠好了底），但还没进 `assets/`。 */
 export interface DraftedAsset {
 	draftId: string;
-	kind: AssetKind;
+	/** 剧目目标；通用出图（`createGeneric`）没有目标，缺省。 */
+	kind?: AssetKind;
 	/** 剧目内相对路径（`media-cache/drafts/<id>/image.png`）。 */
 	path: string;
 	/** 绝对路径：回复里贴 markdown 图片用它（GUI 按工作区路径解析）。 */
@@ -175,6 +177,8 @@ export interface GeneratedAsset {
 	 */
 	autoNeutral?: GeneratedAsset;
 	cutout?: { coverage: number; figureHeight: number };
+	/** 立绘抠底前原片在留底库里的剧目内相对路径（`media-cache/sprite-sources/…`）；没有则缺省。 */
+	sourcePath?: string;
 }
 
 /** `assets/generated.json` 的一条：这张图当初用什么描述生成、落在哪。 */
@@ -211,7 +215,8 @@ interface ResolvedReference {
 
 interface DraftRecord {
 	draftId: string;
-	kind: AssetKind;
+	/** 剧目目标；通用出图的记录没有它。 */
+	kind?: AssetKind;
 	name?: string;
 	spriteId?: string;
 	variant?: string;
@@ -238,9 +243,16 @@ export interface PlayAssetsOptions {
 	tuning?: Partial<CutoutTuning>;
 }
 
+/**
+ * 出图去重表：key 是「剧目根 + 目标」。
+ *
+ * 必须挂在**模块级**而不是 `PlayAssets` 实例上：工具每次调用都现建一个 `PlayAssets`，
+ * 去重表若挂在实例上，两次调用各锁各的，等于没锁（同一目标会被并发出两张、白烧配额）。
+ */
+const generationInflight = new Map<string, Promise<GeneratedAsset>>();
+
 export class PlayAssets {
 	constructor(private readonly opts: PlayAssetsOptions) {}
-
 	private get dir(): string {
 		return this.opts.dir;
 	}
@@ -275,7 +287,7 @@ export class PlayAssets {
 			}
 			if (spec.variant !== NEUTRAL && !(await this.existing(spec.kindPath, NEUTRAL))) {
 				throw new Error(
-					`${spec.spriteId} 还没有入库的 ${NEUTRAL} 定妆照：先出定妆照候选、挑一张用 commit_asset 采用，再派生差分。`,
+					`${spec.spriteId} 还没有入库的 ${NEUTRAL} 定妆照：先出定妆照候选、挑一张用 import_asset 采用，再派生差分。`,
 				);
 			}
 		}
@@ -309,23 +321,67 @@ export class PlayAssets {
 	 * 与 `draft` 的两处不同：进来先 `ensureNeutral`（差分的定妆照缺了就顺手补一张），
 	 * 同一最终目标的并发只跑一次（`inflight`；`draft` 不去重——同一目标并发出三张候选正是它要的）。
 	 */
-	async generate(target: AssetTarget, prompt: string): Promise<GeneratedAsset> {
+	async generate(target: AssetTarget, prompt: string, opts: { description?: string } = {}): Promise<GeneratedAsset> {
 		const spec = await this.resolve(target);
-		const key = `${spec.kindPath}/${spec.stem}`;
-		const running = this.inflight.get(key);
+		// 去重键带剧目根：去重表是**模块级**的（工具每次调用现建 PlayAssets，挂在实例上等于没挂）。
+		const key = `${this.dir}\u0000${spec.kindPath}/${spec.stem}`;
+		const running = generationInflight.get(key);
 		if (running) return running;
 		const job = (async (): Promise<GeneratedAsset> => {
 			const auto = await this.ensureNeutral(spec, prompt);
 			const draft = await this.draft(target, prompt);
 			const committed = await this.commit(draft.draftId);
+			if (opts.description?.trim()) await this.declareDescription(spec, opts.description.trim());
 			return auto ? { ...committed, autoNeutral: auto } : committed;
 		})();
-		this.inflight.set(key, job);
+		generationInflight.set(key, job);
 		try {
 			return await job;
 		} finally {
-			if (this.inflight.get(key) === job) this.inflight.delete(key);
+			if (generationInflight.get(key) === job) generationInflight.delete(key);
 		}
+	}
+
+	/**
+	 * **通用出图**：只把 prompt 变成一张候选图，不绑任何剧目目标（背景 / 立绘 / 差分），
+	 * 也不做色键底、身份锁、自动补 neutral 这些剧目后缀——图落在候选区，等 `register` 入库。
+	 *
+	 * `generate_image` 走这条路；`register` 也用它登记「用别的模型 / 工具出的图」。
+	 */
+	async createGeneric(
+		prompt: string,
+		opts: { references?: string[]; aspectRatio?: ImageAspect; size?: string; model?: string } = {},
+	): Promise<DraftedAsset> {
+		const backend = this.imageBackend();
+		const aspect = opts.aspectRatio ?? '16:9';
+		const references = await this.referencesGeneric(opts.references);
+		const full = references.length > 0 ? `${prompt.trim()}. ${genericReferenceSuffix(references)}` : prompt.trim();
+		const play = loadPlaySync(this.dir)?.config.image;
+		const model = opts.model?.trim() || play?.model;
+		const size = opts.size?.trim() || play?.size;
+		const generated = await backend.generate({
+			prompt: full,
+			aspectRatio: aspect,
+			...(references.length > 0 ? { references: references.map(({ mimeType, data }) => ({ mimeType, data })) } : {}),
+			...(model ? { model } : {}),
+			...(size ? { size } : {}),
+		});
+		const draftId = randomUUID();
+		const dir = this.draftDir(draftId);
+		await mkdir(dir, { recursive: true });
+		const imageExt = extOf(mimeOfBuffer(generated.data));
+		await writeFile(join(dir, `image${imageExt}`), generated.data);
+		const record: DraftRecord = {
+			draftId,
+			aspect,
+			prompt: full,
+			imageExt,
+			createdAt: new Date().toISOString(),
+		};
+		await writeFile(join(dir, 'draft.json'), `${JSON.stringify(record, null, 2)}\n`);
+		await this.pruneDrafts();
+		const rel = join('media-cache', 'drafts', draftId, `image${imageExt}`);
+		return { draftId, path: rel.split(/[\\/]/).join('/'), absPath: join(dir, `image${imageExt}`), aspect };
 	}
 
 	/**
@@ -389,26 +445,6 @@ export class PlayAssets {
 	}
 
 
-	/** 同目标并发去重（只在这一层：草稿要的是「并发出三张」）。 */
-	private readonly inflight = new Map<string, Promise<GeneratedAsset>>();
-
-	/**
-	 * 原地重抠立绘：拿抠底前留的原片重跑一遍抠底，覆盖 `assets/` 里那张透明 PNG。
-	 *
-	 * 只为「图挺好、抠得脏」而存在：这种没法靠重新出图解决（重画出来是另一张图，用户刚点头的
-	 * 那张会被顶掉，还白烧一份配额）。没留底的（更早出的图、用户自己放的图）如实报错。
-	 */
-	async recut(target: AssetTarget, tuning?: Partial<CutoutTuning>): Promise<GeneratedAsset> {
-		this.imageBackend();
-		const spec = await this.resolve({ ...target, kind: 'sprite' });
-		const source = await this.readSource(spec);
-		const cut = await cutout(source.data, resolveTuning({ ...this.opts.tuning, ...tuning }));
-		const written = await this.persist(spec, cut.data, '.png');
-		// 重抠不产生新画面：台账里那条「当初用什么描述出的」不许动（AIVN 同口径：台账的写者
-		// 只有出图与 BGM）。重抠的事实在工具回执里说，不进台账。
-		return { ...written, cutout: { coverage: cut.coverage, figureHeight: cut.figureHeight } };
-	}
-
 	/**
 	 * 把一张草稿正式入库：写 `assets/`、补素材表声明、记生图台账、把留底原片搬进
 	 * `media-cache/sprite-sources/`。
@@ -419,7 +455,7 @@ export class PlayAssets {
 	async commit(draftId: string): Promise<GeneratedAsset> {
 		const draft = await this.loadDraft(draftId);
 		const spec = await this.resolve({
-			kind: draft.kind,
+			kind: draft.kind!,
 			name: draft.name,
 			spriteId: draft.spriteId,
 			variant: draft.variant,
@@ -429,14 +465,93 @@ export class PlayAssets {
 		});
 		const dir = this.draftDir(draftId);
 		const bytes = await readFile(join(dir, `image${draft.imageExt}`));
+		let sourcePath: string | undefined;
 		if (spec.kind === 'sprite' && draft.sourceExt) {
 			await this.keepSource(spec, await readFile(join(dir, `source${draft.sourceExt}`)), draft.sourceExt);
+			sourcePath = `media-cache/sprite-sources/${spec.spriteId}/${spec.stem}${draft.sourceExt}`;
 		}
 		const written = await this.persist(spec, bytes, draft.imageExt);
 		if (spec.kind === 'sprite') await this.declareSprite(spec);
 		await this.recordPrompt(spec, written.path, draft.prompt);
 		await this.markCommitted(draftId, draft);
-		return written;
+		return sourcePath ? { ...written, sourcePath } : written;
+	}
+
+	/**
+	 * 抠底：把一张**纯色底**图变成透明 PNG，写到 `output`（不给就写到候选区），返回输出路径。
+	 *
+	 * 纯图像处理，**只写输出、不改源图**，也不是素材登记的必经步骤——背景 / 插图直接 `register` 即可；
+	 * 立绘先 `cut`、再 `register` 那张透明 PNG。`opts.tuning` 之外可传一次性调参。
+	 */
+	async cutFile(
+		source: string,
+		output: string | undefined,
+		tuning?: Partial<CutoutTuning>,
+	): Promise<{ path: string; absPath: string; cutout: { coverage: number; figureHeight: number } }> {
+		const src = source.trim();
+		if (src === '') throw new Error('cut 要 source（一张纯色底图的路径）');
+		const abs = resolveInPlay(this.dir, src);
+		if (!abs) throw new Error(`cut 的 source 路径越界：${src}（只能给剧目内的相对路径）`);
+		if (!existsSync(abs)) throw new Error(`cut 的 source 找不到：${src}`);
+		const cut = await cutout(await readFile(abs), resolveTuning({ ...this.opts.tuning, ...tuning }));
+
+		const outAbs = output?.trim()
+			? (resolveInPlay(this.dir, output) as string | null)
+			: join(this.draftDir(randomUUID()), 'cut.png');
+		if (!outAbs) throw new Error(`cut 的 output 路径越界：${output}（只能给剧目内的相对路径）`);
+		await mkdir(dirname(outAbs), { recursive: true });
+		await writeFile(outAbs, cut.data);
+		return {
+			path: relative(this.dir, outAbs).split(/[\\/]/).join('/'),
+			absPath: outAbs,
+			cutout: { coverage: cut.coverage, figureHeight: cut.figureHeight },
+		};
+	}
+
+	/**
+	 * 把一张图**登记**成剧目素材（不抠底）：写 `assets/`、补素材表（呈现声明 + 描述）、记台账。
+	 *
+	 * - `source`：剧目内相对路径 / http(s) 网址。立绘应给**已抠好的透明 PNG**（外部来源想自动抠底，
+	 *   先调 `cut`）。
+	 * - `target`：落位（kind + 主体/差分/取景体量），**始终显式给**——登记这一步不认识「出图意图」。
+	 * - `opts.original`：立绘的**抠底前原片**路径；给了就留底到 `media-cache/sprite-sources/`，
+	 *   日后可 `cut` 重抠（不给则不保证可重抠）。
+	 */
+	async register(
+		source: string,
+		target: AssetTarget,
+		opts: { description?: string; prompt?: string; original?: string } = {},
+	): Promise<GeneratedAsset> {
+		const src = source.trim();
+		if (src === '') throw new Error('import_asset 要 source（剧目内相对路径 / http(s) 网址）');
+		const spec = await this.resolve(target);
+
+		let image: Buffer;
+		if (/^https?:\/\//i.test(src)) {
+			image = (await fetchWebImage(src)).data;
+		} else {
+			const abs = resolveInPlay(this.dir, src);
+			if (!abs) throw new Error(`source 路径越界：${src}（只能给剧目内相对路径或 http(s) 网址）`);
+			if (!existsSync(abs)) throw new Error(`source 找不到：${src}（剧目里没有这个文件）`);
+			image = await readFile(abs);
+		}
+
+		let sourcePath: string | undefined;
+		if (opts.original?.trim()) {
+			const oAbs = resolveInPlay(this.dir, opts.original.trim());
+			if (!oAbs) throw new Error(`original 路径越界：${opts.original}`);
+			if (!existsSync(oAbs)) throw new Error(`original 找不到：${opts.original}`);
+			const raw = await readFile(oAbs);
+			const srcExt = extOf(mimeOfBuffer(raw));
+			await this.keepSource(spec, raw, srcExt);
+			sourcePath = `media-cache/sprite-sources/${spec.spriteId}/${spec.stem}${srcExt}`;
+		}
+
+		const written = await this.persist(spec, image, spec.kind === 'sprite' ? '.png' : extOf(mimeOfBuffer(image)));
+		if (spec.kind === 'sprite') await this.declareSprite(spec);
+		if (opts.description?.trim()) await this.declareDescription(spec, opts.description.trim());
+		await this.recordPrompt(spec, written.path, (opts.prompt ?? '').trim());
+		return sourcePath ? { ...written, sourcePath } : written;
 	}
 
 	/* ── 音频 ─────────────────────────────────────────────────────────────── */
@@ -520,6 +635,15 @@ export class PlayAssets {
 	private async references(spec: AssetSpec, explicit: string[] | undefined): Promise<ResolvedReference[]> {
 		const wanted = [...(explicit ?? [])];
 		if (spec.kind === 'sprite' && spec.variant !== NEUTRAL) wanted.unshift(spec.spriteId!);
+		return this.resolveReferences(wanted);
+	}
+
+	/** 通用出图的垫图：只认显式给的（路径 / 网址 / 主体 id），不吃「差分自动垫 neutral」。 */
+	private async referencesGeneric(explicit: string[] | undefined): Promise<ResolvedReference[]> {
+		return this.resolveReferences([...(explicit ?? [])]);
+	}
+
+	private async resolveReferences(wanted: string[]): Promise<ResolvedReference[]> {
 		if (wanted.length > MAX_REFERENCES) {
 			throw new Error(`垫图最多 ${MAX_REFERENCES} 张，这次给了 ${wanted.length} 张`);
 		}
@@ -620,7 +744,7 @@ export class PlayAssets {
 		return { kind: spec.kind, path: `assets/${path}`, absPath: abs, replaced };
 	}
 
-	/** 抠底前原片留一份：`recut_sprite` 只认 `media-cache/sprite-sources/<主体>/`。 */
+	/** 抠底前原片留一份：重抠时从 `media-cache/sprite-sources/<主体>/` 取原图。 */
 	private async keepSource(spec: AssetSpec, data: Buffer, ext: string): Promise<void> {
 		if (!spec.spriteId) return;
 		const dir = join(this.dir, 'media-cache', 'sprite-sources', spec.spriteId);
@@ -631,21 +755,6 @@ export class PlayAssets {
 			}
 		}
 		await writeFile(join(dir, `${spec.stem}${ext}`), data);
-	}
-
-	/** 重抠的原片：先看引擎留的 `media-cache/sprite-sources/`（立绘只能从这里重抠）。 */
-	private async readSource(spec: AssetSpec): Promise<{ data: Buffer; ext: string }> {
-		const dir = join(this.dir, 'media-cache', 'sprite-sources', spec.spriteId!);
-		const hit = existsSync(dir)
-			? (await readdir(dir)).find((file) => file.replace(/\.\w+$/, '') === spec.stem)
-			: undefined;
-		if (!hit) {
-			throw new Error(
-				`没有 ${spec.spriteId}/${spec.stem} 的抠底前原片（media-cache/sprite-sources/）：` +
-					'用户自己放的图与更早出的图没法重抠，只能重新出图。',
-			);
-		}
-		return { data: await readFile(join(dir, hit)), ext: extname(hit) };
 	}
 
 	/** 素材表里的呈现声明：立绘级（framing/stature/title）+ 差分级的画幅覆盖。 */
@@ -673,6 +782,12 @@ export class PlayAssets {
 			}
 			return next;
 		});
+	}
+
+	/** 素材表里的一句话画面描述：剧作家挑素材全靠它。立绘落到 `<主体>/<差分>` 键上。 */
+	private async declareDescription(spec: AssetSpec, description: string): Promise<void> {
+		const key = spec.kind === 'sprite' ? `${spec.spriteId}/${spec.variant}` : spec.stem;
+		await this.withManifest((current) => ({ ...current, [key]: { ...current[key], description } }));
 	}
 
 	/** 台账：这张图当初用什么描述出的（`assets/generated.json`，只增条目不覆盖别人的键）。 */

@@ -56,7 +56,7 @@ interface Group {
 const GROUPS: readonly Group[] = [
 	{
 		title: 'P0 · 决定能力开不开',
-		blurb: '不配就没有那项能力：对应的工具不注册，搭台助手的提示词里也不提它。Key 类字段只写不回显，留空 = 保持现状。',
+		blurb: '不配就没有那项能力：对应的工具不注册，两个预设的提示词里也不提它。Key 类字段只写不回显，留空 = 保持现状。',
 		fields: [
 			{
 				field: 'ttsKeys',
@@ -69,7 +69,7 @@ const GROUPS: readonly Group[] = [
 				field: 'searchKeys',
 				multiple: true,
 				label: 'Exa 检索 Key',
-				hint: '配了搭台助手才有 web_search；多把用逗号分隔。留空可走环境变量 DSH_AIVN_EXA_KEYS',
+				hint: '配了才有 web_search；多把用逗号分隔。留空可走环境变量 DSH_AIVN_EXA_KEYS',
 				kind: 'secret',
 			},
 			{
@@ -87,7 +87,7 @@ const GROUPS: readonly Group[] = [
 			{
 				field: 'imageModel',
 				label: '生图模型',
-				hint: '同上；配齐后搭台助手多 generate_image / commit_asset / recut_sprite，剧作家多同步出图',
+				hint: '同上；配齐后两个预设都拿到 generate_image / generate_asset；cut / import_asset 不门控，没配生图也能抠底与登记外部图',
 				kind: 'text',
 			},
 			{
@@ -116,8 +116,8 @@ const GROUPS: readonly Group[] = [
 			},
 			{
 				field: 'shell',
-				label: '搭台助手命令行（bash）',
-				hint: '开了才给搭台助手装 tool-bash。bash 是预设的「一行」，改完只对**新建**的搭台助手会话生效',
+				label: 'Agent 命令行（bash）',
+				hint: '开了才给两个预设装 tool-bash。bash 是预设的「一行」，改完只对**新建**会话生效',
 				kind: 'switch',
 			},
 		],
@@ -161,7 +161,7 @@ const SECRET_FIELDS = new Set(['ttsKeys', 'searchKeys', 'imageApiKey', 'musicApi
 /** 这些字段存的是「有没有配」而不是值本身，顶部那行能力状态灯据此现算。 */
 const LIGHTS: readonly { label: string; hint: string; on: (value: Record<string, unknown>, configured: ReadonlySet<string>) => boolean }[] = [
 	{ label: '语音', hint: '台词语音与音色库', on: (_value, configured) => configured.has('ttsKeys') },
-	{ label: '检索', hint: '搭台助手的 web_search', on: (_value, configured) => configured.has('searchKeys') },
+	{ label: '检索', hint: 'web_search', on: (_value, configured) => configured.has('searchKeys') },
 	{
 		label: '生图',
 		hint: '地址与模型都给齐才算',

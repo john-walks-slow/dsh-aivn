@@ -34,7 +34,7 @@ export interface AssetCapabilities {
 }
 
 /**
- * 按搭台助手的能力面算素材位：`image` 跟着配置走，`library` 恒假（应用级素材库永久不做），
+ * 按预设的能力面算素材位：`image` 跟着配置走，`library` 恒假（应用级素材库永久不做），
  * 于是四类素材来源里带库的那几支措辞永远走不到，生图那几支跟着真实后端开关。
  */
 export function assetCapabilitiesOf(can: { image: boolean }): AssetCapabilities {

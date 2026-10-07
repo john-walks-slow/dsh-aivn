@@ -6,7 +6,7 @@
  * 值最后会变成舞台根的内联 CSS 变量，白名单与格式校验（`style-tokens.ts`）是唯一的口子。
  *
  * 写完立刻往这座剧目的所有舞台会话推一份全量皮肤快照（见 `PlayContext.broadcastStyle`：
- * 工具在搭台助手会话里跑，画面开在剧作家会话上），已经打开的舞台当场换装，不必刷新页面。
+ * 写皮肤的工具可能在没开舞台的那条会话里跑），已经打开的舞台当场换装，不必刷新页面。
  */
 import { existsSync } from 'node:fs';
 import { rm, writeFile } from 'node:fs/promises';

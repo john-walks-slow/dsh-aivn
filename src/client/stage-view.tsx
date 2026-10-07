@@ -623,7 +623,7 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 				// 插件不做谱系分支（用户定的口径：分支走 DSH 原生的「在新对话中分支」），
 				// 所以「提示」的第二岔是打断，而不是从这一行开新枝。
 				promptAlt="interrupt"
-				// 出图在搭台助手那条会话里做，舞台这排键没有落点，别摆一个点了没反应的键。
+				// 出图是模型自己调 generate_image 的事，不在这排键做，别摆一个点了没反应的键。
 				showGenerate={false}
 				onView={noop}
 				onPrompt={(text, mode) => void direct(mode === 'interrupt' ? 'interrupt' : 'guide', text)}

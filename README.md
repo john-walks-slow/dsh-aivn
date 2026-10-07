@@ -41,7 +41,7 @@ dsh plugin --profile web add github:john-walks-slow/dsh-aivn
 - **客户端半边**（「AIVN」tab）挂在 `conversation.view` 槽上，需要 `dsh-web-app`。它在
   `package.json` 的 `dsh.client{platform:"web"}` 里声明，不走 Loader。
 
-可配的有五处——**语音**、**联网检索**、**生图**、**配乐**、**搭台助手的命令行**；都不配也能照常跑（只是那几项能力没有，对应工具不注册、提示词不提）。
+可配的有六处——**语音**、**联网检索**、**生图**、**配乐**、**命令行**、**按预设禁用工具**；前五项都不配也能照常跑（只是那几项能力没有，对应工具不注册、提示词不提），禁用项默认空。
 
 两种改法，改完都**就地生效**（不用重启 dsh）：
 
@@ -69,22 +69,25 @@ dsh plugin --profile web add github:john-walks-slow/dsh-aivn
     musicModel: flow-music-lyria-3.5
     musicApiKey: ""
     musicTimeoutMs: 240000
+    playwriterDisabledTools: ""             # 按预设禁用工具（逗号分隔的工具名），默认空 = 两预设一致
+    stagehandDisabledTools: ""
 ```
 
-**配置面是扁平的 17 个字段**（DSH 设置界面的控件只认顶层字段，嵌套写法它寻址不到）：
+**配置面是扁平的 19 个字段**（DSH 设置界面的控件只认顶层字段，嵌套写法它寻址不到）：
 
 | 配置项 | 默认 | 给了会怎样 | 环境变量兜底 |
 |---|---|---|---|
-| `ttsKeys` | 空 | 舞台有语音开关，搭台助手多一个 `list_voices`（音色库与合成共用这池 key） | `DSH_AIVN_TTS_KEYS` |
+| `ttsKeys` | 空 | 舞台有语音开关，两个预设多一个 `list_voices`（音色库与合成共用这池 key） | `DSH_AIVN_TTS_KEYS` |
 | `ttsBaseUrl` / `ttsModel` / `ttsConcurrency` | Fish 官方 / `s2.1-pro-free` / `2` | — | — |
-| `searchKeys` | 空 | 搭台助手多一个 `web_search`（一次调用同时拿回结果与正文） | `DSH_AIVN_EXA_KEYS` |
+| `searchKeys` | 空 | 两个预设多一个 `web_search`（一次调用同时拿回结果与正文） | `DSH_AIVN_EXA_KEYS` |
 | `searchBaseUrl` | `https://api.exa.ai` | 换代理 / 镜像时改 | — |
-| `shell` | `false` | 搭台助手的预设里那一行 `tool-bash` 真装上（默认关，与 AIVN 的 `defaultOff` 同口径）。**bash 是预设的「一行」，只对新建的搭台助手会话生效** | — |
-| `imageFormat` / `imageBaseUrl` / `imageModel` | — | **地址与模型都给齐**才有生图：搭台助手多 `generate_image` / `commit_asset` / `recut_sprite`，剧作家多一个**同步**的 `generate_image`。格式是接口协议形状，不是产品名 | — |
+| `shell` | `false` | 两个预设的 `tool-bash` 行真装上（默认关，与 AIVN 的 `defaultOff` 同口径）。**bash 是预设的「一行」，只对新建会话生效** | — |
+| `imageFormat` / `imageBaseUrl` / `imageModel` | — | **地址与模型都给齐**才有 `generate_image` / `generate_asset`（两个预设都有）；`cut` / `import_asset` 不依赖它。格式是接口协议形状，不是产品名 | — |
 | `imageSize` | `1K` | 档位 `1K`/`2K`/`4K`（K 大写）或字面像素 `1536x1024`；gemini 格式只认档位，openai/modelslab 两种都收（modelslab 封顶 1024） | — |
 | `imageApiKey` / `imageTimeoutMs` | 空 / `180000` | 本机网关不校验就把 key 留空（不带鉴权头）；出图慢就把超时调大 | — |
 | `musicBaseUrl` / `musicModel` | — | 都给齐才有 `generate_bgm`（只有 Gemini 形状，没有 `format`） | — |
 | `musicApiKey` / `musicTimeoutMs` | 空 / `240000` | 同上；一首曲子实测约 84 秒 | — |
+| `playwriterDisabledTools` / `stagehandDisabledTools` | 空 | 按预设禁用工具（逗号分隔的工具名，取值为「Agent 工具」清单里的工具名）。默认空 = 两预设工具面完全一致 | — |
 | 抠底调参 | 见「素材生成」 | `DSH_AIVN_CUTOUT_TOLERANCE` / `_KEY_SMOOTH` / `_EDGE_BAND` / `_SPILL` / `_SOLID_RESIDUAL` 五个环境变量 | 同名环境变量 |
 
 key 两处都没有 = 那项能力停用：工具**不注册**、提示词里也不提。两个预设、一条 `/new-play` 命令、
@@ -125,7 +128,7 @@ key 两处都没有 = 那项能力停用：工具**不注册**、提示词里也
   只能是**让剧作家重写这一拍**：插件往会话里追加一条替换标记（`surfaceOp.replace`，与
   `dsh-rewind` 同一个手法），被作废的那一段从上下文里真的消失，模型看不到旧内容。
   代价是一次重写要花一轮 LLM（AIVN 的原地改写不花），换来的是**上下文不会和画面对不上**。
-- **生图不在这一排**：出图在搭台助手那条会话里做（`generate_image`），舞台这排键点了也没有落点，
+- **生图不在这一排**：出图在搭台助手那条会话里做（`generate_asset` / `generate_image`），舞台这排键点了也没有落点，
   所以不摆。
 
 导演说的话带自己一支来源（`dsh-aivn-director`），**不会变成一行玩家台词**：舞台的时间线上
@@ -282,9 +285,12 @@ voice: 短句，少用形容词
 
 `free` = 固定停在自由输入框，不给选项面板。
 
-**素材来源四类目前只是意向**：这一阶段没有生图、也没有跨剧目素材库，四类素材一律只能用
-手工放进 `assets/` 的那些。文风、禁忌、称呼习惯这类只能拿话说的口径写在
-`memory/always/craft.md`，不在 `play.json` 里。
+**素材来源四类是给剧作家的意向指令**：引擎按这四项把「缺素材时怎么办」写进剧作家的《写作参数》——例如 `cg: off` 让它别写 `<cg>`、`background: generate` 让它自己出图。注意两点：
+
+- **没有跨剧目素材库**（应用级 `library/` 永久不做）：`library` / `library-first` 里「用库」那一支永远走不到，会退化成「用本剧目已有的 / 出图」；
+- **生图那几支还要看有没有配生图后端**：没配时会自动改成「用已有素材或旁白交代」，不会教剧作家去调一个不存在的工具。
+
+文风、禁忌、称呼习惯这类只能拿话说的口径写在 `memory/always/craft.md`，不在 `play.json` 里。
 
 **这一段用 `edit` 定点改**（只动 `craft` 这一个键，文件里其余部分一个字节都不碰）。工具里没有
 `set_craft`：写文件就是写文件。写错的值引擎**静默当没写**——改完让搭台助手调 `validate_play`，
@@ -341,24 +347,25 @@ voice: 短句，少用形容词
 | `aivn-playwriter` | 剧作家 | 实时写 Stage DSL 的那位；它的输出被接进舞台 |
 | `aivn-stagehand` | 搭台助手 | 备料：写设定、角色卡、创作口径、挑音色、出图与入库、配乐、查资料 |
 
-两个预设的行集同构：指令文件发现（`AGENTS.md`）+ persona（就是那份提示词）+ 文件工具 +
-文件检索。**搭台助手另加两样**：技能库（自带的 `skills/`，见下）与一行默认关的 `tool-bash`
-（`shell: true` 才真装上）。剧作家两样都没有——写戏、读文件用不上。**预设里不会再列一行
-`dsh-aivn`**——宿主已经装了本插件，再来一行会把路由与事件订阅重复装一遍。
+两个预设的行集**同构**：指令文件发现（`AGENTS.md`）+ persona（就是那份提示词）+ 文件工具 +
+文件检索 + 技能库（自带的 `skills/`，见下）+ 一行默认关的 `tool-bash`（`shell: true` 才真装上）。
+**工具面也完全一致**（见「Agent 工具」），角色差别只剩 persona、注入内容与舞台管线。
+**预设里不会再列一行 `dsh-aivn`**——宿主已经装了本插件，再来一行会把路由与事件订阅重复装一遍。
 
 只有剧作家预设的会话会进舞台管线。搭台助手说什么都不上台。
 
-### 技能库（搭台助手）
+### 技能库（两个预设）
 
-插件自带两份做法速查，随包发布（`skills/`），装进搭台助手的会话：
+插件自带三份做法速查，随包发布（`skills/`），装进两个预设的会话：
 
 | 技能 | 讲什么 |
 | --- | --- |
-| `galgame-audio` | 免费 BGM / 音效去哪里找、哪档授权能商用、六大场景与常见音效类别的选源、再分发与 AI 训练红线 |
-| `galgame-visual-craft` | 画风锚点写在哪、角色外形怎么锁（头身比 / 五官 / 服装）、差分布局与命名、图单怎么写、可直接粘贴的生图提示词写法 |
+| `aivn-play-setup` | 起新剧目 / 改设定的四步做法与各文件写法（premise / craft.md / craft 段 / 角色卡 / 记忆卡 / 素材表）、craft 取值、备料顺序 |
+| `aivn-visual-craft` | 画风锚点写在哪、角色外形怎么锁（头身比 / 五官 / 服装）、差分布局与命名、图单怎么写、可直接粘贴的生图提示词写法 |
+| `aivn-audio` | 免费 BGM / 音效去哪里找、哪档授权能商用、六大场景与常见音效类别的选源、再分发与 AI 训练红线 |
 
-清单进 system prompt（只列名字与一句话），模型觉得对上了才加载全文——两份都是长篇，不该每轮全读。
-`includeDefaultRoots: false` 是刻意的：宿主上那几十个本机运维技能不该挤进搭台助手的清单。
+清单进 system prompt（只列名字与一句话），模型觉得对上了才加载全文——三份都是长篇，不该每轮全读。
+`includeDefaultRoots: false` 是刻意的：宿主上那几十个本机运维技能不该挤进这两个预设的清单。
 
 ## 上下文注入
 
@@ -403,34 +410,44 @@ DSH 的「在新对话中分支」与舞台重建（只重放助手文本）都�
 剧作家的 A 区每轮注入《素材清单》与《角色表》（id + 描述），搭台助手看《当前状态》的文件清单、
 要描述就 `read assets/manifest.json`。
 
-| 工具 | 谁有 | 作用 |
-| --- | --- | --- |
-| `validate_play` | 两个预设 | 剧目自查：`play.json` 读不读得出来（缺字段、坏 JSON 会给原因）、`craft` 里有没有引擎不认的取值、状态文件好不好、故事前提、角色卡张数、立绘、背景、素材条数。刚写过剧目文件之后调它。**没有硬门槛**，缺什么都能开演 |
-| `set_stage_style` | 搭台助手 | 写剧目根的 `theme.json`（舞台皮肤：台词条、选项卡、衬底、圆角、字体、主色），写完把全量皮肤推给同剧目已打开的舞台。三态：省略 = 不动、给值 = 改、`null` = 回默认；不带参数调用 = 看当前值。值格式与可设置的键见上 |
-| `list_voices` | 搭台助手（配了 `tts.keys` 才有） | 查 Fish 音色库挑音色：按语言 / 标签 / 标题关键词取窗口，本地按 `gender` 筛，按热度排序出前 25 条。挑好的 id 填进角色卡的 `voice` |
-| `web_search` | 搭台助手（配了 `search.keys` 才有） | 联网检索：一次调用同时拿回结果与正文。只查剧目之外的事实——设定、角色、剧情都在工作区文件里 |
-| `generate_image` | 搭台助手（配了生图才有） | 出**草稿**：背景 / 插图 / 立绘都能出，立绘自动抠底。一次出几张候选让用户挑，挑中的才入库 |
-| `commit_asset` | 搭台助手 | 把挑中的那张草稿正式入库：写 `assets/`、补素材表声明、记台账。**用户点头之后才调** |
-| `recut_sprite` | 搭台助手 | 拿立绘**入库时留的原片**原地重抠（画面一个像素不变、不烧配额），用于「图挺好、抠得脏」 |
-| `generate_bgm` | 搭台助手（配了音乐才有） | 生成一首 BGM 落 `assets/bgm/`；**同步等待**（约 84 秒），`name` 就是剧本里 `<scene bgm="…">` 引用的 id |
-| `generate_image` | 剧作家（配了生图才有） | 演出中缺图：**同步等图**（70–140 秒，这一轮停在那里）、出图即入库，回执给最终路径——回执回来之后那一行剧本才引用得到它 |
+**两个预设装同一套 AIVN 工具**（工具清单见 `src/tool-catalog.ts`）；「门控」列只有配了对应后端 / key 才注册的项。
+按预设禁用某几个工具，用插件配置 `playwriterDisabledTools` / `stagehandDisabledTools`（逗号分隔的工具名，默认空 = 两预设完全一致）。
 
-`list_voices` / `web_search` 在没配 key 时**不注册**，提示词里也不提它们——不会教模型去调一个
-不存在的工具。文件工具（`read` / `write` / `edit` / `glob` / `grep` / `read_image`）由预设的行集提供，
-两个预设都有：搭台助手用 `read_image` 看画、看用户放进来的图。
+| 工具 | 门控 | 作用 |
+| --- | --- | --- |
+| `validate_play` | — | 剧目自查：`play.json` 读不读得出来（缺字段、坏 JSON 会给原因）、`craft` 里有没有引擎不认的取值、状态文件好不好、故事前提、角色卡张数、立绘、背景、素材条数、出图台账里有没有指向不存在文件的登记。刚写过剧目文件之后调它。**没有硬门槛**，缺什么都能开演 |
+| `set_stage_style` | — | 写剧目根的 `theme.json`（舞台皮肤：台词条、选项卡、衬底、圆角、字体、主色），写完把全量皮肤推给同剧目已打开的舞台。三态：省略 = 不动、给值 = 改、`null` = 回默认；不带参数调用 = 看当前值。值格式与可设置的键见上 |
+| `generate_image` | 生图后端 | **纯生成**：一段画面描述 → 一张**候选图**（回执给文件路径与预览），返回时**不绑定**任何剧目目标、不抠底、不登记。画幅用 `aspectRatio`（默认 16:9）；`references` 可垫主体 id / 剧目内路径 / http(s) 网址。落成素材另走 `cut` / `import_asset`（或直接 `generate_asset`） |
+| `cut` | — | **抠底**：纯色底的图 → 透明 PNG（只写输出，**不改源图**）。`source` 给剧目内相对路径，`output` 不给就写到候选区。五档调参见下（`tolerance` / `spill` / `edgeBand` / `keySmooth` / `solidResidual`）。立绘登记前先跑它；抠脏了就对着**同一张**源图重调再跑。**不依赖生图后端** |
+| `import_asset` | — | 把一张**图登记**成剧目素材：写 `assets/`、补素材表（呈现声明 + 描述）、记台账，**不抠底**。`source` 给剧目内相对路径或 http(s) 网址；落位**显式给**——`kind`（background / cg / sprite）必填，立绘再给 `spriteId` / `variant` / `framing` / `stature` / `title`。立绘要传**已抠好的透明 PNG**（外部来源先 `cut`）；`original` 可留抠底前原片以便重抠。**不依赖生图后端** |
+| `generate_asset` | 生图后端 | **一键**：出图 +（立绘）自动抠底 + 登记，一次完成，回执给最终素材路径。参数与 `import_asset` 的落位一致（`kind` + `name` / `spriteId` / `variant` / `framing` / `stature`）。**只有这条路**由引擎自动做色键底、身份锁、差分垫 neutral；同名素材已有则直接跳过 |
+| `generate_bgm` | 音乐后端 | 生成一首 BGM 落 `assets/bgm/`；**同步等待**（约 84 秒），`name` 就是剧本里 `<scene bgm="…">` 引用的 id |
+| `list_voices` | `tts.keys` | 查 Fish 音色库挑音色：按语言 / 标签 / 标题关键词取窗口，本地按 `gender` 筛，按热度排序出前 25 条。挑好的 id 填进角色卡的 `voice` |
+| `web_search` | `search.keys` | 联网检索：一次调用同时拿回结果与正文。只查剧目之外的事实——设定、角色、剧情都在工作区文件里 |
+
+`list_voices` / `web_search` / `generate_image` / `generate_asset` / `generate_bgm` 在没配对应 key / 后端时
+**不注册**，提示词里也不提它们。**`validate_play` / `set_stage_style` / `cut` / `import_asset` 不门控**：
+它们只读写剧目文件、跑抠底，不碰生图后端——所以没配生图也能用外部工具出图、`cut` 抠底、`import_asset` 登记。
+文件工具（`read` / `write` / `edit` / `glob` / `grep` / `read_image`）由预设的行集提供，两个预设都有。
 
 ## 素材生成
 
-配了 `image` 之后，两个角色都能出图；**同一份实现、两种等待策略**：
+「**像素从哪来**」和「**像素怎么变成剧目素材**」是两步，工具也是分开的：
 
-| | 搭台助手 | 剧作家 |
+- **一键（`generate_asset`）**：出图 +（立绘）自动抠底 + 登记，一步到位——「就想要一张能用的图」走这条。
+- **原子三件套（`generate_image` / `cut` / `import_asset`）**：各自单一职责，可自由组合——
+  要出候选让用户挑、图来自别处（下载 / 别的模型）、或要单独重抠时走这条。
+
+| | 一键（`generate_asset`） | 原子（`generate_image` → `cut` → `import_asset`） |
 | --- | --- | --- |
-| 流程 | **两步**：`generate_image` 出草稿 → 用户挑 → `commit_asset` 入库 | **一步**：`generate_image` 同步等图、出图即入库 |
-| 为什么要这样 | 一次出三张候选，没被挑中的不该在素材表里留下痕迹 | 演出中缺图就当场补，调用本身就声明了最终 id |
+| 来源 | 配置的生图后端 | `generate_image` 的候选 / 剧目内路径 / http(s) 网址 |
+| 剧目感知 | 自动做色键底、身份锁、差分垫 neutral、抠底 | 无：立绘的纯色底要自己在 prompt 里写清，抠底单独调 `cut` |
+| 落位 | 参数显式给（kind / 主体 / 差分 / 取景体量） | `import_asset` 的参数显式给 |
+| 入库 | 一步到位 | 分步：`cut` 抠底 → `import_asset` 登记 |
 
-剧作家这一侧是**同步**的（一次 70–140 秒，这一轮就停在那里）。AIVN 那边是后台排产 + 到货广播，
-插件是 DSH 会话模型、没有回合之外的注入通道，所以宁可等——至少回执说的是真话：模型拿到回执时，
-那个素材 id 确实已经在盘上、这一轮就引用得到。
+出图**同步等待**（一次 70–140 秒）。「一次出多张候选让用户挑」= 同一目标多调几次 `generate_image`，
+把预览贴给用户；挑中的那张再落位——背景 / 插图直接 `import_asset`，立绘先 `cut` 再 `import_asset`。
+**没被挑中的候选不在素材表里留痕。**
 
 ### 目录与台账
 
@@ -441,7 +458,7 @@ play/
 │   └── manifest.json             ← 素材描述与立绘呈现声明（framing / stature / title）
 └── media-cache/                  ← 中间物，不进 git，整目录删掉不心疼
     ├── drafts/<草稿id>/{image.*, source.*, draft.json}
-    ├── sprite-sources/<主体id>/  ← 立绘抠底前的原片（recut_sprite 只认它）
+    ├── sprite-sources/<主体id>/  ← 立绘抠底前的原片（`import_asset` 的 `original` 与自动补 neutral 落这里；重抠从它取）
     └── tts/                      ← 语音缓存（内容寻址）
 ```
 
@@ -465,9 +482,10 @@ play/
   它是所有差分的垫图基准，一条 closeup 不该把整个主体的摆位带跑。
 - **体量 `stature`**（`small` / `normal` / `large` / `huge`）只管台上站多大，与取景是两件事：
   机甲是「全身取景 + 巨大」，猫是「方形取景 + 小」。
-- **抠底自动**：立绘出完会跑一遍色键抠底（`src/media/cutout.ts`，纯色底 + 全局色键 + 边缘覆盖率
-  反解），落成透明 PNG。抠不干净时**不要重新出图**——重画出来是另一张画，用 `recut_sprite`
-  拿留底原片原地重抠，五档调参对应五个环境变量：
+- **抠底**：立绘必须是透明 PNG。走 `generate_asset` 时引擎自动抠（色键底 + 全局色键 + 边缘覆盖率
+  反解，`src/media/cutout.ts`）；走原子路径时在 `generate_image` 出候选后调 `cut`。抠不干净时**不要重新出图**——
+  重画出来是另一张画：对**同一张源图**重调 `cut` 的参数再跑（源图在 `media-cache/sprite-sources/<主体id>/`，
+  或 `import_asset` 时用 `original` 留底）。五档调参对应五个环境变量：
 
 | 环境变量 | 默认 | 作用 |
 | --- | --- | --- |
@@ -655,10 +673,10 @@ dsh-e2e stop
   也从会话面重铺到同一个点。判据取自会话日志的会话面折叠与自挂的 SSE 探针。
 - `injection`（`dsh-e2e run e2e/verify-injection.mjs`）——剧作家的上下文注入：从会话日志断言
   A 区六段与【状态】都进了系统提示词、内容取自夹具文件而不是「自己去读」，并核对工具面
-  （备料工具归搭台助手、素材清单不进工具面——它在注入段里）。
+  （两个预设装同一套 AIVN 工具、素材清单不进工具面——它在注入段里）。
 - `stagehand`（`npm run e2e:stagehand`）——搭台助手：断言 persona 章节、《当前状态》注入
-  （文件清单 + 就绪报告）、随包技能库两份都在技能清单里、工具面是搭台助手那一套
-  （且没有剧作家的收束口）。e2e 实例**没配生图与音乐**，所以这里同时断言那两个能力的工具
+  （文件清单 + 就绪报告）、随包技能库三份都在技能清单里、工具面与剧作家一致
+  （两个预设同一套）。e2e 实例**没配生图与音乐**，所以这里同时断言那两个能力的工具
   **不在**工具清单里、persona 里也**不提**它们（未配后端时不谎报能力）。
 - `voice`（`dsh-e2e run e2e/verify-voice.mjs`）——真打 Fish Audio：断言 voice 帧到达、音频能取回
   且是真 MP3、**浏览器把它解成了 PCM 并真的有音源起播**（在页面里给 `AudioContext` /
