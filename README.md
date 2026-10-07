@@ -177,6 +177,7 @@ assets/cg/…                        插图
 assets/sprites/<id>/…              立绘：每个主体一个目录
 assets/sfx/…  assets/bgm/…         音效与音乐
 assets/manifest.json               素材描述表：素材 id → 一句话画面
+endings.json                       结局账本（引擎维护、跨周目累加；不要手改）
 ```
 
 ### play.json
@@ -195,10 +196,31 @@ assets/manifest.json               素材描述表：素材 id → 一句话画�
 | `characters` | `[{ id, name }]`。**只用来给台词条配名字**：立绘绑定在角色卡的 frontmatter 上 |
 | `craft` | 写作参数，见下 |
 | `initialState` / `initialScene` | 剧目的起始状态与起始场景 |
+| `newGamePlus` | 多周目开关（缺省 `false`）。开启后，同工作区新开的会话（新周目）会在提示词里注入此前已达成的结局，见「结局与多周目」 |
 | `scriptLanguage` | 剧本语言（ISO 639-1）。缺省跟随玩家说什么话 |
 | `voiceLanguage` / `defaultVoiceId` / `cover` | 语音与封面：属于 AIVN app，本插件当前不读 |
 | `image` | `{"model": "…", "size": "2K"}`：**这座剧目自己的出图模型与档位**，覆盖部署级设置（两个字段各覆盖各的，留空即跟随部署配置）。比如一部剧的立绘要 2K 抠底、另一部的小剧场插图 1K 就够 |
 | `agents` | agent 运行设置：属于 AIVN app，本插件当前不读 |
+
+### 结局与多周目
+
+故事走到真正的终点时，剧作家把那一轮的**最后一行**写成结局标签（它**取代**那一轮的 `<stop>`）：
+
+```xml
+<ending id="true_sunrise" title="晨光" subtitle="这一次，她没有回头"/>
+```
+
+到达结局后舞台进入**终局态**：不给任何按钮、不能继续，想再玩只能走 DSH 的「在新对话中分支」
+（回到结局之前）或新建一条会话。结局之后引擎会**单开一轮**请剧作家写一段收束散文
+（`<epilogue>…</epilogue>`），流式填进结局卡。
+
+结局由**引擎**自动记到工作区根的 `endings.json`：跨周目累加、按 `id` 去重、`reachedIn` 记它在第几周目
+达成。这份账本引擎独占，**不要手改**。
+
+`play.json` 打开 `newGamePlus` 后，同工作区**新开的会话**（新周目）开头会把此前已达成的结局注入
+剧作家的提示词，让它安排多周目要素（角色隐约记得、某些路线 / 选项不同）。引擎只保证账本可见，
+**不强制解锁任何内容**——怎么用完全由剧作家决定。新周目开始时引擎会把 `memory/always/state/`
+三个状态文件重置回起点（`premise.md` / `craft.md` / 记忆索引 / 角色卡都不动）。
 
 ### characters/&lt;id&gt;.md
 
@@ -374,7 +396,8 @@ voice: 短句，少用形容词
 工具跟着预设装、跟着预设卸。`validate_play` 两个预设都有；其余按角色分。
 **剧作家的停止点不是工具**：它是剧本正文最后一行的一个标签——`<stop options="甲 | 乙"/>`（选项面板）、
 `<stop placeholder="…"/>`（自由输入框）、`<stop/>`（这一段自然演完）。轮尾因此是一条助手消息，
-DSH 的「在新对话中分支」与舞台重建（只重放助手文本）都认得上。
+DSH 的「在新对话中分支」与舞台重建（只重放助手文本）都认得上。**故事真正的终点改用 `<ending/>`**
+（同为末行标签、取代那一轮的 `<stop>`，见「结局与多周目」）。
 **模型用文件工具就能做的事一律没有**：`play.json`、`craft` 段、`memory/always/state/` 都是文件工具
 写出来的，写成什么样由提示词说清（见上「起一座新剧目」）；「这座剧目有什么素材」也一样——
 剧作家的 A 区每轮注入《素材清单》与《角色表》（id + 描述），搭台助手看《当前状态》的文件清单、
@@ -502,7 +525,7 @@ play/
 | `GET /aivn/asset?session=&path=` | 剧目内的一件素材。`path` 是**相对剧目根**的路径（如 `assets/backgrounds/x.png`），越界 400 |
 | `GET /aivn/audio?session=&file=` | 一句台词的合成音频。文件名是 `sha1(模型 + 音色 id + 文本)`，内容寻址，所以可以长缓存 |
 | `GET /aivn/stream?session=` | SSE，`event: frame`，data 是一帧 `StageFrame` JSON。连上先补推已经播过的帧，15 秒一次 keepalive |
-| `POST /aivn/input { session, text, silent? }` | 玩家的一次输入，投给剧作家。`silent: true` = 不算玩家说的话（舞台的「继续」走这条），仍然会作为一条 user 消息投出去 |
+| `POST /aivn/input { session, text, silent? }` | 玩家的一次输入，投给剧作家。`silent: true` = 不算玩家说的话（舞台的「继续」走这条），仍然会作为一条 user 消息投出去；**会话已结局时回 409**（终局态不接受继续，出口是分支或新会话） |
 | `POST /aivn/direct { session, action, text, from? }` | 导演的一次动作。`action` ∈ `guide`（提示·随下一轮）/ `interrupt`（提示·打断）/ `rewrite`（改写或重写）；`rewrite` 的 `from` ∈ `line`（作废最后一步）/ `beat`（作废整拍，缺省）。这些消息带 `dsh-aivn-director` 来源，不当玩家台词 |
 | `POST /aivn/voice { session, enabled?, paused? }` | 语音总开关与客户端背压。`enabled: false` 让服务端停止分句合成（省额度），`paused` 是播放层积压时的临时背压 |
 

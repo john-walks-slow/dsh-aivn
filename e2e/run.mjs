@@ -35,6 +35,10 @@ export const MODULES = {
 		description: '舞台重建：手写转写走真实 rebuildStage，三种停止点形态在重投影后都留得住（不需要实例、不占 run 锁）',
 		suites: ['verify-rebuild'],
 	},
+	ending: {
+		description: '结局与多周目：账本落账/去重/跨周目累加、A 区结局段、newGamePlus、新周目状态重置（不需要实例、不占 run 锁）',
+		suites: ['verify-ending'],
+	},
 	director: {
 		description: '导演工具栏：提示（引导 / 打断）、改写 / 重写作废会话面、舞台 reset 重投影、分支会话重建',
 		suites: ['verify-director'],

@@ -10,7 +10,8 @@
  *   GET  /aivn/stream?session=   IR 帧的 SSE 流，连上先补推已播出的帧
  *                                （这条会话还一帧都没有时，先从会话面重投影一遍）
  *   POST /aivn/input             玩家输入：`{session, text, silent?}`，投给剧作家
- *                                （时间线由 tap 接管；`silent` 是不上时间线的空推进）
+ *                                （时间线由 tap 接管；`silent` 是不上时间线的空推进；
+ *                                 会话已结局时回 409——终局态不接受继续）
  *   POST /aivn/direct            导演动作：`{session, action, text}`
  *                                action ∈ guide（提示·随下一轮）/ interrupt（提示·打断）/
  *                                rewrite（改写或重写这一拍，`from` 决定作废到哪儿）
@@ -42,6 +43,7 @@ export function installStageRoutes(
 	voice: VoiceHost,
 	director: Director,
 	stageLog: StageLog,
+	hasEnded: (sessionId: string) => boolean,
 ): () => void {
 	return ctx.webServer.register({
 		kind: 'prefix',
@@ -50,7 +52,9 @@ export function installStageRoutes(
 		// `process.exit(1)`。一个坏掉的 play.json、一次 EISDIR 就能把整台 DSH 连同所有会话杀掉。
 		// 这里换个可读的 500 出去，坏的范围就只在用户那一座剧目里。
 		handler: (req, res) => {
-			handle(ctx, hub, injected, voice, director, stageLog, req, res).catch((error: unknown) => fail(res, error));
+			handle(ctx, hub, injected, voice, director, stageLog, hasEnded, req, res).catch((error: unknown) =>
+				fail(res, error),
+			);
 		},
 	});
 }
@@ -71,6 +75,7 @@ async function handle(
 	voice: VoiceHost,
 	director: Director,
 	stageLog: StageLog,
+	hasEnded: (sessionId: string) => boolean,
 	req: IncomingMessage,
 	res: ServerResponse,
 ): Promise<void> {
@@ -128,7 +133,7 @@ async function handle(
 		return;
 	}
 	if (req.method === 'POST' && url.pathname === `${PREFIX}/input`) {
-		await acceptInput(ctx, injected, req, res);
+		await acceptInput(ctx, injected, hasEnded, req, res);
 		return;
 	}
 	if (req.method === 'POST' && url.pathname === `${PREFIX}/direct`) {
@@ -236,6 +241,7 @@ async function sendAsset(ctx: Context, res: ServerResponse, sessionId: string, r
 async function acceptInput(
 	ctx: Context,
 	injected: InjectedMessages,
+	hasEnded: (sessionId: string) => boolean,
 	req: IncomingMessage,
 	res: ServerResponse,
 ): Promise<void> {
@@ -246,6 +252,13 @@ async function acceptInput(
 	const text = typeof body.text === 'string' ? body.text.trim() : '';
 	if (!sessionId || !text) {
 		sendJson(res, 400, { error: 'session and text are required' });
+		return;
+	}
+
+	// 终局态不接受继续：出口交给 DSH 的「在新对话中分支」或新会话。引擎自己的收束指令
+	// 走 `followup` 且已登记，不经过这条路由，所以不会被这里挡住。
+	if (hasEnded(sessionId)) {
+		sendJson(res, 409, { error: 'this session has ended; branch before the ending or start a new playthrough' });
 		return;
 	}
 

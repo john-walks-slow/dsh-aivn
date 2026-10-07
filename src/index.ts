@@ -19,6 +19,7 @@ import { installPlayCommands } from './commands';
 import { Director } from './director';
 import { StageHub } from './hub';
 import { InjectedMessages } from './injected';
+import { EndingsLedger } from './ledger';
 import { registerPresets } from './playwriter/preset';
 import { installPresetTools } from './preset-tools';
 import { installStageRoutes } from './routes';
@@ -195,8 +196,10 @@ function describeCapabilities(capabilities: Capabilities): string {
 
 export async function apply(ctx: Context, config: Config): Promise<() => void> {
 	const hub = new StageHub();
-	/** 「引擎自己投的消息」的登记，开局指令（`stage-tap`）与导演指令（`director`）共用一份。 */
+	/** 「引擎自己投的消息」的登记，开局指令与收束指令（`stage-tap`）、导演指令（`director`）共用一份。 */
 	const injected = new InjectedMessages();
+	/** 结局账本（工作区根 `endings.json`）：引擎在实时 IR 上落账，重建只重推终局标记。 */
+	const ledger = new EndingsLedger((message) => ctx.logger.warn(message));
 
 	const runtime = { revision: 0, current: buildRuntime(config) };
 	ctx.logger.info(`[dsh-aivn] 搭台助手能力：${describeCapabilities(runtime.current.capabilities)}`);
@@ -212,7 +215,7 @@ export async function apply(ctx: Context, config: Config): Promise<() => void> {
 		ctx.logger,
 	);
 
-	const tap = installStageTap(ctx, hub, injected, voice);
+	const tap = installStageTap(ctx, hub, injected, voice, ledger);
 	// 导演的动作全是**会话层**的：提示投进下一轮，改写/重写往会话里加一条替换标记。
 	const director = new Director(hub, injected);
 	// 帧流的真相源是会话面：这条把「会话现在长什么样」重投影成一条帧流（回退、重写、分支、重启）。
@@ -222,6 +225,10 @@ export async function apply(ctx: Context, config: Config): Promise<() => void> {
 		voice,
 		// 重建会把这条会话的流式解析器与语音管线作废（它们手里是上一版内容的半成品）。
 		onRebuilt: (sessionId) => tap.forgetParser(sessionId),
+		// 重放之前先清掉上一遍推出来的终局 / 收束标记（回退掉结局那一拍后终局正确退出）。
+		onRebuildStart: (sessionId) => tap.resetTerminal(sessionId),
+		// 重放的每一帧转给 tap：重建也要重推出「已结局」的终局态（回退掉结局那一拍则退出终局）。
+		onEvent: (sessionId, event) => tap.noteEvent(sessionId, event),
 		// 提示队列在导演手里，不在会话面上：重置帧清掉客户端那份之后要补回来。
 		pendingGuides: (sessionId) => director.snapshot(sessionId),
 	});
@@ -266,7 +273,9 @@ export async function apply(ctx: Context, config: Config): Promise<() => void> {
 	});
 
 	ctx.inject(['webServer'], (webCtx) => {
-		disposers.push(installStageRoutes(webCtx, hub, injected, voice, director, stageLog));
+		disposers.push(
+			installStageRoutes(webCtx, hub, injected, voice, director, stageLog, (sessionId) => tap.hasEnded(sessionId)),
+		);
 		webCtx.logger.info('[dsh-aivn] stage routes mounted on /aivn');
 	});
 

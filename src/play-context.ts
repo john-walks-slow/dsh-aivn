@@ -32,6 +32,7 @@ import {
 import { listAssets, readManifest } from './assets';
 import { loadPlaySync } from './play';
 import { assetCapabilitiesOf, renderCraftParams, resolveCraft } from './craft';
+import { readLedger } from './ledger';
 import { playwriterTail } from './playwriter/prompt';
 
 /** 一次快照的存活时间：够覆盖一个 turn 的多个 step，又保证跨轮必重读。 */
@@ -48,6 +49,7 @@ const ORDER = {
 	assets: 130,
 	craft: 140,
 	memory: 150,
+	endings: 160,
 	tail: 200,
 };
 
@@ -61,6 +63,7 @@ export interface PlaySnapshot {
 	assets: string;
 	craft: string;
 	memoryIndex: string;
+	endings: string;
 	state: string;
 }
 
@@ -109,6 +112,7 @@ export function readPlaySnapshot(dir: string, canImage: () => boolean = () => fa
 		assets: renderAssets(index, notes),
 		craft,
 		memoryIndex: renderMemoryIndex(dir),
+		endings: renderEndings(dir, play.config.newGamePlus === true),
 		state: renderState(dir, play.config.characters?.map((card) => card.id) ?? []),
 	};
 }
@@ -143,6 +147,8 @@ export function registerPlayContext(
 		section('aivn:play-assets', ORDER.assets, (s) => s.assets),
 		section('aivn:play-craft', ORDER.craft, (s) => s.craft),
 		section('aivn:play-memory-index', ORDER.memory, (s) => s.memoryIndex),
+		// 多周目：`newGamePlus` 开着且账本里已有结局时才产出文本，首周目为空（与今天一致）。
+		section('aivn:play-endings', ORDER.endings, (s) => s.endings),
 		// 静态尾段（格式契约、记忆卡规则、引入新角色、演出契约）跟着动态段一起挂：
 		// 这几章只有剧作家要，而 persona 那一格装不下两段。位置紧接 A 区之后，与 AIVN 同序。
 		agentCtx.systemPrompt.section({ name: 'aivn:playwriter-tail', order: ORDER.tail, text: () => playwriterTail({ image: canImage() }) }),
@@ -161,6 +167,7 @@ const EMPTY: PlaySnapshot = {
 	assets: '',
 	craft: '',
 	memoryIndex: '',
+	endings: '',
 	state: '',
 };
 
@@ -379,6 +386,43 @@ function renderState(dir: string, characterIds: readonly string[]): string {
 
 	if (!body) return '';
 	return `【状态】\n${body}\n\n状态就是上面三个文件，由你自己写：有实质推进就改它们，别让它停在开头的零。`;
+}
+
+/* ── 多周目：此前已达成的结局 ─────────────────────────────────────────────── */
+
+/**
+ * `newGamePlus` 打开时，把**此前已达成的结局**（工作区根 `endings.json`）告诉剧作家，让它
+ * 安排这一周目的多周目要素。
+ *
+ * 只在「开关打开 + 账本里至少有一条结局」时产出文本：首周目（账本空）与开关关闭时都为空，
+ * 与今天完全一致。这是一条**提示词级约定**——引擎只保证账本可见，不 gate 任何内容。
+ * 账本坏了就当没有（stage-tap 那边已经报过警），注入缺一段不该让整轮演出失败。
+ */
+function renderEndings(dir: string, newGamePlus: boolean): string {
+	if (!newGamePlus) return '';
+	let data: ReturnType<typeof readLedger>;
+	try {
+		data = readLedger(dir);
+	} catch {
+		return '';
+	}
+	const rows = Object.entries(data.endings);
+	if (rows.length === 0) return '';
+
+	const list = rows
+		.map(([id, record]) => {
+			const title = record.title?.trim() || id;
+			const subtitle = record.subtitle?.trim();
+			return subtitle ? `${title}（${subtitle}）` : title;
+		})
+		.join('、');
+
+	return (
+		`# 此前已达成的结局\n\n` +
+		`这是第 ${Math.max(1, data.playthroughs)} 周目。此前达成的结局：${list}。\n` +
+		`请让这一周目体现多周目要素——角色可以隐约记得、某些路线 / 选项可以因此不同——` +
+		`但不要直接复述这段说明，也不要把它当成戏里某个角色的话。`
+	);
 }
 
 /* ── 角色卡读盘 ─────────────────────────────────────────────────────────── */

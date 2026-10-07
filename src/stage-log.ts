@@ -67,6 +67,19 @@ export interface RebuildDeps {
 	playDir?: string | undefined;
 	/** 重建完叫一声，让实时那一路把流式解析器丢掉（它的半行文本已经作废）。 */
 	onRebuilt?: ((sessionId: string) => void) | undefined;
+	/**
+	 * 重放之前叫一声：把上一轮重推导出的终局 / 收束标记清掉，好让这一遍重放从头推。
+	 *
+	 * 顺序是「先清、后重放、末尾再 `onRebuilt`」——回退掉结局那一拍时，清掉之后再没有 ending
+	 * 事件，终局就正确退出了；分支 / 冷开带着结局前缀时，重放会把标记重新推回来。
+	 */
+	onRebuildStart?: ((sessionId: string) => void) | undefined;
+	/**
+	 * 重放的每一帧都转交一份（`stage-tap` 的终局 / 收束跟踪）。
+	 *
+	 * 重建只重放、不落账——它是给「冷开 / 分支 / 回看后重推出终局态」用的，重复记账在这里被挡掉。
+	 */
+	onEvent?: ((sessionId: string, event: StageEvent) => void) | undefined;
 	/** 提示队列的现值（导演排的话）。重置帧把客户端那份清了，这里补一帧回来。 */
 	pendingGuides?: ((sessionId: string) => readonly GuideFrameItem[]) | undefined;
 }
@@ -85,6 +98,8 @@ export function rebuildStage(
 ): void {
 	const { hub, injected, voice } = deps;
 	hub.reset(sessionId);
+	// 上一遍重推导出的终局 / 收束标记先清掉，这一遍重放从头推（见 `RebuildDeps.onRebuildStart`）。
+	deps.onRebuildStart?.(sessionId);
 	// 重置帧会让客户端把提示队列一并清掉（那是上一版内容的一部分）；队列在导演手里，
 	// 与舞台内容无关，所以紧接着补一帧现值回去。
 	hub.appendGuide(sessionId, deps.pendingGuides?.(sessionId) ?? []);
@@ -101,6 +116,7 @@ export function rebuildStage(
 			lines.push(current);
 			current = null;
 		}
+		deps.onEvent?.(sessionId, event);
 	});
 
 	for (const seq of session.surface.nodes) {
@@ -214,6 +230,8 @@ export class StageLog {
 			voice: this.deps.voice,
 			playDir: sessionWorkspace(this.ctx, sessionId),
 			...(this.deps.onRebuilt ? { onRebuilt: this.deps.onRebuilt } : {}),
+			...(this.deps.onRebuildStart ? { onRebuildStart: this.deps.onRebuildStart } : {}),
+			...(this.deps.onEvent ? { onEvent: this.deps.onEvent } : {}),
 		});
 		return true;
 	}

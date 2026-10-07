@@ -19,7 +19,8 @@ export const PLAY_FILES = `# 剧目文件
 - \`memory/index/<层>/<名字>.md\` —— 设定记忆卡（地点、组织、规则这类），层是自定的分组名；
 - \`characters/<id>.md\` —— 角色卡；
 - \`assets/backgrounds/ | cg/ | sprites/<主体id>/ | bgm/ | sfx/\` —— 素材本身；
-- \`assets/manifest.json\` —— 素材描述表（键是素材 id，值是描述）。
+- \`assets/manifest.json\` —— 素材描述表（键是素材 id，值是描述）；
+- \`endings.json\` —— 结局账本（**引擎维护、只读**）：跨周目记录已达成的结局，别手改。
 
 ## play.json
 
@@ -33,6 +34,7 @@ export const PLAY_FILES = `# 剧目文件
 | \`characters\` | \`[{"id": "lin", "name": "林"}]\`：主要角色表，只给台词条挂名字，不影响演出 |
 | \`scriptLanguage\` | 剧本语言（ISO 639-1，如 \`ja\`）：写了就一律用它写正文与选项；缺省跟着玩家输入走 |
 | \`initialScene\` | 舞台标题上的场景名 |
+| \`newGamePlus\` | 多周目开关（\`true\` / \`false\`，缺省 false）：开了之后，新周目的开头会把此前已达成的结局注入提示词（见《结局与多周目》） |
 
 写作参数（\`craft\`）、生图档位（\`image\`）、两个 agent 的设置（\`agents\`）各有专门入口，别手写。
 

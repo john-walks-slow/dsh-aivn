@@ -21,15 +21,17 @@
  *   那一句同轮送到，见 `openPlay`。
  */
 import type { Context } from '@deepseek-ai/cordis';
-import { StageDslParser, type StageEvent } from '@aivn/core';
+import { StageDslParser, type EndingAttrs, type StageEvent } from '@aivn/core';
 import type {} from '@deepseek-ai/dsh-agent';
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm';
 import type { StageHub } from './hub';
 import type { InjectedMessages } from './injected';
-import { loadPlaySync } from './play';
+import type { EndingsLedger } from './ledger';
+import { loadPlaySync, type Play } from './play';
+import { resetPlayState } from './play-state';
 import type { VoiceHost } from './voice-host';
 import type { VoicePipeline } from './voice';
-import { PLAYWRITER_PRESET, sessionPreset, sessionWorkspace, type LiveAgent } from './session';
+import { attachedAgent, PLAYWRITER_PRESET, sessionPreset, sessionWorkspace, type LiveAgent } from './session';
 
 /** 事件载荷都带一层 `{ agent }` 外壳（由 agent 作用域的分发器补上）。 */
 interface AgentShell {
@@ -53,15 +55,32 @@ interface InboxPayload {
 	message: UserMessage;
 }
 
+/** 一条会话的终局 / 收束进度。 */
+interface SessionFlow {
+	/** 已到达结局：终局态（拦玩家输入）。 */
+	ended: boolean;
+	/** 最近一条结局 id：收束散文落地时回填账本用它。 */
+	endingId: string | null;
+	/** 本会话正在累积的收束散文。 */
+	epilogue: string;
+	/** 收束指令投过没有（每条会话只投一次）。 */
+	summaryAsked: boolean;
+}
+
 export function installStageTap(
 	ctx: Context,
 	hub: StageHub,
 	injected: InjectedMessages,
 	voice: VoiceHost,
+	ledger: EndingsLedger,
 ): StageTap {
 	const parsers = new Map<string, StageDslParser>();
 	/** 每会话的语音管线（懒建：这一行的角色没有音色时它什么都不做）。 */
 	const voices = new Map<string, VoicePipeline | null>();
+	/** 每会话的终局 / 收束进度。 */
+	const flows = new Map<string, SessionFlow>();
+	/** 已经登记过「新周目开始」的会话（onInput 一轮里可能被调多次）。 */
+	const begun = new Set<string>();
 
 	const pipelineFor = (sessionId: string): VoicePipeline | null => {
 		if (voices.has(sessionId)) return voices.get(sessionId) ?? null;
@@ -77,6 +96,7 @@ export function installStageTap(
 			parser = new StageDslParser((event) => {
 				const frame = hub.append(sessionId, event);
 				feedVoice(sessionId, event, frame.seq);
+				trackEvent(sessionId, event, true);
 			});
 			parsers.set(sessionId, parser);
 		}
@@ -94,6 +114,83 @@ export function installStageTap(
 	/** 这条会话是不是舞台上的那一出。不是就整条管线都不碰。 */
 	const isPlaywriter = (sessionId: string): boolean =>
 		sessionPreset(ctx, sessionId) === PLAYWRITER_PRESET;
+
+	const flowFor = (sessionId: string): SessionFlow => {
+		let flow = flows.get(sessionId);
+		if (!flow) {
+			flow = { ended: false, endingId: null, epilogue: '', summaryAsked: false };
+			flows.set(sessionId, flow);
+		}
+		return flow;
+	};
+
+	/**
+	 * 把一帧 IR 喂给终局 / 收束跟踪。**实时（`live`）与重建都会调**——重建时也要重推出「已结局」，
+	 * 否则刷新 / 分支 / 冷开之后终局态就丢了。两者的区别只有写副作用：`live` 才落账、才投收束指令；
+	 * 重建（`live=false`）纯粹重放，绝不重复记账。
+	 */
+	const trackEvent = (sessionId: string, event: StageEvent, live: boolean): void => {
+		const flow = flowFor(sessionId);
+		switch (event.kind) {
+			case 'ending': {
+				flow.ended = true;
+				flow.endingId = event.id;
+				flow.epilogue = '';
+				if (!live) break;
+				const dir = sessionWorkspace(ctx, sessionId);
+				if (dir) ledger.recordEnding(dir, sessionId, event);
+				askSummary(sessionId, event);
+				break;
+			}
+			case 'epilogue_start':
+				flow.epilogue = '';
+				break;
+			case 'epilogue_text':
+				flow.epilogue += event.delta;
+				break;
+			case 'epilogue_end': {
+				if (!live || !flow.endingId) break;
+				const dir = sessionWorkspace(ctx, sessionId);
+				if (dir) ledger.recordSummary(dir, flow.endingId, flow.epilogue);
+				break;
+			}
+		}
+	};
+
+	/**
+	 * 结局之后的收束指令：排进**下一轮**（`followup`，不是同轮的 `inject`），并登记摘除——舞台不会
+	 * 把它当成一行玩家台词。判定按 `message.id`（见 `injected.ts`），不是正文比对。
+	 */
+	const askSummary = (sessionId: string, ending: EndingAttrs): void => {
+		const flow = flowFor(sessionId);
+		if (flow.summaryAsked) return;
+		const agent = attachedAgent(ctx, sessionId);
+		if (!agent) return;
+		flow.summaryAsked = true;
+		const message = createUserMessage({
+			content: [{ type: 'text', text: summaryInstruction(ending) }],
+			source: { kind: 'user' },
+		});
+		injected.remember(sessionId, message.id);
+		agent.followup(message);
+	};
+
+	/**
+	 * 新周目开始（空会话面的新会话第一句话）：账本记一个周目、把剧内状态重置回起点（`play-state`）。
+	 * 由 `openPlay` 调用，按 sessionId 幂等。重置失败只告警，不挡新周目——状态差一点总比演不起来好。
+	 */
+	const beginPlaythrough = (sessionId: string, play: Play): void => {
+		if (begun.has(sessionId)) return;
+		begun.add(sessionId);
+		ledger.beginPlaythrough(play.dir, sessionId);
+		try {
+			resetPlayState(play);
+		} catch (error) {
+			ctx.logger.warn(
+				`[dsh-aivn] 重置剧内状态失败（新周目仍照常开始）：${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	};
 
 	const onFrame = (payload: AssistantStreamPayload): void => {
 		const sessionId = payload.agent.id;
@@ -121,6 +218,10 @@ export function installStageTap(
 
 		const sessionId = payload.agent.id;
 		if (!isPlaywriter(sessionId)) return;
+
+		// 终局：拒绝玩家继续——出口交给 DSH 的「在新对话中分支」或新会话。
+		// 引擎自己的收束指令已在上面按 id 摘除，不受这道闸影响。
+		if (flowFor(sessionId).ended) return;
 
 		const text = messageText(payload.message);
 		if (!text) return;
@@ -156,6 +257,10 @@ export function installStageTap(
 		const play = loadPlaySync(sessionWorkspace(ctx, sessionId));
 		if (!play) return;
 
+		// 空会话面 = 新周目：记一个周目号 + 把剧内状态重置回起点（幂等）。
+		// 必须在注入开局指令之前——A 区【状态】快照第一轮就会读这三个文件。
+		beginPlaythrough(sessionId, play);
+
 		const opening = play.config.opening.trim();
 		if (!opening || opening === playerText) return;
 
@@ -176,8 +281,11 @@ export function installStageTap(
 		const sessionId = payload.agent.id;
 		parsers.delete(sessionId);
 		voices.delete(sessionId);
+		flows.delete(sessionId);
+		begun.delete(sessionId);
 		voice.disposeSession(sessionId);
 		injected.forget(sessionId);
+		ledger.forget(sessionId);
 	};
 
 	const offFrame = ctx.on('agent/assistant-stream', onFrame);
@@ -193,6 +301,8 @@ export function installStageTap(
 			offDisposed();
 			parsers.clear();
 			voices.clear();
+			flows.clear();
+			begun.clear();
 		},
 		forgetParser: (sessionId) => {
 			// 重建把这条会话的帧流整个换掉了，解析器手里那半行文本（以及没闭合的包裹标签）
@@ -201,14 +311,38 @@ export function installStageTap(
 			voices.delete(sessionId);
 			voice.disposeSession(sessionId);
 		},
+		hasEnded: (sessionId) => flowFor(sessionId).ended,
+		// 重建（`stage-log`）重放助手文本时调它重推终局标记；`live=false` 表示只重放、不落账。
+		noteEvent: (sessionId, event) => trackEvent(sessionId, event, false),
+		// 重建开始前清掉上一遍推出来的终局 / 收束标记：回退掉结局那一拍后不再有 ending 事件，
+		// 终局据此正确退出；旧标记不清的话它会一直挂着，把玩家永久锁在门外。
+		resetTerminal: (sessionId) => {
+			const flow = flows.get(sessionId);
+			if (!flow) return;
+			flow.ended = false;
+			flow.endingId = null;
+			flow.epilogue = '';
+			flow.summaryAsked = false;
+		},
 	};
 }
 
-/** 舞台管线的把手：装配期拿它转交给 `stage-log`（重建后要丢解析器）。 */
+/**
+ * 舞台管线的把手：装配期拿它转交给 `stage-log`（重建后要丢解析器）。
+ *
+ * `hasEnded` / `noteEvent` 是结局这条线的两个出口：前者给路由拦终局后的玩家输入，后者让
+ * **重建**也能重推终局态（冷开 / 分支 / 回看之后「已结局」不丢），但绝不重复落账。
+ */
 export interface StageTap {
 	dispose(): void;
 	/** 这条会话的流式解析器与语音管线作废（会话被重投影了）。 */
 	forgetParser(sessionId: string): void;
+	/** 这条会话是否已到达结局（终局态：拒绝玩家继续）。 */
+	hasEnded(sessionId: string): boolean;
+	/** 重建开始前清掉终局 / 收束标记（回退掉结局那一拍后终局正确退出）。 */
+	resetTerminal(sessionId: string): void;
+	/** 重建期间重放一帧 IR：只重推终局 / 收束状态，不落账。 */
+	noteEvent(sessionId: string, event: StageEvent): void;
 }
 
 /**
@@ -224,4 +358,19 @@ function messageText(message: UserMessage): string {
 		.map((block) => block.text)
 		.join('\n\n')
 		.trim();
+}
+
+/**
+ * 收束指令的正文（一条括号里的舞台指示，口径见《演出契约》）。
+ *
+ * 它只知道结局的标题；收束散文要回顾的是**这一周目**的旅程，而那段历史就在剧作家自己的上下文里，
+ * 不必由引擎复述。要点三条：单独一轮、只写 `<epilogue>`、写完停笔（不再给停止点）。
+ */
+function summaryInstruction(ending: EndingAttrs): string {
+	const title = ending.title?.trim() || ending.id;
+	return (
+		`（结局已到达：${title}。请为这一周目写一段收束全文的散文总结，` +
+		'作为 <epilogue>…</epilogue> 输出：回顾这段旅程、点出主题与代价，' +
+		'不要写新对白、不要推进剧情、不要再给停止点。写完就停笔。）'
+	);
 }

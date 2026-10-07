@@ -36,6 +36,11 @@
    引擎自己补的消息想挤进**当前**那一轮只能用 `agent.inject`（落 `next-step`，整批认领）：
    `followup` 落 `next-turn`，而一轮只认领一条，第二条要等下一轮。开局指令就是这么补的
    （`stage-tap.ts` 的 `openPlay`，跟着玩家的第一条消息走）。
+   **结局（`<ending …/>`）是同一族的标签**：也在剧本末行、取代那一轮的 `<stop>`，终局态从重放的 IR 推出
+   （`stage-tap` 按实时/重建两条回调维护 per-session `ended`，`EndingsLedger` 把结局落账到工作区根
+   `endings.json`）。**重建只重推终局标记、绝不重复落账**；结局之后引擎用 `followup` 单开一轮要收束散文
+   （`<epilogue>`，回填账本 `summary`）。`play.json` 的 `newGamePlus` 只走 A 区注入（`play-context.ts` 的
+   `aivn:play-endings` 段），引擎不做任何 gate。详见 README「结局与多周目」。
 5. **提示词分两段**：`PLAYWRITER_PROMPT` 是 persona 的 `prefix`（静态前半），
    `PLAYWRITER_TAIL` 由 `src/play-context.ts` 注册成 order 200 的段。中间夹着 A 区的动态段——
    `persona` 那一格只装得下一段静态文本，所以「A 区之后」的几章必须由插件自己挂。

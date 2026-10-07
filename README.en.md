@@ -138,6 +138,7 @@ assets/cg/…                        CGs
 assets/sprites/<id>/…              sprites: one directory per subject
 assets/sfx/…  assets/bgm/…         sound effects and music
 assets/manifest.json               asset description table: asset id → one-line visual
+endings.json                       endings ledger (engine-maintained, accumulates across playthroughs; do not edit)
 ```
 
 ### play.json
@@ -156,10 +157,36 @@ The remaining fields (all optional):
 | `characters` | `[{ id, name }]`. **Only used to put names on the dialogue bar**: sprite binding lives in the character card's frontmatter |
 | `craft` | Writing parameters, see below |
 | `initialState` / `initialScene` | The play's starting state and starting scene |
+| `newGamePlus` | New-game-plus switch (default `false`). When on, a session newly opened in the same workspace (a new playthrough) gets the previously reached endings injected into the prompt — see "Endings and new game plus" |
 | `scriptLanguage` | Script language (ISO 639-1). Defaults to following whatever language the player speaks |
 | `voiceLanguage` / `defaultVoiceId` / `cover` | Voice and cover: they belong to the AIVN app; this plugin doesn't read them yet |
 | `image` | `{"model": "…", "size": "2K"}`: **this play's own image model and size tier**, overriding the deployment settings (each field overrides only itself; leave it out to follow the deployment). One play may want 2K sprites for cutout while another is fine with 1K CGs |
 | `agents` | Agent runtime settings: they belong to the AIVN app; this plugin doesn't read them yet |
+
+### Endings and new game plus
+
+When the story reaches its true end, the playwright writes an ending tag as the **last line** of that beat
+(it **replaces** that beat's `<stop>`):
+
+```xml
+<ending id="true_sunrise" title="晨光" subtitle="这一次，她没有回头"/>
+```
+
+Reaching an ending puts the stage into a **terminal state**: no buttons, no continuing — to play again you
+branch before the ending with DSH's native "branch in new conversation", or start a new session. After the
+ending the engine opens **one extra turn** and asks the playwright for a closing prose passage
+(`<epilogue>…</epilogue>`), which streams into the ending card.
+
+The engine records endings automatically in `endings.json` at the workspace root: accumulated across
+playthroughs, deduplicated by `id`, with `reachedIn` recording which playthrough reached it. The engine owns
+this ledger — **do not edit it**.
+
+When `play.json` turns on `newGamePlus`, a **newly opened session** in the same workspace (a new playthrough)
+has the previously reached endings injected into the playwright's prompt so it can weave in new-game-plus
+elements (characters half-remembering, different routes/choices). The engine only makes the ledger visible —
+it **forces no unlocks**; how to use it is entirely up to the playwright. At the start of a new playthrough
+the engine resets the three state files under `memory/always/state/` (it leaves `premise.md`, `craft.md`, the
+memory index and character cards untouched).
 
 ### characters/&lt;id&gt;.md
 
@@ -320,6 +347,8 @@ description), and the stage-hand assistant reads the file listing in "Current st
 `<stop options="A | B"/>` (option panel), `<stop placeholder="…"/>` (free-text input), `<stop/>`
 (this beat simply ends). The turn therefore ends on an assistant message, which is what DSH's
 "branch in a new conversation" and the stage rebuild (it replays assistant text only) both require.
+**The story's true ending uses `<ending/>` instead** (also a last-line tag, replacing that beat's `<stop>` —
+see "Endings and new game plus").
 
 | Tool | Who has it | What it does |
 | --- | --- | --- |
@@ -459,7 +488,7 @@ The browser half talks to just these endpoints, all scoped by session:
 | `GET /aivn/asset?session=&path=` | One asset inside the play. `path` is **relative to the play root** (e.g. `assets/backgrounds/x.png`); 400 if it escapes |
 | `GET /aivn/audio?session=&file=` | Synthesized audio for one line. The file name is `sha1(model + voice id + text)` and content-addressed, so it can be cached for a long time |
 | `GET /aivn/stream?session=` | SSE, `event: frame`, with the data being one `StageFrame` JSON. On connect it replays frames already performed, then a keepalive every 15 seconds |
-| `POST /aivn/input { session, text, silent? }` | One player input, delivered to the playwright. `silent: true` means it doesn't count as something the player said (the stage's **Continue** takes this path); it is still inserted as a user message |
+| `POST /aivn/input { session, text, silent? }` | One player input, delivered to the playwright. `silent: true` means it doesn't count as something the player said (the stage's **Continue** takes this path); it is still inserted as a user message. **Returns 409 once the session has ended** (a terminal state accepts no continuing; the way out is a branch or a new session) |
 | `POST /aivn/voice { session, enabled?, paused? }` | The master voice switch and client backpressure. `enabled: false` stops the server from synthesizing sentence by sentence (saves quota); `paused` is temporary backpressure when the playback layer falls behind |
 
 `StageFrame` comes in three kinds:
