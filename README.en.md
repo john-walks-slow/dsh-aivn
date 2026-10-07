@@ -298,14 +298,20 @@ The plugin ships three how-to references inside the package (`skills/`), mounted
 
 | Skill | What it covers |
 | --- | --- |
-| `aivn-play-setup` | The four-step setup for a new play or a settings change, and what each file holds (premise / craft.md / the craft block / character cards / memory cards / asset sheet), the `craft` values, and prep order |
-| `aivn-visual-craft` | Where the art-style anchor goes, how to pin a character's looks (head-to-body ratio / face / outfit), variant layout and naming, how to write an art order, and ready-to-paste image prompts |
-| `aivn-audio` | Where to find free BGM / SFX, which licences allow commercial use, source picks for six BGM moods and common SFX categories, redistribution and AI-training red lines |
+| `aivn-play-setup` | The four-step setup for a new play or a settings change, and what each file holds (premise / craft.md / the craft block / character cards / memory cards / asset sheet), the `craft` values, prep order, and introducing a new subject mid-play (card / sprite / bit-part NPC) |
+| `aivn-visual-craft` | Where the art-style anchor goes, how to pin a character's looks (head-to-body ratio / face / outfit), variant layout and naming, how to write an art order, ready-to-paste image prompts, and filling in a missing image mid-play |
+| `aivn-audio` | Where to find free BGM / SFX, which licences allow commercial use, source picks for six BGM moods and common SFX categories, redistribution and AI-training red lines, and how to write prompts when a music backend is wired up |
 
 Only names and one-line descriptions go into the system prompt; the model loads the full text when
 one looks relevant — all three are long and should not be read every beat. `includeDefaultRoots: false`
 is deliberate: the dozens of host-ops skills installed on the machine have no business crowding
 these presets' catalog.
+
+**The how-to lives in the skill; the persona keeps only a one-line pointer**: edit `skills/*.md` to
+change a recipe (it takes effect immediately, no `lib/` rebuild) and the always-on prompt stays lean.
+Capability-gated chapters (missing image, music) stay in the persona — the skill catalog is not
+gated by capability, so a full downshift would let an instance without a backend read how to call a
+tool it doesn't have. See "prompt map" in `AGENTS.md`.
 
 ## Context injection
 
@@ -326,7 +332,7 @@ document. The names below are translations of those headers.
 | "Asset list" | ids + descriptions for backgrounds / music / SFX / CGs; cue rules appended when there is music or SFX | `assets/` + `assets/manifest.json` |
 | "Writing parameters" | How long each beat is, how many options, asset sources, plus the creative-guidelines prose | `craft` in `play.json` + `memory/always/craft.md` |
 | "Memory index" | One line per setting card (category / title / path / summary) | `memory/index/**` |
-| Static suffix | Script format, how to write memory cards, introducing new characters, the performance contract | the trailing block the plugin registers |
+| Static suffix | Script format (Stage DSL), endings & new game plus, memory cards & world state, the performance contract, plus two pointers — introducing new characters (to `aivn-play-setup`) and missing images (to `aivn-visual-craft`, only with an image backend) | the trailing block the plugin registers (`playwriterTail`) |
 | [State] | Scene, affinity, flags, active threads (a user-role snapshot that changes every beat) | `memory/always/state/*` |
 
 These sections **mount only for playwright sessions** (registered on the Agent scope), so the

@@ -1,6 +1,6 @@
 ---
 name: aivn-visual-craft
-description: 视觉小说剧目的视觉规格与图单做法：画风锚点怎么定与写在哪、角色外形怎么锁死（头身比/五官/服装）、立绘差分布局与命名、背景与事件 CG 的画面约定，以及一套可直接粘贴给生图工具的提示词写法（有色细线、通透上色、破对称姿态、负面词黑名单）。当用户要定剧目画风、要一份立绘图单、或抱怨出图发油描边粗动作僵硬时使用。
+description: 视觉小说剧目的视觉规格与图单做法：画风锚点怎么定与写在哪、角色外形怎么锁死（头身比/五官/服装）、立绘差分布局与命名、背景与事件 CG 的画面约定、一套可直接粘贴给生图工具的提示词写法（有色细线、通透上色、破对称姿态、负面词黑名单），以及演出中缺图时当场补图与入库的做法（一键出图 / 候选挑图 / 外部图登记）。当用户要定剧目画风、要一份立绘图单、演出中缺图要当场补，或抱怨出图发油描边粗动作僵硬时使用。
 ---
 
 # aivn-visual-craft（立绘与 CG 的画面规格）
@@ -134,18 +134,22 @@ Ultra-fine whisper-light colored outlines, clean translucent coloring, no thick 
 
 ## 七、出图与入库（`generate_asset` / `generate_image` / `cut` / `import_asset`）
 
-两条路，按「要不要让用户挑」选：
+`cut` 与 `import_asset` **不依赖生图后端、始终可用**；`generate_asset` 与 `generate_image` **只在剧目配了生图后端时才存在**——
+没配就别调它们，改走「外部来源」（用户给的图 / 免费源 / 别的工具出的图）。先按当前有没有生图后端选路：
 
-- **一键（`generate_asset`）**：出图 +（立绘）自动抠底 + 登记，一次到位。给 `kind`（background / cg / sprite）；
-  立绘再给 `spriteId` + `variant`，画幅跟着 `framing`（full / half / square）走。回执给最终路径，这一轮就能引用。
-  剧目后缀（色键底、身份锁、差分自动垫 neutral）只在**这条路**里由引擎自动拼——prompt 里别再写抠底与画幅。
-- **原子三件套（要挑候选 / 图来自别处 / 要重抠）**：
-  - `generate_image`：**纯生成**，只把 prompt 变成一张候选图（回执给图片路径与预览）。它不绑剧目目标、
-    不做色键底、不抠底——**通用出图，画幅用 `aspectRatio`（默认 16:9）**。要立绘就在这里自己把纯色底、
-    平涂、景别写进 prompt。
-  - `cut`：把纯色底候选抠成透明 PNG（`source` + 可选调参）；抠脏了对**同一张**重调再跑，别重新出图。
-  - `import_asset`：把一张图登记成素材（`source` 给剧目内路径 / 网址，`kind` 必填；立绘登记**已抠好的透明 PNG**，
-    再给 `spriteId` / `variant` / `framing` / `stature` / `description`；`original` 留抠底前原片以便重抠）。
+- **配了生图后端**：两条路，按「要不要让用户挑」选：
+  - **一键（`generate_asset`）**：出图 +（立绘）自动抠底 + 登记，一次到位。给 `kind`（background / cg / sprite）；
+    立绘再给 `spriteId` + `variant`，画幅跟着 `framing`（full / half / square）走。回执给最终路径，这一轮就能引用。
+    剧目后缀（色键底、身份锁、差分自动垫 neutral）只在**这条路**里由引擎自动拼——prompt 里别再写抠底与画幅。
+  - **原子三件套（要挑候选 / 图来自别处 / 要重抠）**：
+    - `generate_image`：**纯生成**，只把 prompt 变成一张候选图（回执给图片路径与预览）。它不绑剧目目标、
+      不做色键底、不抠底——**通用出图，画幅用 `aspectRatio`（默认 16:9）**。要立绘就在这里自己把纯色底、
+      平涂、景别写进 prompt。
+    - `cut`：把纯色底候选抠成透明 PNG（`source` + 可选调参）；抠脏了对**同一张**重调再跑，别重新出图。
+    - `import_asset`：把一张图登记成素材（`source` 给剧目内路径 / 网址，`kind` 必填；立绘登记**已抠好的透明 PNG**，
+      再给 `spriteId` / `variant` / `framing` / `stature` / `description`；`original` 留抠底前原片以便重抠）。
+- **没配生图后端**：把图单交给用户（或从免费源找来），用 `import_asset` 登记——它写 `assets/`、补素材表描述、
+  记台账；**立绘要透明底**，先 `cut(source=…)` 抠成透明 PNG，再登记那张。
 
 **候选流程**（定妆照）：`generate_image` 同一目标多调几次（prompt 各不同；定妆照都用 variant=neutral），
 预览一行一行贴给用户；他点头的那张再落位——背景 / 插图 `import_asset(kind=…, name=…)`，
@@ -160,7 +164,25 @@ Ultra-fine whisper-light colored outlines, clean translucent coloring, no thick 
   `stature`（small / normal / large / huge）只管台上多大。人物 full 或 half，猫与道具 square，机甲 huge。
 - **出完贴给用户看**（回执里那行 markdown 图片）；抠脏了用 `cut` 调参重抠（画面不变、不烧配额），别重新出图。
 
-## 八、交付前自查
+## 八、演出中缺图（剧作家在演出中）
+
+剧作家写剧本时遇到「这一轮真要引用的背景 / 插图 / 立绘还没有」，当场补。**只有在剧目配了生图后端时**才走生图；
+没配就换一段能演的戏、用旁白交代，或让玩家手工放图进 `assets/`。
+
+- **出图同步**（70–140 秒，这一轮就停在那里）；一轮预算是 240 秒，**一次出图占掉一半以上**——
+  只为这一轮真要引用的东西出，别为「以后可能用得上」出，也别一轮里连出好几张。
+- **默认走 `generate_asset`（一键）**：出图 +（立绘）自动抠底 + 登记，回执给最终路径——**回执回来之后**
+  那一行剧本才引用得到它。
+  - 背景 / 插图：`generate_asset(kind="background", name="cafe", prompt="…")`；
+    立绘：`generate_asset(kind="sprite", spriteId="xiaoyu", variant="smile", framing="full", prompt="…")`。
+  - 立绘非 neutral 的差分自动垫该主体的 neutral 定妆照；那个主体**一张立绘都没有**时会先自动补一张 neutral
+    再出这张差分（回执里两张都给你，记得两张都跟用户交代）；但它**已有别的差分、只缺 neutral** 时会被拒绝
+    （先单独要一张 neutral 让用户过目）。人物用 framing=full 或 half，猫与道具用 square。
+- **先看 A 区的《素材清单》与《角色表》**：已有同名或现成的同类素材就别重出——同名时引擎会跳过并告诉你（不覆盖旧图）。
+- **要精细控制时**用原子三件套（`generate_image` / `cut` / `import_asset`）：要让用户挑候选就 `generate_image`
+  出候选、贴预览、点头再落位；图来自别处（用户给的、下载的、别的模型出的）直接用 `import_asset`，立绘要透明底先 `cut`。
+
+## 九、交付前自查
 
 - 画风锚点已写进 `craft.md`，且这一批图都用同一份？
 - 每个主体的外形锚定逐张一致（发色、瞳色、发饰、服装没变）？

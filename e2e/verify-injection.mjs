@@ -168,6 +168,16 @@ try {
 			? '配了生图后端：剧作家有 generate_image / generate_asset；cut / import_asset 不门控、始终在'
 			: '没配生图后端：剧作家没有 generate_image / generate_asset，但 cut / import_asset 仍在',
 	);
+	// 缺图章已下沉成技能的「门控指针」：指针正文随生图能力位出现 / 消失，
+	// 做法正文在恒列的 skill 里（见 AGENTS.md「提示词地图」）。用「演出中缺图」这个只在指针里
+	// 出现的短语判定——`aivn-visual-craft` 这个名字在《演出中引入新主体》指针里也会无条件出现。
+	// **耦合锚点**：改 `IMAGE_POINTER`（src/playwriter/prompt.ts）里这个短语或
+	// `aivn-visual-craft` §八标题时，同步改这条断言。
+	check(
+		'A14b',
+		hasImage === prompt.includes('「演出中缺图」一节'),
+		hasImage ? '缺图章指针指向技能 aivn-visual-craft 的「演出中缺图」一节' : '没配生图时不出现缺图章指针',
+	);
 
 	console.log('\n段序：');
 	for (const heading of headings) console.log(`   ${heading}`);

@@ -47,6 +47,53 @@
    `persona` 那一格只装得下一段静态文本，所以「A 区之后」的几章必须由插件自己挂。
    改提示词时看清楚一段属于哪半边，别把动态内容写回静态 prefix。
 
+## 提示词地图
+
+agent 提示词分三层，**每一类知识只有一个家**。改任何提示词前先在这里定位它属于哪层：
+
+| 层 | 载体 | 改完 | 生效 |
+| --- | --- | --- | --- |
+| **Skill** | `skills/aivn-play-setup/`、`aivn-visual-craft/`、`aivn-audio/` | 直接改 markdown | 宿主把 name+description 恒列进 `<available_skills>`，模型按需 `skill` 加载全文；**改完即生效** |
+| **persona + 注入段** | 硬编码 TS（下表） | `npm run build` 并提交 `lib/` | `persona.prefix` 装载时烘焙；`systemPrompt.section` 每轮现读 |
+| **运行期剧目文件** | `<剧目>/premise.md`、`craft.md`、`play.json`、`characters/*`、`memory/*`、`assets/manifest.json`、`theme.json` | 直接改 | 条件化渲染进 A 区注入；属「内容」，不是提示词本体 |
+
+**分层规约（单一真相源）**：
+
+- **机制**（怎么调、参数形状、会不会覆盖、同步等多久）→ 工具 `DESCRIPTION`。
+- **食谱**（做法步骤、选源/授权、画风与外形配方）→ 按需加载的 skill。
+- **身份 / 职责边界 / 每轮契约 / 能力位门控指针** → persona。
+- **数据渲染模板**（读盘→文本）→ `src/play-context.ts` / `src/stagehand/context.ts` / `src/craft.ts`。
+- persona 里出现工具名时只描述「何时用」，参数细节归 DESCRIPTION。
+
+**代码里的提示词位置**：
+
+| 提示词 | 文件 | 注入点 | 门控 |
+| --- | --- | --- | --- |
+| 剧作家身份 / 剧目在哪 / 怎么工作 | `src/playwriter/prompt.ts` | persona.prefix | — |
+| 《剧目文件》 | `src/play-files.ts` | prefix + tail（两预设共用） | — |
+| 剧本格式（Stage DSL）/ 结局 / 记忆卡 / 演出契约 | `src/playwriter/prompt.ts` | `section` `aivn:playwriter-tail`（order 200） | — |
+| 演出中引入新主体（指针）/ 缺图怎么办（指针） | `src/playwriter/prompt.ts` | 同上（`aivn:playwriter-tail` 内的字段） | 缺图指针 `can.image` |
+| 搭台助手身份 / 职责 / 对话风格 | `src/stagehand/prompt.ts` | persona.prefix | — |
+| 出图要点（短规则 + 指针） | `src/stagehand/prompt.ts` | `section` `aivn:stagehand-guide`（order 40） | 恒在，按 `can.image` 分措辞 |
+| 配乐（指针）/ 命令行 / 联网检索 / 技能库 | `src/stagehand/prompt.ts` | 同上 | 配乐 `can.music`、命令行 `can.shell`、检索 `can.search` |
+| A 区段（语言 / 设定 / 角色表 / 素材 / 写作参数 / 记忆索引 / 结局 / 状态） | `src/play-context.ts` | `section` + `context` | 按数据 / 能力位 |
+| 写作参数措辞 | `src/craft.ts` | 由 A 区渲染 | 配置驱动 |
+| 搭台《当前状态》 | `src/stagehand/context.ts` | `systemPrompt.section` | — |
+| 9 个工具描述 | `src/stagehand/tools/*`、`src/tools/validate-play.ts` | 工具 schema | 工具注册门控 |
+| 导演消息壳 / 收束指令 | `src/director.ts`、`src/stage-tap.ts` | 运行期 user 消息 | — |
+
+**门控规则**（skill 恒列，persona 门控章随能力位消失）：
+
+- **门控章不能整章下沉**：skill 没有能力位门控，整章下沉会让没配后端的实例从恒列 skill 读到教它调不存在
+  工具的正文。做法是**正文下沉到 skill，persona 只留一句保留同名标题的门控指针**（指针随能力位出现/消失）。
+- skill 的 `name` + `description`（恒可见）**必须能力中立**：不点名门控工具（`generate_asset` /
+  `generate_image` / `generate_bgm` / `list_voices` / `web_search`）。正文可以点名，但必须**条件化**
+  （先讲清「本剧目配了 / 没配 X 后端」，两支各走哪条路）。
+- e2e 靠门控指针的标题与条件句判定能力位。
+
+**e2e 锚点**：改 persona 章标题或条件句时，同步改 `e2e/verify-injection.mjs`（A 区段、缺图章）与
+`e2e/verify-stagehand.mjs`（《出图要点》《配乐》《剧目文件》、技能清单、门控措辞）。
+
 ## 开发
 
 ```bash

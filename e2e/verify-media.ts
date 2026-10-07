@@ -264,14 +264,13 @@ check(
 	on.includes('generate_asset') &&
 	on.includes('generate_image') &&
 	on.includes('import_asset') &&
-	on.includes('cut') &&
-	on.includes('立绘三档取景') &&
+	on.includes('aivn-visual-craft') &&
 	on.includes('# 配乐（generate_bgm）'),
-	'配了生图 / 音乐时 persona 教一键 generate_asset、候选 generate_image 与配乐',
+	'配了生图 / 音乐时 persona 教一键 generate_asset、候选 generate_image 与配乐，做法指向技能',
 );
 check(
 	'M20',
-	off.includes('现在**没有配生图后端**') && off.includes('import_asset') && !off.includes('# 配乐（generate_bgm）'),
+	off.includes('本剧目**没有配生图后端**') && off.includes('import_asset') && !off.includes('# 配乐（generate_bgm）'),
 	'没配时 persona 走 fallback，用 import_asset 登记外部图',
 );
 check(
@@ -279,6 +278,35 @@ check(
 	playwriterTail({ image: true }).includes('# 缺图怎么办') &&
 		!playwriterTail({ image: false }).includes('# 缺图怎么办'),
 	'剧作家的缺图章跟着生图能力位出现 / 消失',
+);
+
+// 9b. 技能库的两条门控规约（见 AGENTS.md「提示词地图」）：
+//   (i) 恒列的 name+description 必须能力中立；(ii) 正文点名门控工具时必须条件化措辞。
+const gatedToolNames = ['generate_asset', 'generate_image', 'generate_bgm', 'list_voices', 'web_search'];
+const skillDir = new URL('../skills/', import.meta.url);
+const skillFiles = Object.fromEntries(
+	await Promise.all(
+		['aivn-play-setup', 'aivn-visual-craft', 'aivn-audio'].map(async (name) => [
+			name,
+			await readFile(new URL(`${name}/SKILL.md`, skillDir), 'utf8'),
+		]),
+	),
+);
+check(
+	'M21b',
+	Object.values(skillFiles).every((text) => {
+		const description = /^---\n[\s\S]*?^description:\s*(.+)$/m.exec(text)?.[1] ?? '';
+		return gatedToolNames.every((name) => !description.includes(name));
+	}),
+	'三份 skill 的 description 能力中立（不点名门控工具）',
+);
+check(
+	'M21c',
+	['aivn-visual-craft', 'aivn-play-setup'].every(
+		(name) =>
+			(skillFiles[name] ?? '').includes('配了生图后端') && (skillFiles[name] ?? '').includes('没配生图后端'),
+	),
+	'点名门控工具的 skill 正文写成条件化措辞（配了 / 没配 两支都在）',
 );
 
 // 9. 并发写：同一批里几次落库不能互相覆盖（读-改-写按文件串行）

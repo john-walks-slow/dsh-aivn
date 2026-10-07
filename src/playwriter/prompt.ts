@@ -170,7 +170,7 @@ const MEMORY_RULES = `## 记忆卡（memory/index/）
 
 - **改既有卡先 read、再用 edit 定点改**，整篇 write 容易把没提到的内容抹掉。
 - 写具体可用的设定（地点长什么样、约定是什么），不写「待补充」。
-- 角色不在这里，走 \`characters/<id>.md\`（见《引入新角色》）。
+- 角色不在这里，走 \`characters/<id>.md\`（见《演出中引入新主体》）。
 
 ## 世界状态（memory/always/state/）
 
@@ -187,43 +187,17 @@ const MEMORY_RULES = `## 记忆卡（memory/index/）
 - 写坏了不报错但会悄悄少几行：拿不准就调 \`validate_play\` 看一眼。`;
 
 /**
- * 引入台上还没有的新主体时的三条路（建档 / 立绘 / 临时角色）。
+ * 引入台上还没有的新主体时的入口（建档 / 立绘 / 临时角色）。
  *
- * 第 2 步按 `can.image` 分叉：配了生图后端就是 `generate_asset`（同步等图、一键出图即入库），
- * 没配就退回「立绘要手工放进 assets/sprites/<立绘目录>/」——台上没有立绘的主体先别让它上台。
+ * 做法正文（卡可选、立绘目录、临时角色 `<say … name="路人甲">`、有生图后端时出图还是交用户）已下沉到
+ * 技能 `aivn-play-setup` 的「演出中引入新主体」一节——这里只留一句指路，别把三种走法再抄一遍。
+ * 角色外形与立绘差分的画法在 `aivn-visual-craft`，两个技能互相交叉引用。
  */
-function newCharacterRules(can: { image: boolean }): string {
-	return `## 引入新角色
+const NEW_CHARACTER_POINTER = `## 演出中引入新主体
 
-需要引入台上还没有的新主体时，按以下步骤：
-
-**1. 要人设才建档（write）**——**卡是可选的**：只上台不出声、或本来就是来换张图的主体
-（机甲、猫、道具）不该有一张卡。要建就把设定写进 \`characters/<id>.md\`，**文件名就是主体 id**：
-
-    write(path="characters/xiaoyu.md", content="---\\nname: 小雨\\n---\\n咖啡店打工的少女，说话温柔，常用省略号。")
-
-卡片是 frontmatter 头部 + 正文两段，头部只写 name / sprite / voice 三项（见《角色表》）。
-
-- **差分与取景体量不写在卡上**：差分就是立绘目录里的文件名，取景/体量/名牌落在 \`assets/manifest.json\`。
-  卡上唯一与立绘有关的是 \`sprite\` 那一格——**用哪一套**立绘。
-- **改既有卡先 read、再用 edit 定点改**：整篇 write 会把你没提到的字段抹掉。
-- 玩家扮演的主角也是一张普通卡，id 固定 \`protagonist\`：要改主角设定就改它，别另建一张。
-
-**2. 立绘**：${
-		can.image
-			? `剧目里没有就当场要一张——\`generate_asset\` 按 \`spriteId\`（主体 id）+ \`variant\` 一键出图入库（见《缺图怎么办》），
-回执回来之后 \`<actor id="xiaoyu" variant="smile">\` 就能用。一次只出一张，先出这一轮真要上台的那个差分。`
-			: `本剧目没有生图工具——立绘由玩家手工放进 \`assets/sprites/<立绘目录>/\`，
-文件名（去掉扩展名）就是 \`variant\` 名，\`<actor id="xiaoyu" variant="smile">\` 直接可用。
-台上还没有立绘的主体先别让它上台——改用旁白/台词交代，或只写有立绘的角色。`
-	}
-
-**3. 临时角色（一次性 NPC）**：只出声不出图也行，直接在 say 上写 name 属性：
-
-    <say id="passerby" name="路人甲">你好啊。</say>
-
-name 只覆盖本句名牌，不写入角色表。只想出声、不上台的路人用这条就够了。`;
-}
+需要引入台上还没有的新主体（角色、机甲、猫、道具）时，**先加载技能 \`aivn-play-setup\` 的
+「演出中引入新主体」一节**——那里写了建档（卡是可选的）、立绘目录、临时角色（只出声不上台）
+三种走法，以及有没有生图后端各走哪条路。人物外形与立绘差分怎么写见技能 \`aivn-visual-craft\`。`;
 
 /** 演出契约：引擎认的硬规则，用户不可改（节奏与素材来源见《写作参数》，文风与禁忌见 craft.md）。 */
 const CONTRACT_RULES = `# 演出契约（引擎规则，不可改）
@@ -275,26 +249,19 @@ ${HOW_I_WORK}`;
 /**
  * 缺图章：配了生图后端才出现（没配时工具也没注册，提示词里不能教它调一个不存在的工具）。
  *
- * 剧作家这边的出图是**同步**的（D3）：一次调用等到图落盘、当场入库，回执给最终路径。
- * 所以这一章的重点不是「怎么发起」，而是「什么时候才值得占掉一轮的一半」。
+ * 做法正文（一键 `generate_asset` 与原子三件套各适用什么场合、抠脏了怎么办）已下沉到技能
+ * `aivn-visual-craft` 的「演出中缺图」一节——这里只留这一章的入口与那条最要紧的取舍：
+ * 出图同步、占掉这一轮的一半，只为这一轮真要引用的东西出。
  */
-const IMAGE_CHAPTER = `# 缺图怎么办（generate_asset / generate_image）
+const IMAGE_POINTER = `# 缺图怎么办（generate_asset / generate_image）
 
-剧目里没有你要的背景 / 插图 / 立绘时，当场要一张。出图**同步**（70–140 秒，这一轮就停在那里）；
-**一轮的预算是 240 秒，一次出图占掉一半以上**——只为这一轮真的要引用的东西出，别为「以后可能用得上」出。
+剧目里没有你要的背景 / 插图 / 立绘时，**先加载技能 \`aivn-visual-craft\` 的「演出中缺图」一节**——
+那里写了何时值得出图、一键 \`generate_asset\` 与原子三件套（\`generate_image\` / \`cut\` / \`import_asset\`）
+各自适用什么场合、抠脏了怎么重抠。
 
-**默认走 \`generate_asset\`（一键）**：出图 +（立绘）自动抠底 + 登记，回执给最终路径——**回执回来之后**那一行剧本才引用得到它。
-
-- 背景 / 插图：\`generate_asset(kind="background", name="cafe", prompt="…")\`；
-  立绘：\`generate_asset(kind="sprite", spriteId="xiaoyu", variant="smile", framing="full", prompt="…")\`。
-- **先看 A 区的《素材清单》与《角色表》**：已有同名或有现成的同类素材时不要重出——同名时引擎会直接跳过并告诉你（它不覆盖旧图）。
-- 立绘非 neutral 的差分自动垫该主体的 neutral 定妆照。那个主体**一张立绘都还没有**时，引擎会先自动补一张 neutral 再出这张差分——回执里两张都给你，记得两张都跟用户交代；但它**已经有别的差分、只缺 neutral** 时会被拒绝（那套差分是拿别的脸锚定的，先单独要一张 neutral 让用户过目）。人物用 framing=full 或 half，猫与道具用 square。
-- 出图期间这一轮是停着的、玩家看到的是等待——不要一轮里连出好几张。
-
-**要精细控制时**用原子三件套（\`generate_image\` / \`cut\` / \`import_asset\`）：
-- **要让用户挑候选**（比如定妆照）：\`generate_image\` 只出一张候选（回执给图片路径），把预览贴给用户挑；他点头的那张再落位——背景/插图 \`import_asset(kind=…, name=…)\`，立绘先 \`cut\` 抠底再 \`import_asset(kind="sprite", spriteId=…, variant=…)\`。
-- **图来自别处**（用户给的、下载的、别的模型出的）：直接用 \`import_asset\`；立绘要透明底就先 \`cut\`。
-- **抠脏了**（边上脏、发丝被啃）：\`cut(source=…)\` 调参重抠（画面不变、只重跑抠底），别重新出图。`;
+**出图是同步的**（70–140 秒，这一轮就停在那里），一轮的预算是 240 秒——**只为这一轮真的要引用的东西出**，
+别为「以后可能用得上」出，也别一轮里连出好几张。先看 A 区的《素材清单》与《角色表》：有现成的就别重出
+（同名时引擎会跳过并告诉你）。`;
 
 /**
  * 剧作家提示词的**后半**：舞台契约与写作规矩，全是静态文本，只有「要不要教出图」跟着能力位。
@@ -311,9 +278,9 @@ ${ENDING_RULES}
 
 ${MEMORY_RULES}
 
-${newCharacterRules(can)}
+${NEW_CHARACTER_POINTER}
 
-${can.image ? `${IMAGE_CHAPTER}
+${can.image ? `${IMAGE_POINTER}
 
 ` : ''}${CONTRACT_RULES}`;
 }

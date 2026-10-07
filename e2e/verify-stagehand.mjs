@@ -156,6 +156,14 @@ try {
 	// 技能库：三份自带技能都挂上（这一条同时证明 skill 行装载成功、包内路径算对了）
 	check('S11', catalog.includes('aivn-audio'), '技能清单里有 aivn-audio');
 	check('S12', catalog.includes('aivn-visual-craft') && catalog.includes('aivn-play-setup'), '技能清单里有 aivn-visual-craft 与 aivn-play-setup');
+	// 门控规约 (i)：技能清单的 name+description 恒列，必须能力中立——不点名任何门控工具。
+	// 详见 AGENTS.md「提示词地图」。
+	const gatedTools = ['generate_asset', 'generate_image', 'generate_bgm', 'list_voices', 'web_search'];
+	check(
+		'S12b',
+		gatedTools.every((name) => !catalog.includes(name)),
+		'技能清单（name+description）不点名门控工具（恒列内容不谎报能力）',
+	);
 
 	// 工具面：搭台助手那一套；剧作家的收束口一个都不在，「只写一个文件」的那几个也没有名字可装
 	const expects = ['validate_play', 'set_stage_style'];
@@ -182,7 +190,7 @@ try {
 		allImageOn
 			? namedOneStep && prompt.includes('import_asset') && musicChapter
 			: headings.includes('# 出图要点') &&
-					prompt.includes('现在**没有配生图后端**') &&
+					prompt.includes('本剧目**没有配生图后端**') &&
 					prompt.includes('import_asset') &&
 					!musicChapter,
 		allImageOn ? 'persona 教一键 generate_asset 与配乐（与工具面一致）' : 'persona 走没配生图的 fallback 章，用 import_asset 登记外部图',
