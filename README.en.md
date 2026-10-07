@@ -624,6 +624,16 @@ browser half (`lib/client.js`) bundles `@aivn/stage`, so it is judged strictly o
 sibling checkout is clean; otherwise it warns — a difference there usually means someone is editing
 that package right now.
 
+### Release a new version
+
+```bash
+npm run release                                            # rebuild + typecheck + bump patch + pack
+node ~/.agents/skills/npm-publish/scripts/publish-webauthn.cjs /tmp/dsh-aivn-<version>.tgz   # fingerprint publish
+git push --follow-tags                                     # the version commit and tag to GitHub
+```
+
+Version semantics: patch for fixes, minor for features, major for breaking changes.
+
 ### e2e
 
 ```bash

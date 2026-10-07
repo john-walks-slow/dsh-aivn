@@ -645,6 +645,16 @@ git config core.hooksPath .githooks    # 每个 clone 各做一次，之后提�
 `lib/` 是**跟踪的构建产物**：DSH 直接加载它，所以改完 `src/` 必须重建再提交。
 `npm publish` 前会跑 `prepublishOnly`（重建 + 类型检查），保证发出去的和源码一致。
 
+### 发新版
+
+```bash
+npm run release                                            # 重建 + typecheck + bump patch + 打包
+node ~/.agents/skills/npm-publish/scripts/publish-webauthn.cjs /tmp/dsh-aivn-<新版>.tgz   # 指纹发布
+git push --follow-tags                                     # 版本提交与 tag 上 GitHub
+```
+
+版本语义：修 bug 用 patch、加功能用 minor、破坏性改动用 major。
+
 ### e2e
 
 ```bash
