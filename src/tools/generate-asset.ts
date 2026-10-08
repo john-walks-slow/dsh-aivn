@@ -6,8 +6,8 @@
  * 在**这条编排路径**里由引擎自动加（因为它知道出的是立绘），原子路径则靠技能里的配方。
  */
 import { defineTool } from '@deepseek-ai/dsh-tools';
-import type { MediaBackends } from '../../media/backends';
-import { playAssetsOf } from '../../media/assets';
+import type { MediaBackends } from '../media/backends';
+import { playAssetsOf } from '../media/assets';
 import {
 	existingNote,
 	generatedResult,
@@ -17,8 +17,8 @@ import {
 	textOutput,
 	toTarget,
 	type ImageArgs,
-} from '../../media/generate-tool';
-import type { PlayContext } from '../../tools/context';
+} from '../media/generate-tool';
+import type { PlayContext } from './context';
 
 const DESCRIPTION = [
 	'**一键**：生成 +（立绘）抠底 + 登记，一次完成——适合「就想要一张能用的图」。',

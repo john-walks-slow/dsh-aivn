@@ -25,10 +25,10 @@
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EndingsLedger, readLedger } from '../src/ledger';
-import { readPlaySnapshot } from '../src/play-context';
-import { resetPlayState } from '../src/play-state';
-import { loadPlaySync } from '../src/play';
+import { EndingsLedger, readLedger } from '../src/play/ledger';
+import { readPlaySnapshot } from '../src/play/play-context';
+import { resetPlayState } from '../src/play/play-state';
+import { loadPlaySync } from '../src/play/play';
 
 const dir = mkdtempSync(join(tmpdir(), 'dsh-aivn-ending-'));
 process.on('exit', () => rmSync(dir, { recursive: true, force: true }));

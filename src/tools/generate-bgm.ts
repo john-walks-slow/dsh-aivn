@@ -8,10 +8,10 @@
  * 这里只留契约：一首、落 `assets/bgm/`、id 就是剧本里 `<scene bgm="…">` 引用的名字。
  */
 import { defineTool } from '@deepseek-ai/dsh-tools';
-import { playAssetsOf } from '../../media/assets';
-import type { MediaBackends } from '../../media/backends';
-import { textOutput } from '../../media/generate-tool';
-import type { PlayContext } from '../../tools/context';
+import { playAssetsOf } from '../media/assets';
+import type { MediaBackends } from '../media/backends';
+import { textOutput } from '../media/generate-tool';
+import type { PlayContext } from './context';
 
 const DESCRIPTION = [
 	'生成一首背景音乐并落库（`assets/bgm/<name>.m4a`）。`name` 就是剧本里 `<scene bgm="…">` 引用的 id。',

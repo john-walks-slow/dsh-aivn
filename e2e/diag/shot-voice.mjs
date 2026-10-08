@@ -4,12 +4,12 @@
  *
  * 开到「剧作家已经开口、语音开关在场」那一刻，把舞台整块拍下来。
  *
- * 运行：dsh-e2e run e2e/shot-voice.mjs
+ * 运行：dsh-e2e run e2e/diag/shot-voice.mjs
  */
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { clearPlay, seedPlay, PLAY } from './lib/fixture.mjs';
+import { clearPlay, seedPlay, PLAY } from '../lib/fixture.mjs';
 import {
 	WORKSPACE,
 	dismissOnboarding,
@@ -22,9 +22,9 @@ import {
 	sendMessage,
 	shot,
 	waitFor,
-} from './lib/boot.mjs';
+} from '../lib/boot.mjs';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 /** 与 verify-stage 同一个落点（已在 .gitignore 里）。 */
 const OUT = join(ROOT, 'e2e-artifacts');
 mkdirSync(OUT, { recursive: true });

@@ -19,9 +19,9 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { createUserMessage, type MessageSource, type UserMessage } from '@deepseek-ai/dsh-llm';
 import type { SessionSeq } from '@deepseek-ai/dsh-session';
-import type { StageHub } from './hub';
-import type { InjectedMessages } from './injected';
-import type { LiveAgent, LiveSession } from './session';
+import type { StageHub } from '../hub';
+import type { InjectedMessages } from '../injected';
+import type { LiveAgent, LiveSession } from '../session';
 
 /** 导演消息的来源标签。宿主与舞台都按它把导演的话和玩家的话分开。 */
 const DIRECTOR_KIND = 'dsh-aivn-director';

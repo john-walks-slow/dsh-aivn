@@ -12,6 +12,7 @@ docs/research/
 /assets/
 /characters/
 /memory/
+/endings.json
 # 剧目皮肤（style 模块的 e2e 会临时落一份，跑完自己删）
 /theme.json
 

@@ -10,7 +10,7 @@
  */
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
-import { readPlayReadiness, renderReadiness } from '../readiness';
+import { readPlayReadiness, renderReadiness } from '../play/readiness';
 import type { PlayContext } from './context';
 
 const DESCRIPTION = [

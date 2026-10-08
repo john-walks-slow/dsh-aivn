@@ -20,8 +20,8 @@
  * `联网检索`（`can.search`）；`出图要点` 恒在、按 `can.image` 分措辞（都写成条件化措辞，不谎报能力）。
  * 详见 AGENTS.md 的「提示词地图」。
  */
-import { PLAY_FILES } from '../play-files';
-import type { Capabilities } from './capabilities';
+import { PLAY_FILES } from '../play/play-files';
+import type { Capabilities } from '../capabilities';
 
 /** 身份与剧目在哪：不随能力位变，两个阶段都这样。 */
 const IDENTITY = `你是这座剧目的**搭台助手**——负责把剧目准备好：世界观前提、角色卡、创作口径、

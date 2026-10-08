@@ -9,7 +9,7 @@
  */
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
-import type { VoiceCatalog, VoiceEntry } from '../voice-catalog';
+import type { VoiceCatalog, VoiceEntry } from '../voice/voice-catalog';
 
 /** 一次列多少条：够挑就行，音色库动辄上千条。 */
 const LIST_LIMIT = 25;

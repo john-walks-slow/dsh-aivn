@@ -18,8 +18,8 @@ import {
 	describeTheme,
 	sanitizeTheme,
 	validateThemePatch,
-} from '../src/style-tokens';
-import { readPlayTheme, THEME_FILE } from '../src/theme';
+} from '../src/style/style-tokens';
+import { readPlayTheme, THEME_FILE } from '../src/style/theme';
 
 const results: Array<{ id: string; ok: boolean; note: string }> = [];
 const check = (id: string, ok: boolean, note = ''): void => {

@@ -12,10 +12,10 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { languageLabel } from '@aivn/core';
 import type { Context } from '@deepseek-ai/cordis';
-import { loadPlaySync } from '../play';
-import { readPlayReadiness, renderReadiness } from '../readiness';
-import { countTheme } from '../style-tokens';
-import { readPlayTheme, THEME_FILE } from '../theme';
+import { loadPlaySync } from '../play/play';
+import { readPlayReadiness, renderReadiness } from '../play/readiness';
+import { countTheme } from '../style/style-tokens';
+import { readPlayTheme, THEME_FILE } from '../style/theme';
 
 /** 一次快照的存活时间：够覆盖一个 turn 的多个 step，又保证跨轮必重读。 */
 const TTL_MS = 1_000;

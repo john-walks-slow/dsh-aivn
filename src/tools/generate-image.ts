@@ -8,10 +8,10 @@
  * 在技能 `aivn-visual-craft` —— 出立绘前先按它写 prompt。
  */
 import { defineTool } from '@deepseek-ai/dsh-tools';
-import type { MediaBackends } from '../../media/backends';
-import { playAssetsOf } from '../../media/assets';
-import { genericResult, textOutput } from '../../media/generate-tool';
-import type { PlayContext } from '../../tools/context';
+import type { MediaBackends } from '../media/backends';
+import { playAssetsOf } from '../media/assets';
+import { genericResult, textOutput } from '../media/generate-tool';
+import type { PlayContext } from './context';
 
 const DESCRIPTION = [
 	'生成一张图（**候选**）：给一段英文画面描述，返回图片文件路径与预览。',

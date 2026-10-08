@@ -9,7 +9,7 @@
  * - 不落 `media-cache/web-images/` 缓存。那张缓存是给工坊 `view_image` 复用同一个网址用的；
  *   这里的下载结果直接当垫图字节交给生图后端，同一网址偶尔重下一次（几秒）比维护一层
  *   缓存失效便宜。
- * - 出口代理不自己配（与 `tts.ts` / `stagehand/exa.ts` 同理）：DSH 进程带着
+ * - 出口代理不自己配（与 `voice/tts.ts` / `exa.ts` 同理）：DSH 进程带着
  *   `NODE_USE_ENV_PROXY` 与 `HTTP(S)_PROXY`，全局 `fetch` 自己走。
  */
 import { lookup } from 'node:dns/promises';

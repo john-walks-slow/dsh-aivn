@@ -10,7 +10,7 @@ import { basename } from 'node:path';
 import type { Context } from '@deepseek-ai/cordis';
 import type { CommandResult } from '@deepseek-ai/dsh-commands';
 import type {} from '@deepseek-ai/dsh-commands';
-import { scaffoldPlay } from './scaffold';
+import { scaffoldPlay } from './play/scaffold';
 import type { LiveAgent } from './session';
 
 const DESCRIPTION = '把当前工作目录立成一座剧目（写 play.json 与骨架文件）';

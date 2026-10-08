@@ -12,7 +12,7 @@
  *   （`promptAlt="interrupt"`）而不是开新枝，生图那一格不摆（`showGenerate={false}`）——
  *   `targets` 里的锚点是插件自己铸的（`beat:current` / `line:<seq>`），服务端按它决定
  *   作废到哪儿。回退与分支交给 DSH 原生那两样（rewind / 在新对话中分支），舞台只是跟着
- *   会话面重投影一遍（`src/stage-log.ts`）。
+ *   会话面重投影一遍（`src/stage/stage-log.ts`）。
  * - **没有语音**：`voiceAvailable={false}`，三态恒 none，重听按钮不出现。
  * - **轮边界来自宿主**：不是编排器的 `beat_end`，是 tap 从 `agent/status` 摘下来的
  *   `beat` 帧——剧作家起笔即开演，停笔即「写完了，等玩家」。
@@ -430,7 +430,7 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 	 * 一次导演动作。三条路都走 `/aivn/direct`：提示（引导 / 打断）与改写 / 重写。
 	 *
 	 * 与 `send` 分开是因为它不是「替玩家说一句」：宿主给这些话自己一支来源，舞台的时间线上
-	 * 不会多出一行玩家台词；而改写 / 重写还会作废会话里已经写出来的那一段（见 `director.ts`）。
+	 * 不会多出一行玩家台词；而改写 / 重写还会作废会话里已经写出来的那一段（见 `src/stage/director.ts`）。
 	 */
 	const direct = useCallback(
 		async (action: 'guide' | 'interrupt' | 'rewrite', text: string, from?: 'beat' | 'line'): Promise<void> => {

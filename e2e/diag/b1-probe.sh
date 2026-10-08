@@ -14,7 +14,7 @@ set -u
 
 SID="${1:?用法: b1-probe.sh <session-id>}"
 BASE="${2:?用法: b1-probe.sh <session-id> <base-url>}"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 cd "$ROOT" || exit 1
 fail=0

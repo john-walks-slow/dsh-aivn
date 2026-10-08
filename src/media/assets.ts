@@ -34,8 +34,8 @@ import {
 	type SpriteFraming,
 	type SpriteStature,
 } from '@aivn/core';
-import { characterNames, readManifest, resolveInPlay } from '../assets';
-import { loadPlaySync } from '../play';
+import { characterNames, readManifest, resolveInPlay } from '../play/assets';
+import { loadPlaySync } from '../play/play';
 import { cutout, resolveTuning, type CutoutResult, type CutoutTuning } from './cutout';
 import { aspectMatches, extOf, sniffImageMime, sizeOfImage, type ImageAspect, type ImageBackend } from './image';
 import type { MusicBackend } from './music';

@@ -2,13 +2,13 @@
 /**
  * 舞台样式体检：插件把 `stage.css` 注进去没有、令牌拿到没有、按钮算出来是什么样。
  *
- * 用法：dsh-e2e run e2e/css-diag.mjs（实例要在跑）
+ * 用法：dsh-e2e run e2e/diag/css-diag.mjs（实例要在跑）
  * 不开 LLM 轮：新会话的工作目录就是仓库根，那儿有 play.json，舞台会渲染空态与「开演」按钮。
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PLAY } from './lib/fixture.mjs';
+import { PLAY } from '../lib/fixture.mjs';
 import {
 	dismissOnboarding,
 	gotoGui,
@@ -20,9 +20,9 @@ import {
 	pickPreset,
 	sendMessage,
 	waitFor,
-} from './lib/boot.mjs';
+} from '../lib/boot.mjs';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const OUT = join(ROOT, 'e2e-artifacts');
 mkdirSync(OUT, { recursive: true });
 

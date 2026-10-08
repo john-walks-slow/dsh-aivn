@@ -8,10 +8,10 @@
  * `media-cache/sprite-sources/`，日后可重抠。写 `assets/`、补素材表（呈现声明 + 描述）、记台账。
  */
 import { defineTool } from '@deepseek-ai/dsh-tools';
-import type { MediaBackends } from '../../media/backends';
-import { playAssetsOf, type AssetTarget } from '../../media/assets';
-import { generatedResult, textOutput } from '../../media/generate-tool';
-import type { PlayContext } from '../../tools/context';
+import type { MediaBackends } from '../media/backends';
+import { playAssetsOf, type AssetTarget } from '../media/assets';
+import { generatedResult, textOutput } from '../media/generate-tool';
+import type { PlayContext } from './context';
 
 const DESCRIPTION = [
 	'把一张图**登记**成剧目素材：写 `assets/`、补素材表（呈现声明 + 描述）、记台账。**不抠底**。',

@@ -33,7 +33,7 @@ import { listAssets, readManifest } from './assets';
 import { loadPlaySync } from './play';
 import { assetCapabilitiesOf, renderCraftParams, resolveCraft } from './craft';
 import { readLedger } from './ledger';
-import { playwriterTail } from './playwriter/prompt';
+import { playwriterTail } from '../playwriter/prompt';
 
 /** 一次快照的存活时间：够覆盖一个 turn 的多个 step，又保证跨轮必重读。 */
 const TTL_MS = 1_000;

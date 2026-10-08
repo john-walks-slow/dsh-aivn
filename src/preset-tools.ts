@@ -4,7 +4,7 @@
  * 与 AIVN 的差别只有两处：那边 `createAgentKit()` 按角色一次性装配好 `tools` 数组交给 pi，
  * 这里没有那个装配点——工具注册在 **Agent 自己的 ctx 上**（`agent.ctx.tools.register`），
  * 于是要自己判断「这个 Agent 跑的是哪个预设、该装哪些工具」；另外**没有「起剧目」工具**：
- * 写 `play.json` 就是文件工具的事，字段与布局在提示词的《剧目文件》那一章（见 `play-files.ts`）。
+ * 写 `play.json` 就是文件工具的事，字段与布局在提示词的《剧目文件》那一章（见 `play/play-files.ts`）。
  *
  * 判断读 `agentPresets.composedPreset(agent.ctx)`（**活的**预设，权威），
  * 会话头里的 `agentPreset` 只是创建事实、换过预设之后它就旧了，这里当兜底。
@@ -50,21 +50,21 @@ import type { SessionId } from '@deepseek-ai/dsh-session';
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools';
 import type { StageHub } from './hub';
 import type { MediaBackends } from './media/backends';
-import { registerPlayContext } from './play-context';
+import { registerPlayContext } from './play/play-context';
 import { PLAYWRITER_PRESET, STAGEHAND_PRESET, sessionPreset, sessionWorkspace, type LiveAgent } from './session';
-import type { Capabilities } from './stagehand/capabilities';
+import type { Capabilities } from './capabilities';
 import { registerStagehandContext } from './stagehand/context';
-import type { Exa } from './stagehand/exa';
+import type { Exa } from './exa';
 import { stagehandGuide } from './stagehand/prompt';
-import { createCutTool } from './stagehand/tools/cut';
-import { createGenerateAssetTool } from './stagehand/tools/generate-asset';
-import { createGenerateBgmTool } from './stagehand/tools/generate-bgm';
-import { createGenerateImageTool } from './stagehand/tools/generate-image';
-import { createImportAssetTool } from './stagehand/tools/import-asset';
-import { createListVoicesTool } from './stagehand/tools/list-voices';
-import { createSetStageStyleTool } from './stagehand/tools/set-stage-style';
-import { createWebSearchTool } from './stagehand/tools/web-search';
-import type { VoiceCatalog } from './stagehand/voice-catalog';
+import { createCutTool } from './tools/cut';
+import { createGenerateAssetTool } from './tools/generate-asset';
+import { createGenerateBgmTool } from './tools/generate-bgm';
+import { createGenerateImageTool } from './tools/generate-image';
+import { createImportAssetTool } from './tools/import-asset';
+import { createListVoicesTool } from './tools/list-voices';
+import { createSetStageStyleTool } from './tools/set-stage-style';
+import { createWebSearchTool } from './tools/web-search';
+import type { VoiceCatalog } from './voice/voice-catalog';
 import { gateSatisfied, TOOL_CATALOG, type ToolSpec } from './tool-catalog';
 import type { PlayContext } from './tools/context';
 import { createValidatePlayTool } from './tools/validate-play';

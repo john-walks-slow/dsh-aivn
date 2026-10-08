@@ -2,7 +2,7 @@
  * 预设 id。
  *
  * 一个会话跑哪个预设决定它在舞台上的角色：只有剧作家预设的会话才会被接进
- * DSL 管线（见 `stage-tap.ts`），搭台助手只管生成素材、不上台。
+ * DSL 管线（见 `stage/stage-tap.ts`），搭台助手只管生成素材、不上台。
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type {
@@ -30,7 +30,7 @@ export const STAGEHAND_PRESET = 'aivn-stagehand';
  * Agent 手里的那条会话，按本插件用到的面收窄。
  *
  * 事件日志与会话面都是 `@deepseek-ai/dsh-session` 的公开类型（类型位置上的收窄不会丢精度）；
- * `append` 只用来投一条**替换会话面尾部**的导演标记（见 `director.ts`），所以照原样声明。
+ * `append` 只用来投一条**替换会话面尾部**的导演标记（见 `stage/director.ts`），所以照原样声明。
  */
 export interface LiveSession {
 	readonly id: string;
@@ -73,7 +73,7 @@ export interface LiveAgent {
 	/**
 	 * 投一条「这一步之内」的消息（`next-step`）。与 `followup` 的区别是要紧的：一轮开始时
 	 * 宿主从 `next-turn` 只认领一条，`next-step` 整批认领且排在它前面——开局指令靠这一点
-	 * 挤进玩家的第一句所在的那一轮（见 `stage-tap.ts` 的 `openPlay`）。
+	 * 挤进玩家的第一句所在的那一轮（见 `stage/stage-tap.ts` 的 `openPlay`）。
 	 */
 	inject(message: UserMessage): void;
 	/** 投一条 steering（最近的 step 边界吃）。 */

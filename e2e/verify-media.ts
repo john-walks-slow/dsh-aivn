@@ -18,7 +18,7 @@ import { SPRITE_FRAMING_SHOT } from '@aivn/core';
 import { PlayAssets } from '../src/media/assets';
 import { cutout } from '../src/media/cutout';
 import { playwriterTail } from '../src/playwriter/prompt';
-import { readPlayReadiness } from '../src/readiness';
+import { readPlayReadiness } from '../src/play/readiness';
 import { stagehandPrompt } from '../src/stagehand/prompt';
 import type { GeneratedImage, ImageBackend, ImageRequest } from '../src/media/image';
 import type { GeneratedMusic, MusicBackend } from '../src/media/music';

@@ -3,7 +3,7 @@
  *
  * 逐条搬自 AIVN `apps/server/src/imageBackend.ts`，只按插件侧的事实改了三处：
  * 配置键名（`image.*` 而不是 `STAGE_IMAGE_*`）、网络走全局 `fetch`（DSH 进程带环境代理，
- * 与 `tts.ts` / `exa.ts` 同一口径）、画幅不符的兜底在 `commit.ts` 落盘前那一道。
+ * 与 `voice/tts.ts` / `exa.ts` 同一口径）、画幅不符的兜底在 `commit.ts` 落盘前那一道。
  *
  * 协议差异收敛在 `gemini-image.ts` / `openai-image.ts` / `modelslab-image.ts` 三个实现里，
  * 调用方只描述「要一张什么图」。

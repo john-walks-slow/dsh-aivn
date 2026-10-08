@@ -13,7 +13,7 @@
  * 限制级通道 / 记忆详情与归档检索还没实现，对应的整章一律删掉，不留悬空承诺。
  */
 
-import { PLAY_FILES } from '../play-files';
+import { PLAY_FILES } from '../play/play-files';
 
 /** 开场：这份提示词服务的角色，以及玩家发来的消息的两种含义。 */
 const ROLE_INTRO = `你是一部视觉小说的剧作家（playwriter），实时为一部正在"直播"的游戏写剧本。

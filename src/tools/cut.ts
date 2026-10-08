@@ -6,10 +6,10 @@
  * `media-cache/sprite-sources/`，日后想重抠时喂给它即可。
  */
 import { defineTool } from '@deepseek-ai/dsh-tools';
-import type { MediaBackends } from '../../media/backends';
-import { playAssetsOf } from '../../media/assets';
-import { textOutput } from '../../media/generate-tool';
-import type { PlayContext } from '../../tools/context';
+import type { MediaBackends } from '../media/backends';
+import { playAssetsOf } from '../media/assets';
+import { textOutput } from '../media/generate-tool';
+import type { PlayContext } from './context';
 
 const DESCRIPTION = [
 	'抠底：把一张**纯色底**的图（通常是要当立绘的主体）转成透明 PNG。回执给输出路径与抠底体检。',

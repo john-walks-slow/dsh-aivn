@@ -13,10 +13,10 @@ import { rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 import { defineTool, type ParameterPropertySpec, type ParameterSchemaSpec } from '@deepseek-ai/dsh-tools';
-import { PLAY_FILE } from '../../play';
-import { describeTheme, STYLE_TOKENS, validateThemePatch, type StyleToken } from '../../style-tokens';
-import { readPlayTheme, THEME_FILE } from '../../theme';
-import type { PlayContext } from '../../tools/context';
+import { PLAY_FILE } from '../play/play';
+import { describeTheme, STYLE_TOKENS, validateThemePatch, type StyleToken } from '../style/style-tokens';
+import { readPlayTheme, THEME_FILE } from '../style/theme';
+import type { PlayContext } from './context';
 
 const RESET = '省略 = 保持现状；给 null = 恢复默认（该键从 theme.json 移除，删空则文件整个删掉）。';
 

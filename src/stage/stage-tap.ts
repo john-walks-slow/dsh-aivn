@@ -24,14 +24,14 @@ import type { Context } from '@deepseek-ai/cordis';
 import { StageDslParser, type EndingAttrs, type StageEvent } from '@aivn/core';
 import type {} from '@deepseek-ai/dsh-agent';
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm';
-import type { StageHub } from './hub';
-import type { InjectedMessages } from './injected';
-import type { EndingsLedger } from './ledger';
-import { loadPlaySync, type Play } from './play';
-import { resetPlayState } from './play-state';
-import type { VoiceHost } from './voice-host';
-import type { VoicePipeline } from './voice';
-import { attachedAgent, PLAYWRITER_PRESET, sessionPreset, sessionWorkspace, type LiveAgent } from './session';
+import type { StageHub } from '../hub';
+import type { InjectedMessages } from '../injected';
+import type { EndingsLedger } from '../play/ledger';
+import { loadPlaySync, type Play } from '../play/play';
+import { resetPlayState } from '../play/play-state';
+import type { VoiceHost } from '../voice/voice-host';
+import type { VoicePipeline } from '../voice/voice';
+import { attachedAgent, PLAYWRITER_PRESET, sessionPreset, sessionWorkspace, type LiveAgent } from '../session';
 
 /** 事件载荷都带一层 `{ agent }` 外壳（由 agent 作用域的分发器补上）。 */
 interface AgentShell {

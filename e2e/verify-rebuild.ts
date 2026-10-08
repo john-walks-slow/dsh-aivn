@@ -29,9 +29,9 @@
  */
 import { StageHub } from '../src/hub';
 import { InjectedMessages } from '../src/injected';
-import { rebuildStage } from '../src/stage-log';
+import { rebuildStage } from '../src/stage/stage-log';
 import type { LiveSession } from '../src/session';
-import type { VoiceHost } from '../src/voice-host';
+import type { VoiceHost } from '../src/voice/voice-host';
 
 const SAY = (text: string): string => `<say id="lin">${text}</say>`;
 

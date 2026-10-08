@@ -6,12 +6,16 @@
 
 | 路径 | 是什么 |
 | --- | --- |
-| `src/` | 宿主半边（Cordis 插件）：中枢、DSL 管线、路由、剧目脚手架 |
-| `src/play-context.ts` | A 区注入：把前提 / 角色表 / 素材清单 / 写作参数 / 记忆索引 / 状态区挂进系统提示词 |
+| `src/`（根） | 宿主接线（Cordis 插件）：`index`（装配）、`routes`、`session`、`hub`、`preset-tools`、`tool-catalog`、`commands`、`injected`，以及宿主级服务 `capabilities` / `exa` |
+| `src/play/` | 剧目领域：`play`（数据层）、`play-context`（A 区注入）、`play-files`（《剧目文件》）、`play-state`、`craft`、`readiness`、`scaffold`、`ledger`、`assets` |
+| `src/stage/` | 演出投影：`stage-tap`（DSL→IR）、`stage-log`（会话面重投影）、`director`（导演工具栏） |
+| `src/style/` | 舞台皮肤：`style-tokens`（令牌白名单与校验）、`theme`（`theme.json` 读取） |
+| `src/voice/` | 语音：`tts`（Fish 客户端）、`voice`（分句/预取管线）、`voice-host`（按会话接线）、`voice-catalog`（音色库） |
+| `src/media/` | 生图 / 音乐 / 抠底的后端实现与素材落库（无角色分叉） |
 | `src/playwriter/` | 剧作家预设与提示词（停止点是剧本里的 `<stop …/>`，不是工具） |
+| `src/stagehand/` | 搭台助手专属：`prompt`（persona/guide）、`context`（《当前状态》注入） |
 | `src/tool-catalog.ts` | AIVN 工具面的单一真相源（工具名、职责、开启门控）；装配与提示词工具表都从它派生 |
-| `src/tools/` | 两个预设共用的工具与工具上下文（`validate_play` / `PlayContext`） |
-| `src/play-files.ts` | 《剧目文件》那一章：目录布局与 `play.json` / 角色卡的字段，**两个预设共用同一段文本**（写文件就是建剧目，没有「起剧目」工具） |
+| `src/tools/` | 两个预设共用的**全部** AIVN 工具（9 个）+ 工具上下文（`PlayContext`） |
 | `src/client/` | 浏览器半边（React），挂在 `conversation.view` 槽 |
 | `lib/` | **跟踪的构建产物**（`lib/index.js` / `lib/client.js`）——DSH 直接加载它 |
 | `e2e/` | dsh-e2e 套件 |
@@ -36,14 +40,14 @@
    （**别退回按正文比对**，改一个字就静默失效）。
    引擎自己补的消息想挤进**当前**那一轮只能用 `agent.inject`（落 `next-step`，整批认领）：
    `followup` 落 `next-turn`，而一轮只认领一条，第二条要等下一轮。开局指令就是这么补的
-   （`stage-tap.ts` 的 `openPlay`，跟着玩家的第一条消息走）。
+   （`stage/stage-tap.ts` 的 `openPlay`，跟着玩家的第一条消息走）。
    **结局（`<ending …/>`）是同一族的标签**：也在剧本末行、取代那一轮的 `<stop>`，终局态从重放的 IR 推出
    （`stage-tap` 按实时/重建两条回调维护 per-session `ended`，`EndingsLedger` 把结局落账到工作区根
    `endings.json`）。**重建只重推终局标记、绝不重复落账**；结局之后引擎用 `followup` 单开一轮要收束散文
-   （`<epilogue>`，回填账本 `summary`）。`play.json` 的 `newGamePlus` 只走 A 区注入（`play-context.ts` 的
+   （`<epilogue>`，回填账本 `summary`）。`play.json` 的 `newGamePlus` 只走 A 区注入（`play/play-context.ts` 的
    `aivn:play-endings` 段），引擎不做任何 gate。详见 README「结局与多周目」。
 5. **提示词分两段**：`PLAYWRITER_PROMPT` 是 persona 的 `prefix`（静态前半），
-   `PLAYWRITER_TAIL` 由 `src/play-context.ts` 注册成 order 200 的段。中间夹着 A 区的动态段——
+   `PLAYWRITER_TAIL` 由 `src/play/play-context.ts` 注册成 order 200 的段。中间夹着 A 区的动态段——
    `persona` 那一格只装得下一段静态文本，所以「A 区之后」的几章必须由插件自己挂。
    改提示词时看清楚一段属于哪半边，别把动态内容写回静态 prefix。
 
@@ -62,7 +66,7 @@ agent 提示词分三层，**每一类知识只有一个家**。改任何提示�
 - **机制**（怎么调、参数形状、会不会覆盖、同步等多久）→ 工具 `DESCRIPTION`。
 - **食谱**（做法步骤、选源/授权、画风与外形配方）→ 按需加载的 skill。
 - **身份 / 职责边界 / 每轮契约 / 能力位门控指针** → persona。
-- **数据渲染模板**（读盘→文本）→ `src/play-context.ts` / `src/stagehand/context.ts` / `src/craft.ts`。
+- **数据渲染模板**（读盘→文本）→ `src/play/play-context.ts` / `src/stagehand/context.ts` / `src/play/craft.ts`。
 - persona 里出现工具名时只描述「何时用」，参数细节归 DESCRIPTION。
 
 **代码里的提示词位置**：
@@ -70,17 +74,17 @@ agent 提示词分三层，**每一类知识只有一个家**。改任何提示�
 | 提示词 | 文件 | 注入点 | 门控 |
 | --- | --- | --- | --- |
 | 剧作家身份 / 剧目在哪 / 怎么工作 | `src/playwriter/prompt.ts` | persona.prefix | — |
-| 《剧目文件》 | `src/play-files.ts` | prefix + tail（两预设共用） | — |
+| 《剧目文件》 | `src/play/play-files.ts` | prefix + tail（两预设共用） | — |
 | 剧本格式（Stage DSL）/ 结局 / 记忆卡 / 演出契约 | `src/playwriter/prompt.ts` | `section` `aivn:playwriter-tail`（order 200） | — |
 | 演出中引入新主体（指针）/ 缺图怎么办（指针） | `src/playwriter/prompt.ts` | 同上（`aivn:playwriter-tail` 内的字段） | 缺图指针 `can.image` |
 | 搭台助手身份 / 职责 / 对话风格 | `src/stagehand/prompt.ts` | persona.prefix | — |
 | 出图要点（短规则 + 指针） | `src/stagehand/prompt.ts` | `section` `aivn:stagehand-guide`（order 40） | 恒在，按 `can.image` 分措辞 |
 | 配乐（指针）/ 命令行 / 联网检索 / 技能库 | `src/stagehand/prompt.ts` | 同上 | 配乐 `can.music`、命令行 `can.shell`、检索 `can.search` |
-| A 区段（语言 / 设定 / 角色表 / 素材 / 写作参数 / 记忆索引 / 结局 / 状态） | `src/play-context.ts` | `section` + `context` | 按数据 / 能力位 |
-| 写作参数措辞 | `src/craft.ts` | 由 A 区渲染 | 配置驱动 |
+| A 区段（语言 / 设定 / 角色表 / 素材 / 写作参数 / 记忆索引 / 结局 / 状态） | `src/play/play-context.ts` | `section` + `context` | 按数据 / 能力位 |
+| 写作参数措辞 | `src/play/craft.ts` | 由 A 区渲染 | 配置驱动 |
 | 搭台《当前状态》 | `src/stagehand/context.ts` | `systemPrompt.section` | — |
-| 9 个工具描述 | `src/stagehand/tools/*`、`src/tools/validate-play.ts` | 工具 schema | 工具注册门控 |
-| 导演消息壳 / 收束指令 | `src/director.ts`、`src/stage-tap.ts` | 运行期 user 消息 | — |
+| 9 个工具描述 | `src/tools/*` | 工具 schema | 工具注册门控 |
+| 导演消息壳 / 收束指令 | `src/stage/director.ts`、`src/stage/stage-tap.ts` | 运行期 user 消息 | — |
 
 **门控规则**（skill 恒列，persona 门控章随能力位消失）：
 
@@ -121,6 +125,9 @@ dsh-e2e stop
   用 `zstd -dc` 解）、`voice`（台词语音，`verify-voice.mjs`，真打 Fish Audio，跑之前要 export
   `DSH_AIVN_TTS_KEYS`；它在页面里给 `AudioContext` / `decodeAudioData` / `AudioBufferSourceNode.start`
   挂钩子，断言的是「浏览器真的解出 PCM 并起播」，不是「帧到了」）。
+- 诊断 / 截图脚本在 `e2e/diag/`（`css-diag.mjs` / `shot-tabs.mjs` / `shot-voice.mjs` / `b1-probe.sh`），
+  不进 `MODULES`、手动 `dsh-e2e run`；`style-tokens.check.ts` **不是**诊断脚本——它是 `verify-style.mjs`
+  的夹具，留在 `e2e/` 根。
 - **`rebuild` 是唯一不需要实例的套件**（`node e2e/run.mjs rebuild` 直接跑，不占 run 锁）：
   `verify-rebuild.mjs` 用 esbuild 把 `verify-rebuild.ts` 打进内存/临时文件再跑，夹具里手写一份
   转写，直接调**真实的** `rebuildStage()`，断言三种停止点形态在重投影之后都留得住。
@@ -162,7 +169,7 @@ git **静默跳过**（实测退出码 0，不报错）——所以`.githooks/` 
 
 - **页签标签**：真相源是 `src/client/index.tsx` 注册会话视图时的 `label`（现在叫 `AIVN`）。
   e2e 用 `openViewTabWhenReady(page, '<label>')` 等它，标签对不上就是一直等到超时。2026-10-06
-  查出 `e2e/verify-voice.mjs` 与 `e2e/css-diag.mjs` 还在等改名前的「舞台」——语音套件因此注定
+  查出 `e2e/verify-voice.mjs` 与 `e2e/diag/css-diag.mjs` 还在等改名前的「舞台」——语音套件因此注定
   失败，几周里一直被当成「没配 TTS key」。
 - **路由**：`src/routes.ts` 里 `PREFIX`（`/aivn`）下的路径，客户端与 e2e 两处都要跟着改。
 - **工具名**：`src/**/tools/*.ts` 里的 `name`，与 `e2e/verify-injection.mjs` 的工具面断言成对

@@ -22,9 +22,9 @@ import type { Context } from '@deepseek-ai/cordis';
 import { isReplacementSurfaceEvent, type SessionEvent, type SessionId } from '@deepseek-ai/dsh-session';
 import type { Message } from '@deepseek-ai/dsh-llm';
 import type {} from '@deepseek-ai/dsh-api-session-controller';
-import type { GuideFrameItem, StageHub } from './hub';
-import type { InjectedMessages } from './injected';
-import { loadPlaySync } from './play';
+import type { GuideFrameItem, StageHub } from '../hub';
+import type { InjectedMessages } from '../injected';
+import { loadPlaySync } from '../play/play';
 import {
 	attachedAgent,
 	PLAYWRITER_PRESET,
@@ -32,8 +32,8 @@ import {
 	sessionPreset,
 	sessionWorkspace,
 	type LiveSession,
-} from './session';
-import type { VoiceHost } from './voice-host';
+} from '../session';
+import type { VoiceHost } from '../voice/voice-host';
 
 /**
  * 这条替换算不算**时间旅行**（有人把上下文拨回到某个点）。

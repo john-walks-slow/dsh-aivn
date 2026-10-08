@@ -11,11 +11,11 @@
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { StageHub } from './hub';
-import { readVoiceMap } from './play-context';
+import type { StageHub } from '../hub';
+import { readVoiceMap } from '../play/play-context';
 import type { FishTts } from './tts';
 import { chunkLine, VoicePipeline } from './voice';
-import type { VoicedLine } from './stage-log';
+import type { VoicedLine } from '../stage/stage-log';
 
 /** 音频缓存目录（相对剧目根）。 */
 export const TTS_CACHE_DIR = join('media-cache', 'tts');

@@ -3,12 +3,12 @@
  * e2e: AIVN tab 两种状态的实拍图（给人看的，不做断言）。
  *
  * 剧作家会话 → 会话头部有「AIVN」tab；搭台助手会话 → 没有。
- * 运行：dsh-e2e run e2e/shot-tabs.mjs
+ * 运行：dsh-e2e run e2e/diag/shot-tabs.mjs
  */
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { clearPlay, seedPlay } from './lib/fixture.mjs';
+import { clearPlay, seedPlay } from '../lib/fixture.mjs';
 import {
 	WORKSPACE,
 	dismissOnboarding,
@@ -20,9 +20,9 @@ import {
 	sendMessage,
 	shot,
 	waitFor,
-} from './lib/boot.mjs';
+} from '../lib/boot.mjs';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 /** 与 verify-stage 同一个落点（已在 .gitignore 里）。 */
 const OUT = join(ROOT, 'e2e-artifacts');
 mkdirSync(OUT, { recursive: true });
