@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import { SPRITE_FRAMING_SHOT } from '@aivn/core';
 import { PlayAssets } from '../src/media/assets';
-import { cutout } from '../src/media/cutout';
+import { resolveTuning } from '../src/media/cutout';
 import { PLAYWRITER_PROMPT, playwriterTail } from '../src/playwriter/prompt';
 import { readPlayReadiness } from '../src/play/readiness';
 import { stagehandPrompt } from '../src/stagehand/prompt';
@@ -488,266 +488,21 @@ try {
 }
 check('M36', ssrf.includes('内网'), `垫图网址拒绝内网地址（${ssrf.slice(0, 40)}…）`);
 
-/* ── 16. 抠底回归（照 AIVN `apps/server/test/cutout.test.ts` 的四条）── */
+/* ── 16. 抠底调参：插件自己的 env 前缀（算法与夹具都在 `@aivn/agent` 的包单测里）── */
 
-/** 读某点的 alpha。 */
-async function alphaAt(data: Buffer, x: number, y: number): Promise<number> {
-	const { data: raw, info } = await sharp(data).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-	return raw[(y * info.width + x) * info.channels + 3] ?? 0;
-}
-
-/**
- * 抠底夹具的色键底：**必须饱和**——`cutout` 现在会体检整圈边框量出的底色，白底 / 灰底直接报错
- * （白底会把角色身上接近白的部分整块判成背景，还会让 `despill` 压错通道）。所以夹具一律铺纯绿。
- */
-const KEY_BG: [number, number, number] = [0, 255, 0];
-
-/** 铺一张纯绿键底的画布。 */
-function keyCanvas(width: number, height: number): Buffer {
-	const raw = Buffer.alloc(width * height * 3);
-	for (let i = 0; i < width * height; i++) {
-		raw[i * 3] = KEY_BG[0];
-		raw[i * 3 + 1] = KEY_BG[1];
-		raw[i * 3 + 2] = KEY_BG[2];
-	}
-	return raw;
-}
-
-/** 往画布上刷一块矩形（夹具共用）。 */
-function paintRect(
-	raw: Buffer,
-	width: number,
-	x0: number,
-	y0: number,
-	x1: number,
-	y1: number,
-	c: [number, number, number],
-): void {
-	for (let y = y0; y <= y1; y++) {
-		for (let x = x0; x <= x1; x++) {
-			const o = (y * width + x) * 3;
-			raw[o] = c[0];
-			raw[o + 1] = c[1];
-			raw[o + 2] = c[2];
-		}
-	}
-}
-
-/**
- * 色键夹具：纯绿底 + 深色人形，人形里埋四块「离底色不同远近」的封闭口袋。
- * 四个都贴不到画面边——纯色键不看连通性，贴不贴边不改变任何事：
- * A 离底色 4 格、B 20 格、C 42 格、D 60 格（走 PNG，JPEG 的色振铃会把摆好的色差搅没）。
- * 距离按绿底算：只动绿以外的一路，逐通道最大差就是那个距离。
- */
-async function keyedPockets(): Promise<Buffer> {
-	const width = 200;
-	const height = 300;
-	const raw = keyCanvas(width, height);
-	paintRect(raw, width, 40, 20, 160, 280, [40, 50, 80]);
-	paintRect(raw, width, 60, 40, 99, 79, [4, 251, 4]);
-	paintRect(raw, width, 100, 40, 139, 79, [20, 235, 20]);
-	paintRect(raw, width, 60, 100, 99, 139, [42, 213, 42]);
-	paintRect(raw, width, 100, 100, 139, 139, [60, 195, 60]);
-	return sharp(raw, { raw: { width, height, channels: 3 } }).png().toBuffer();
-}
-
-/** 人物内部被抠穿的像素数（落在不透明外框之内的全透明像素）。量容差效应时不依赖坐标换算。 */
-async function interiorHoles(data: Buffer): Promise<number> {
-	const { data: raw, info } = await sharp(data).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-	const alpha = (x: number, y: number): number => raw[(y * info.width + x) * info.channels + 3] ?? 0;
-	let minX = info.width;
-	let maxX = -1;
-	let minY = info.height;
-	let maxY = -1;
-	for (let y = 0; y < info.height; y++) {
-		for (let x = 0; x < info.width; x++) {
-			if (alpha(x, y) > 0) {
-				if (x < minX) minX = x;
-				if (x > maxX) maxX = x;
-				if (y < minY) minY = y;
-				if (y > maxY) maxY = y;
-			}
-		}
-	}
-	let holes = 0;
-	for (let y = minY; y <= maxY; y++) {
-		for (let x = minX; x <= maxX; x++) if (alpha(x, y) === 0) holes++;
-	}
-	return holes;
-}
-
-/** 容差用例的夹具是刻意干净的 PNG，而 `keySmooth` 是给 JPEG 环纹用的降噪前置：只问色键本身时关掉它。 */
-const NO_SMOOTH = { keySmooth: 0 } as const;
-
-// 与底色同色的封闭块照抠不误——「别撞色」是出图那一步的责任
-{
-	const width = 200;
-	const height = 300;
-	const raw = keyCanvas(width, height);
-	paintRect(raw, width, 40, 20, 160, 280, [40, 20, 60]); // 人形
-	paintRect(raw, width, 80, 130, 120, 190, KEY_BG); // 与底色逐位同色的封闭块：2501px、封闭
-	const data = await sharp(raw, { raw: { width, height, channels: 3 } }).png().toBuffer();
-
-	// 那块的中心 (100,160) 映射到输出画布（人物外框 + 等比缩放 + 底部居中）
-	const box = { x0: 39, y0: 19, x1: 161, y1: 281 };
-	const w = box.x1 - box.x0 + 1;
-	const h = box.y1 - box.y0 + 1;
-	const scale = Math.min(1080 / w, 1920 / h);
-	const left = Math.round((1080 - Math.round(w * scale)) / 2);
-	const top = 1920 - Math.round(h * scale);
-	const x = left + Math.round((100 - box.x0) * scale);
-	const y = top + Math.round((160 - box.y0) * scale);
-
-	const result = await cutout(data, { ...NO_SMOOTH });
-	check(
-		'M37',
-		(await alphaAt(result.data, x, y)) === 0 && (await alphaAt(result.data, left + Math.round(2 * scale), y)) === 255,
-		'与底色同色的封闭块被抠穿（纯色键不分内外），人形自己没被连坐',
-	);
-}
-
-// tolerance 是唯一旋钮：多远的像素算底色全由它定
-{
-	const data = await keyedPockets();
-	const tight = await interiorHoles((await cutout(data, { tolerance: 8, ...NO_SMOOTH })).data);
-	const loose = await interiorHoles((await cutout(data, { tolerance: 48, ...NO_SMOOTH })).data);
-	const widest = await interiorHoles((await cutout(data, { tolerance: 64, ...NO_SMOOTH })).data);
-	check(
-		'M38',
-		loose - tight > 2000 && widest - loose > 1000,
-		`容差是唯一旋钮（紧档抠穿 ${tight}px，中档 ${loose}px，松档 ${widest}px）`,
-	);
-}
-
-// 边界带的 alpha 是反解出来的真实覆盖率，不是钉死的 128 地板
-{
-	const width = 400;
-	const height = 2120;
-	// 底色用真色键色（纯绿）：白底现在会被底体检拦下，而这一条量的是反解公式本身
-	const raw = keyCanvas(width, height);
-	const FIGURE: [number, number, number] = [40, 40, 40];
-	// 半覆盖列的颜色 = 覆盖率的线性混合 a·F + (1−a)·底色——反解要能把它解回 a
-	const bands = [0.2, 0.5, 0.8].map((coverage, i) => ({
-		y: 200 + i * 600,
-		coverage,
-		value: KEY_BG.map((b, c) => Math.round(coverage * FIGURE[c]! + (1 - coverage) * b)) as [number, number, number],
-	}));
-	for (let y = 100; y < 2020; y++) {
-		for (let x = 100; x < 300; x++) {
-			const o = (y * width + x) * 3;
-			const c = x === 100 ? (bands.find((b) => y >= b.y && y < b.y + 500)?.value ?? FIGURE) : FIGURE;
-			raw[o] = c[0]!;
-			raw[o + 1] = c[1]!;
-			raw[o + 2] = c[2]!;
-		}
-	}
-	const result = await cutout(await sharp(raw, { raw: { width, height, channels: 3 } }).png().toBuffer());
-
-	// scale 恒等于 1，人形 200 宽居中落在 1080 画布的 x 440..639，底对齐
-	const left = Math.round((1080 - 200) / 2);
-	const measured: number[] = [];
-	let ok = true;
-	for (const band of bands) {
-		const edge = await alphaAt(result.data, left, band.y);
-		measured.push(edge);
-		ok = ok && Math.abs(edge - Math.round(255 * band.coverage)) <= 2 && edge < 255;
-		ok = ok && (await alphaAt(result.data, left + 1, band.y)) === 255;
-		ok = ok && (await alphaAt(result.data, left - 1, band.y)) === 0;
-	}
-	check(
-		'M39',
-		ok && new Set(measured).size === 3,
-		`边界 alpha 是真覆盖率而不是 128 地板（三档实测 ${measured.join(' / ')}）`,
-	);
-}
-
-// 色键底（绿底）+ 亮色前景：覆盖率与反解出来的边缘色都对（分母必须带符号）
-{
-	const width = 400;
-	const height = 2120;
-	const BG: [number, number, number] = [0, 255, 0];
-	const SKIN: [number, number, number] = [245, 215, 190];
-	const blend = SKIN.map((v, c) => Math.round(0.5 * v + 0.5 * BG[c]!));
-	const raw = Buffer.alloc(width * height * 3);
-	for (let y = 0; y < height; y++) {
-		for (let x = 0; x < width; x++) {
-			const o = (y * width + x) * 3;
-			const inside = x >= 101 && x < 300 && y >= 100 && y < 2020;
-			// 那条半覆盖列只画在人形里，别一路画到画布上下缘——否则外框会被它撑成整张图高
-			const c = x === 100 && y >= 100 && y < 2020 ? blend : inside ? SKIN : BG;
-			raw[o] = c[0]!;
-			raw[o + 1] = c[1]!;
-			raw[o + 2] = c[2]!;
-		}
-	}
-	const result = await cutout(await sharp(raw, { raw: { width, height, channels: 3 } }).png().toBuffer());
-	const { data, info } = await sharp(result.data).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-	const at = (x: number, y: number): number[] => {
-		const o = (y * info.width + x) * info.channels;
-		return [data[o]!, data[o + 1]!, data[o + 2]!, data[o + 3]!];
-	};
-	// 与「反解覆盖率」那条用例同一套尺寸换算：200 宽的人形居中落在 1080 画布的 x 440
-	const left = Math.round((1080 - 200) / 2);
-	const edge = at(left, 600);
-	const solid = at(left + 20, 600);
-	const blendOk = Math.abs(edge[3]! - 128) <= 6 && [0, 1, 2].every((c) => Math.abs(edge[c]! - SKIN[c]!) <= 12);
-	const solidOk = solid[3] === 255 && [0, 1, 2].every((c) => Math.abs(solid[c]! - SKIN[c]!) <= 4);
-	check(
-		'M40',
-		blendOk && solidOk && at(left - 3, 600)[3] === 0,
-		`绿底 + 亮色前景：半覆盖像素反解回前景色且不残留底色（边缘 ${edge[3]}，实心 ${solid[3]}）`,
-	);
-}
-
-/* ── 17. 底色体检：白底 / 灰底不是色键色，当场拒绝 ── */
-
-// 2026-10-09 剧目 demo 的 kikyo 就是这么废的：模型给回一张白底，被当成色键硬抠——浅色处抠成洞，
-// despill 又把「白底的峰值通道 = 红」压掉，画面整片发灰。旧代码覆盖率落在区间内，全程静默。
-{
-	const width = 400;
-	const height = 1200;
-	const sheet = async (bg: [number, number, number], figure: [number, number, number]) => {
-		const raw = Buffer.alloc(width * height * 3);
-		for (let y = 0; y < height; y++) {
-			for (let x = 0; x < width; x++) {
-				const o = (y * width + x) * 3;
-				const inside = x >= 150 && x < 250 && y >= 100 && y < 1100;
-				const c = inside ? figure : bg;
-				raw[o] = c[0]!;
-				raw[o + 1] = c[1]!;
-				raw[o + 2] = c[2]!;
-			}
-		}
-		return sharp(raw, { raw: { width, height, channels: 3 } }).png().toBuffer();
-	};
-	const reject = async (bg: [number, number, number]) => {
-		try {
-			await cutout(await sheet(bg, [40, 40, 40]));
-			return '';
-		} catch (error) {
-			return error instanceof Error ? error.message : String(error);
-		}
-	};
-	const white = await reject([255, 255, 255]);
-	const grey = await reject([240, 240, 240]);
-	// 反面：浅色但仍是**饱和**的色键色（浅蓝，极差 135）不该被门槛误拦。
-	let paleKeyCoverage = -1;
-	try {
-		paleKeyCoverage = (await cutout(await sheet([120, 200, 255], [40, 40, 40]))).coverage;
-	} catch {
-		paleKeyCoverage = -1;
-	}
-	check(
-		'M50',
-		white.includes('色键色') && white.includes('255') && grey.includes('色键色'),
-		`白底 / 浅灰底被底体检拒绝（${white.slice(0, 44)}…）`,
-	);
-	check(
-		'M51',
-		paleKeyCoverage > 0.02 && paleKeyCoverage < 0.97,
-		`浅色但饱和的色键底不被误拦（浅蓝，前景 ${(paleKeyCoverage * 100).toFixed(1)}%）`,
-	);
-}
+// 算法本身（15 条：色键、边界反解、限色、底色体检、画布锚点）已经搬进包单测，这里只守插件
+// 这一侧的接线：`DSH_AIVN_CUTOUT_*` 读得到、超界夹住、单次覆盖优先。
+process.env.DSH_AIVN_CUTOUT_TOLERANCE = '200';
+process.env.DSH_AIVN_CUTOUT_SPILL = '32';
+const envTuning = resolveTuning();
+const overrideTuning = resolveTuning({ tolerance: 8 });
+delete process.env.DSH_AIVN_CUTOUT_TOLERANCE;
+delete process.env.DSH_AIVN_CUTOUT_SPILL;
+check(
+	'M52',
+	envTuning.tolerance === 128 && envTuning.spill === 32 && envTuning.edgeBand === 4 && overrideTuning.tolerance === 8,
+	`抠底调参接 DSH_AIVN_CUTOUT_*（超界夹成 ${envTuning.tolerance}、单次覆盖优先、其余用默认）`,
+);
 
 /* ── 18. 台账对账：登记指向不存在的文件要报出来 ── */
 
