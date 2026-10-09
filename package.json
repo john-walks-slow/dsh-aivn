@@ -1,116 +1,117 @@
 {
-	"name": "dsh-aivn",
-	"version": "0.2.0",
-	"type": "module",
-	"description": "AIVN's stage engine inside DeepSeek Harness: a workspace is a play, the playwright preset writes Stage DSL, and a Stage tab in the conversation renders it live (backgrounds, sprites, dialog, stop-point choices, line-by-line TTS). dsh-aivn：把 AIVN 的舞台引擎装进 DSH——工作区就是一部剧目，剧作家预设写 Stage DSL，对话页的「舞台」tab 实时演出（背景、立绘、台词条、停止点选项、逐句语音）。",
-	"main": "./lib/index.js",
-	"exports": {
-		".": "./lib/index.js",
-		"./client": "./lib/client.js",
-		"./cordis.patch.yml": "./cordis.patch.yml",
-		"./package.json": "./package.json"
-	},
-	"files": [
-		"lib",
-		"cordis.patch.yml",
-		"skills",
-		"README.md",
-		"README.en.md",
-		"LICENSE",
-		"screenshots",
-		"screenshots.json"
-	],
-	"scripts": {
-		"build": "node build.mjs",
-		"e2e": "dsh-e2e run e2e/run.mjs --list",
-		"e2e:stage": "dsh-e2e run e2e/run.mjs stage",
-		"e2e:director": "dsh-e2e run e2e/run.mjs director",
-		"e2e:stagehand": "dsh-e2e run e2e/run.mjs stagehand",
-		"e2e:entry": "dsh-e2e run e2e/run.mjs entry",
-		"e2e:media": "esbuild e2e/verify-media.ts --bundle --platform=node --format=esm --target=node22 --external:sharp --outfile=e2e/.media-check.mjs && node e2e/.media-check.mjs; rm -f e2e/.media-check.mjs",
-		"prepublishOnly": "npm run build && npm run typecheck",
-		"release": "npm run build && npm run typecheck && npm version patch && npm pack --pack-destination /tmp",
-		"typecheck": "tsc --noEmit"
-	},
-	"dsh": {
-		"bundle": {
-			"patch": "./cordis.patch.yml"
-		},
-		"client": {
-			"platform": "web",
-			"inject": [
-				"@deepseek-ai/dsh-client-ui-conversation",
-				"@deepseek-ai/dsh-client-ui-settings",
-				"@deepseek-ai/dsh-client-ui-plugin-manager"
-			]
-		}
-	},
-	"dependencies": {
-		"@deepseek-ai/dsh-agent": "0.1.7-rc.2",
-		"@deepseek-ai/dsh-api-session-controller": "0.1.7-rc.2",
-		"@deepseek-ai/dsh-llm": "0.1.7-rc.2",
-		"@deepseek-ai/dsh-session": "0.1.7-rc.2",
-		"@deepseek-ai/dsh-tools": "0.1.7-rc.2",
-		"@deepseek-ai/schemastery": "^3.18.4",
-		"sharp": "^0.35.5"
-	},
-	"devDependencies": {
-		"@aivn/core": "file:../stage-ai/packages/core",
-		"@aivn/stage": "file:../stage-ai/packages/stage",
-		"@deepseek-ai/cordis": "^4.0.4",
-		"@deepseek-ai/cordis-plugin-loader": "^1.0.5",
-		"@deepseek-ai/dsh-agent-preset-registry": "0.1.7-rc.2",
-		"@deepseek-ai/dsh-api-remotes": "^0.1.7-rc.2",
-		"@deepseek-ai/dsh-client-runtime": "0.1.1-rc.2",
-		"@deepseek-ai/dsh-client-store": "^0.1.7-rc.2",
-		"@deepseek-ai/dsh-client-ui-conversation": "0.1.7-rc.2",
-		"@deepseek-ai/dsh-client-ui-plugin-manager": "^0.1.7-rc.2",
-		"@deepseek-ai/dsh-client-ui-primitives": "^0.1.7-rc.2",
-		"@deepseek-ai/dsh-client-ui-settings": "^0.1.7-rc.2",
-		"@deepseek-ai/dsh-client-ui-slots": "0.1.7-rc.2",
-		"@deepseek-ai/dsh-commands": "^0.1.7-rc.2",
-		"@deepseek-ai/dsh-host-webserver": "0.1.7-rc.2",
-		"@deepseek-ai/dsh-settings": "^0.1.7-rc.2",
-		"@deepseek-ai/dsh-system-prompt": "^0.1.7-rc.2",
-		"@types/node": "^22.20.1",
-		"@types/react": "~18.3.31",
-		"@types/react-dom": "^18.3.7",
-		"esbuild": "^0.28.2",
-		"playwright-core": "^1.57.0",
-		"react": "^18.3.1",
-		"react-dom": "^18.3.1",
-		"typescript": "^5.9.3"
-	},
-	"peerDependencies": {
-		"@deepseek-ai/cordis": "^4.0.1"
-	},
-	"keywords": [
-		"dsh",
-		"dsh-plugin",
-		"deepseek-harness",
-		"aivn",
-		"visual-novel",
-		"vn",
-		"stage",
-		"stage-dsl",
-		"tts",
-		"voice",
-		"fish-audio",
-		"playwright",
-		"视觉小说",
-		"舞台",
-		"剧作家",
-		"语音",
-		"配音"
-	],
-	"author": "john-walks-slow",
-	"license": "MIT",
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/john-walks-slow/dsh-aivn.git"
-	},
-	"homepage": "https://github.com/john-walks-slow/dsh-aivn#readme",
-	"bugs": {
-		"url": "https://github.com/john-walks-slow/dsh-aivn/issues"
-	}
+  "name": "dsh-aivn",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "AIVN's stage engine inside DeepSeek Harness: a workspace is a play, the playwright preset writes Stage DSL, and a Stage tab in the conversation renders it live (backgrounds, sprites, dialog, stop-point choices, line-by-line TTS). dsh-aivn：把 AIVN 的舞台引擎装进 DSH——工作区就是一部剧目，剧作家预设写 Stage DSL，对话页的「舞台」tab 实时演出（背景、立绘、台词条、停止点选项、逐句语音）。",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "skills",
+    "README.md",
+    "README.en.md",
+    "LICENSE",
+    "screenshots",
+    "screenshots.json"
+  ],
+  "scripts": {
+    "build": "node build.mjs",
+    "e2e": "dsh-e2e run e2e/run.mjs --list",
+    "e2e:stage": "dsh-e2e run e2e/run.mjs stage",
+    "e2e:director": "dsh-e2e run e2e/run.mjs director",
+    "e2e:stagehand": "dsh-e2e run e2e/run.mjs stagehand",
+    "e2e:entry": "dsh-e2e run e2e/run.mjs entry",
+    "e2e:media": "esbuild e2e/verify-media.ts --bundle --platform=node --format=esm --target=node22 --external:sharp --outfile=e2e/.media-check.mjs && node e2e/.media-check.mjs; rm -f e2e/.media-check.mjs",
+    "prepublishOnly": "npm run build && npm run typecheck",
+    "release": "npm run build && npm run typecheck && npm version patch && npm pack --pack-destination /tmp",
+    "typecheck": "tsc --noEmit"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ]
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-agent": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-llm": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.7-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.4",
+    "sharp": "^0.35.5"
+  },
+  "devDependencies": {
+    "@aivn/agent": "file:../stage-ai/packages/agent",
+    "@aivn/core": "file:../stage-ai/packages/core",
+    "@aivn/stage": "file:../stage-ai/packages/stage",
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/cordis-plugin-loader": "^1.0.5",
+    "@deepseek-ai/dsh-agent-preset-registry": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-api-remotes": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-runtime": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-store": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-ui-conversation": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-ui-plugin-manager": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-ui-slots": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-commands": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-settings": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "^0.1.7-rc.2",
+    "@types/node": "^22.20.1",
+    "@types/react": "~18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "esbuild": "^0.28.2",
+    "playwright-core": "^1.57.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "aivn",
+    "visual-novel",
+    "vn",
+    "stage",
+    "stage-dsl",
+    "tts",
+    "voice",
+    "fish-audio",
+    "playwright",
+    "视觉小说",
+    "舞台",
+    "剧作家",
+    "语音",
+    "配音"
+  ],
+  "author": "john-walks-slow",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/john-walks-slow/dsh-aivn.git"
+  },
+  "homepage": "https://github.com/john-walks-slow/dsh-aivn#readme",
+  "bugs": {
+    "url": "https://github.com/john-walks-slow/dsh-aivn/issues"
+  }
 }
