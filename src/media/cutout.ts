@@ -1,11 +1,16 @@
-import sharp from 'sharp';
+import sharp from "sharp";
 
 /**
  * 立绘抠底层：把「单一纯色底 + 角色」的生图原片转成引擎能直接压在场景上的透明 PNG。
  *
- * **整份照搬 AIVN `apps/server/src/cutout.ts`（2026-10-06 的 main）**，只改了一处：五个调参的
- * 环境变量前缀从 `STAGE_CUTOUT_*` 换成插件自己的 `DSH_AIVN_CUTOUT_*`。算法一个字没动——
- * 这套参数是拿真实立绘一格一格量出来的（下面每处的注释就是量出来的依据），转述只会转丢。
+ * **以上游 AIVN `apps/server/src/cutout.ts` 为准整份抄过来的**（最近一次抄写 2026-10-09）。算法一个字
+ * 没动——这套参数是拿真实立绘一格一格量出来的（下面每处的注释就是量出来的依据），转述只会转丢。
+ * **同步方式就是重抄一遍**，所以本文件只允许有这三处适配，别处一律以上游为准：
+ * 1. 五个调参的环境变量前缀 `STAGE_CUTOUT_*` → `DSH_AIVN_CUTOUT_*`；
+ * 2. 措辞：上游提到的 `StageTheater.tsx` / `playAssets.ts` / issue 目录在这里都不存在，换成插件
+ *    这边的指路（`media/prompts.ts` 的 `keyBackground` + `generate_asset` 的 `keyColor`）；
+ * 3. 上游那个没人用的 `CANVAS_WIDTH = 1080` 没抄——插件开着 `noUnusedLocals`，画布宽是按
+ *    `canvasHeight` 现算的。
  *
  * 为什么必须有这一层：舞台把立绘当 `<img>` 直接叠在背景图上，不抠底就是一块不透明矩形
  * 挂在画面中央。
@@ -90,42 +95,9 @@ export interface CutoutTuning {
 }
 
 const CANVAS_HEIGHT = 1920;
+// 画布宽按 canvasHeight 现算（上游那份的 CANVAS_WIDTH = 1080 是没人用的残留，见文件头）
 const COVERAGE_MIN = 0.02;
 const COVERAGE_MAX = 0.97;
-
-/**
- * 底色体检：整圈边框量出来的「底色」必须真是一个**色键色**，否则当场报错。
- *
- * 为什么必须有这一条：纯色键抠底的前提是「底色是出图时选定的、不与角色撞色的纯色」。
- * 这条前提一旦被破坏，算法**不会**报错——它会安安静静地把角色身上一切接近底色的像素
- * 判成背景。最坏的情况是白底：白袜、白衬衫、银发全被抠穿，一张立绘打成镂空；
- * 就算角色身上没有浅色，`despill` 也会把「白底的峰值通道」当成要压的那一路
- * （三通道相等 → 峰值算成红），把整张图的红通道抹平，画面发灰。
- * 两条都是一路静默入库，只有用户肉眼看得出来（2026-10-09 剧目 demo 的 kikyo 就是这么废的）。
- *
- * 判据是**通道极差**而不是「白不白」：色键色（纯绿 #00FF00、纯品红 #FF00FF）必然是三通道
- * 差得极开的纯色，实测合法底色极差 191~255；而白底、浅灰底、照片底这类都在 8 以下。
- * 不写死白名单色值，是因为底色由模型画、JPEG 一路抖过来本就不可能逐位精确，
- * 而「饱和的纯色」这个性质是稳的。
- *
- * 门槛 96 取得很宽：真正要拦的是「无色相」的白/灰（极差 ≈ 0），
- * 留足余量给浅色但仍是色键的底（比如纯蓝 #0000FF 极差 255、稍脏的绿幕也有 190+）。
- */
-const MIN_KEY_SATURATION = 96;
-
-function assertKeyBackground(rgba: Buffer, width: number, height: number, channels: number): void {
-  const bg = borderMedian(rgba, width, height, channels);
-  const spread = Math.max(...bg) - Math.min(...bg);
-  if (spread >= MIN_KEY_SATURATION) return;
-  throw new Error(
-    `抠底失败：整圈边框量出的底色是 (${bg.join(", ")})，通道极差只有 ${spread}——` +
-      "这是一个白底或灰底，不是色键色。纯色键会把角色身上接近这个颜色的部分整块判成背景" +
-      "（白袜、白衬衫、银发会被直接抠穿，落盘就是一张镂空的立绘）。" +
-      "根因是出图那一步没按色键底出图：让立绘带上单一纯色底的要求再重出——" +
-      "`generate_asset` 默认就拼纯绿 #00FF00（绿色系主体给 `keyColor: \"magenta\"`）；" +
-      "走 `generate_image` 的原子路径要把纯色底自己写进 prompt。不要靠调 tolerance 去救。",
-  );
-}
 
 function envInt(name: string, fallback: number, min: number, max: number): number {
   const parsed = Number(process.env[name]);
@@ -168,6 +140,40 @@ export function defaultTuning(): CutoutTuning {
 
 export function resolveTuning(override?: Partial<CutoutTuning>): CutoutTuning {
   return { ...defaultTuning(), ...override };
+}
+
+/**
+ * 底色体检：整圈边框量出来的「底色」必须真是一个**色键色**，否则当场报错。
+ *
+ * 为什么必须有这一条：纯色键抠底的前提是「底色是出图时选定的、不与角色撞色的纯色」。
+ * 这条前提一旦被破坏，算法**不会**报错——它会安安静静地把角色身上一切接近底色的像素
+ * 判成背景。最坏的情况是白底：白袜、白衬衫、银发全被抠穿，一张立绘打成镂空；
+ * 就算角色身上没有浅色，`despill` 也会把「白底的峰值通道」当成要压的那一路（三通道相等 →
+ * 峰值算成红），把整张图的红通道抹平，画面发灰。两条都是一路静默入库，只有用户肉眼看得出来
+ * （2026-10-09 剧目 demo 的 kikyo 就是这么废的）。
+ *
+ * 判据是**通道极差**而不是「白不白」：色键色（纯绿 #00FF00、纯品红 #FF00FF）必然是三通道
+ * 差得极开的纯色，实测合法底色极差 191~255；而白底、浅灰底、照片底这类都在 8 以下。
+ * 不写死白名单色值，是因为底色由模型画、JPEG 一路抖过来本就不可能逐位精确，
+ * 而「饱和的纯色」这个性质是稳的。
+ *
+ * 门槛 96 取得很宽：真正要拦的是「无色相」的白/灰（极差 ≈ 0），
+ * 留足余量给浅色但仍是色键的底（比如纯蓝 #0000FF 极差 255、稍脏的绿幕也有 190+）。
+ */
+const MIN_KEY_SATURATION = 96;
+
+function assertKeyBackground(rgba: Buffer, width: number, height: number, channels: number): void {
+  const bg = borderMedian(rgba, width, height, channels);
+  const spread = Math.max(...bg) - Math.min(...bg);
+  if (spread >= MIN_KEY_SATURATION) return;
+  throw new Error(
+    `抠底失败：整圈边框量出的底色是 (${bg.join(", ")})，通道极差只有 ${spread}——` +
+      "这是一个白底或灰底，不是色键色。纯色键会把角色身上接近这个颜色的部分整块判成背景" +
+      "（白袜、白衬衫、银发会被直接抠穿，落盘就是一张镂空的立绘）。" +
+      "根因是出图那一步没按色键底出图：让立绘带上单一纯色底的要求再重出——" +
+      "`generate_asset` 默认就拼纯绿 #00FF00（绿色系主体给 `keyColor: \"magenta\"`）；" +
+      "走 `generate_image` 的原子路径要把纯色底自己写进 prompt。不要靠调 tolerance 去救。",
+  );
 }
 
 export async function cutout(data: Buffer, options: CutoutOptions = {}): Promise<CutoutResult> {
