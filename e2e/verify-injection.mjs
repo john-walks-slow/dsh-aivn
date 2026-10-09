@@ -90,7 +90,15 @@ function skillCatalog(events) {
 	return '';
 }
 
-/** 全部事件的可见文本，拼成一份——用来断言「某类消息一条都没进来」。 */
+/**
+ * `@deepseek-ai/dsh-agent-instructions` 投进来的消息（按类型化 source 认，不认文案——
+ * 上游改措辞不该让这条判据静默变绿）。
+ */
+function instructionMessages(events) {
+	return events.filter((event) => event.type === 'user/message' && event.data?.source?.kind === 'agent-instructions');
+}
+
+/** 全部事件的可见文本，拼成一份——给类型化判据做文案级兜底（上游换了 source 形状时还能命中）。 */
 function allText(events) {
 	return events
 		.map((event) => {
@@ -116,8 +124,9 @@ try {
 	// 等到日志里出现系统提示词：那是第一个 step 开头写下的，不用等整轮演完。
 	let prompt = '';
 	let tools = [];
+	let events = [];
 	for (let i = 0; i < 60; i += 1) {
-		const events = sessionEvents(sessionDir);
+		events = sessionEvents(sessionDir);
 		prompt = systemPrompt(events);
 		tools = toolNames(events);
 		if (prompt !== '' && tools.length > 0) break;
@@ -125,7 +134,7 @@ try {
 	}
 
 	const headings = [...prompt.matchAll(/^#{1,2} .+$/gm)].map((m) => m[0]);
-	const catalog = skillCatalog(sessionEvents(sessionDir));
+	const catalog = skillCatalog(events);
 	check('A3', prompt.length > 0, `系统提示词已写出（${prompt.length} 字）`);
 	check('A4', headings.includes('# 剧目设定'), `有《剧目设定》段（${headings.length} 个标题）`);
 	check('A5', headings.includes('# 角色表'), '有《角色表》段');
@@ -165,22 +174,30 @@ try {
 		['aivn-play-setup', 'aivn-visual-craft', 'aivn-audio'].every((name) => catalog.includes(name)),
 		'剧作家的技能清单里有三份 aivn-* 技能',
 	);
-	// 隔离（一）：预设不装 `dsh-agent-instructions`——`$DSH_HOME/AGENTS.md` 与工作区的
-	// `AGENTS.md` 都不该进这个会话。e2e 的工作区就是本仓库根，它自带一份 AGENTS.md，
-	// 装了那一行就一定会被读进来。三种文案（首注入 / 替换 / 空）都带 "workspace instruction"。
-	const everything = allText(sessionEvents(sessionDir));
+	// 隔离（一）：预设不装 `dsh-agent-instructions`，web 部署里宿主那一行也是关的——
+	// `$DSH_HOME/AGENTS.md` 与工作区的 `AGENTS.md` 都不该进这个会话。e2e 的工作区就是
+	// 本仓库根，它自带一份 AGENTS.md，装了那一行就一定会被读进来。
+	const injected = instructionMessages(events);
 	check(
 		'A15',
-		!everything.includes('workspace instruction'),
-		'没有宿主的指令注入（全局与工作区的 AGENTS.md 都没进来）',
+		injected.length === 0 && !allText(events).includes('workspace instruction'),
+		`没有宿主的指令注入（agent-instructions 消息 ${injected.length} 条）`,
 	);
 	// 隔离（二）：技能库挂在自己的 `isolate` realm 里，清单里只有随包的那几份——
 	// 公开注册表会把全局层（宿主行、第三方插件注册的 runtime skill）并进每个 agent。
+	//
+	// **这条判据只在「宿主全局层真的挂了 provider」时才有区分度**：web 剖面默认关掉了宿主
+	// 的 skill-filesystem，裸跑时宿主全局层本来就是空的，A16 必然通过。第三方插件在代码里
+	// 注册 provider 时会带出自己的工具（探针用 `@aiwayds/dsh-subagent-registry`，它带
+	// `use_agent`），拿这个当「前提在位」的标记，并在前提缺席时把话说明白。
 	const listed = [...catalog.matchAll(/^- `([a-z0-9-]+)`:/gm)].map((match) => match[1]);
+	const hostProviderLive = tools.includes('use_agent');
 	check(
 		'A16',
-		listed.length > 0 && listed.every((name) => name.startsWith('aivn-')),
-		`技能清单只有随包的 aivn-*（实际：${listed.join(', ') || '空'}）`,
+		!hostProviderLive || (listed.length > 0 && listed.every((name) => name.startsWith('aivn-'))),
+		hostProviderLive
+			? `宿主全局 provider 在位，清单仍只有随包的 aivn-*（实际：${listed.join(', ') || '空'}）`
+			: `技能清单只有随包的 aivn-*（实际：${listed.join(', ') || '空'}）——本实例没有宿主全局 provider，本条本次无区分度，要它咬人就用 \`dsh-e2e start --extra @aiwayds/dsh-subagent-registry:<path>\` 起实例`,
 	);
 	// 生图：generate_image / generate_asset 跟着生图能力位；cut / import_asset 不门控，始终在。
 	const hasImage = tools.includes('generate_image');

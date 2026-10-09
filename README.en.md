@@ -333,10 +333,12 @@ differences are persona, injected context, and the stage pipeline. **Neither pre
 `dsh-aivn` entry** — the host already loads the plugin, and another entry would install the routes
 and event subscriptions twice.
 
-Neither preset sees the host's **skills or instructions**: no `dsh-agent-instructions` row, so
-neither `$DSH_HOME/AGENTS.md` nor a workspace `AGENTS.md` reaches the prompt (play context is
-injected entirely by the A-block); and the skill library lives in its own `isolate` realm, so
-skills from host rows or third-party plugins never leak into the catalog.
+Neither preset **feeds on the host's skills or instructions**: there is no `dsh-agent-instructions`
+row — and in a web deployment the host's own row is off too — so neither `$DSH_HOME/AGENTS.md` nor a
+workspace `AGENTS.md` reaches the prompt (play context is injected entirely by the A-block; a
+profile running straight off `dsh-base` still has the host row, and that layer has to switch it off
+itself). The skill library lives in its own `isolate` realm, so skills from host rows or
+third-party plugins never leak into the catalog.
 
 Only sessions on the playwright preset enter the stage pipeline. Nothing the stage-hand assistant
 says goes on stage.

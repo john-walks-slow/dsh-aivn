@@ -8,10 +8,11 @@
  * 行集：persona + 文件工具 + 一行默认关的 shell + 一份**私有**技能库。两个预设的行集同构——
  * 剧作家单飞时也要会备料（画风、图单、选源），技能库是它按需查的做法速查。
  *
- * **这两个预设不看宿主的 skill 与指令**：
- * - 故意不装 `@deepseek-ai/dsh-agent-instructions`：剧目上下文全由 A 区注入，
- *   `$DSH_HOME/AGENTS.md`（整台机器的运维通例）与工作区的 `AGENTS.md` 都是噪音，
- *   而剧目目录常常就落在某个仓库里，装了这一行就一定会把宿主的开发指引塞给剧作家。
+ * **这两个预设不主动装宿主的 skill 与指令**：
+ * - `@deepseek-ai/dsh-agent-instructions` 一行**故意不装**：web 部署里宿主那一行本身也是关的
+ *   （`dsh-web-app` 的 patch），所以这两个 Agent 一条 workspace 指令都拿不到。
+ *   但这一层只到「自己没装」为止——直出 `dsh-base` 的剖面里宿主那一行还在，预设管不着。
+ *   剧目上下文本来就全由 A 区注入，`$DSH_HOME/AGENTS.md` 那类整机运维通例是纯噪音。
  * - 技能库挂在 `isolate` realm 里（见 {@link skillRows}）：不隔离就一定会漏进全局层的技能。
  */
 import { dirname, join } from 'node:path';
@@ -66,7 +67,9 @@ function rows(prompt: string, opts: { bash?: boolean; skills?: boolean } = {}): 
  * 第三方插件（`ctx.skills.registerProvider`）注册的 runtime skill 都落在那里，预设层只能
  * 同名覆盖、删不掉。不隔离时 `includeDefaultRoots: false` 只挡住了「根」，挡不住那些
  * 代码里注册进来的技能。把 `dsh-skill` 挂进 realm 后预设拿到一份私有注册表，
- * `skill` 工具与浏览器侧（`serviceForAgent`）都按 realm 找到它，目录里只剩随包的做法。
+ * `skill` 工具（插件自己的 ctx，在 realm 内）与活着的会话的浏览器侧清单（`serviceForAgent`
+ * 按 fiber 归属找实现）都命中它，目录里只剩随包的做法。（冷会话——Agent 还没 resume——的
+ * `/skill` 菜单是上游另一条取法，会回落到宿主注册表；那是既有行为，不在本预设的控制范围。）
  *
  * `includeDefaultRoots: false` 是这一层里的第二道：排掉私有注册表的项目/用户/bundled 根，
  * 只留随包的 `skills/`。
