@@ -2,8 +2,8 @@
  * 写作参数（`craft`）—— 两份说法与补丁语义在 `@aivn/agent` 的 `craft/params.ts`，
  * 两个宿主共用一份；插件这边只留两件事：
  *
- * - **停止点的措辞**：插件把停止点写在剧本最后一行（`<stop options="… | …"/>`），
- *   服务端那边是工具调用 `beat_done(options=[…])`——同一件事两种表达，这是刻意的差异；
+ * - **停止点的措辞**：两个宿主都是「剧本最后一行写 `<stop options="… | …"/>`」，
+ *   正文同源（`@aivn/agent` 的 `STOP_TAG_RULES`，2026-10-10 P6-e 统一）；
  * - **能力位**：插件的预设不装应用级素材资源库（`library` 恒假），于是带库的措辞走不到。
  */
 import { renderCraftParams as renderCraft, CRAFT_ENUMS, type AssetCapabilities } from '@aivn/agent';
