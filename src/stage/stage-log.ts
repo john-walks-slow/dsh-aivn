@@ -80,6 +80,13 @@ export interface RebuildDeps {
 	 * 重建只重放、不落账——它是给「冷开 / 分支 / 回看后重推出终局态」用的，重复记账在这里被挡掉。
 	 */
 	onEvent?: ((sessionId: string, event: StageEvent) => void) | undefined;
+	/**
+	 * 重放推出来的限制级态（整条重放只给一次，末尾那次）。
+	 *
+	 * 冷开 / 分支 / 回看之后，左上角角标与「这一段带不带标」都得跟着回到正确的那一版；
+	 * 增量那一路的开关值不能当数——帧流整个换掉了。
+	 */
+	onNsfw?: ((sessionId: string, active: boolean) => void) | undefined;
 	/** 提示队列的现值（导演排的话）。重置帧把客户端那份清了，这里补一帧回来。 */
 	pendingGuides?: ((sessionId: string) => readonly GuideFrameItem[]) | undefined;
 }
@@ -105,9 +112,18 @@ export function rebuildStage(
 	// 与舞台内容无关，所以紧接着补一帧现值回去。
 	hub.appendGuide(sessionId, deps.pendingGuides?.(sessionId) ?? []);
 
-	const events = new Map(session.snapshotEvents().map((event) => [event.seq, event] as const));
+	const snapshot = session.snapshotEvents();
+	const events = new Map(snapshot.map((event) => [event.seq, event] as const));
 	const lines: VoicedLine[] = [];
 	let current: VoicedLine | null = null;
+	/** 限制级通道的两个出口重推出来的现值（只有开关，没有段起止的其它形态）。 */
+	let nsfw = false;
+	// 工具调用自己不是会话面上的事件（`tool/call` 不在 `SurfaceEventType` 里），所以按配对的
+	// callId 找回它的名字：见下面 `tool/result` 那一支。
+	const callNames = new Map<string, string>();
+	for (const event of snapshot) {
+		if (event.type === 'tool/call') callNames.set(event.data.callId, event.data.name);
+	}
 
 	/** 与实时那一路同一个解析器：重建出来的 IR 与流式写字时逐帧同构。 */
 	const parser = new StageDslParser((event) => {
@@ -136,6 +152,15 @@ export function rebuildStage(
 			}
 			continue;
 		}
+		if (event.type === 'tool/result') {
+			// 限制级通道：段起止只认那两次工具调用（`enter_nsfw` / `exit_nsfw`，id 见 `tool-catalog.ts`），
+			// 认**配对的 `tool/result`** 而不是直接扫 `tool/call`——被回退 / 重写抹掉的那一段调用
+			// 照样躺在日志里，扫它会把标识推亮；`tool/result` 在会话面上，抹掉的就不在。
+			const name = callNames.get(event.data.message.toolCallId);
+			if (name === 'enter_nsfw') nsfw = true;
+			else if (name === 'exit_nsfw') nsfw = false;
+			continue;
+		}
 		if (event.type !== 'user/message') continue;
 		// 玩家说过的话才上时间线。引擎自己投的（开局指令、继续、导演指令）不算——
 		// 与实时那一路同一个口径，见 `injected.ts`。
@@ -147,6 +172,10 @@ export function rebuildStage(
 
 	// 语音：盘上有就补一帧「好了」（重听按钮因而照常），没有就留白。
 	if (deps.playDir !== undefined) voice.replayCached(sessionId, deps.playDir, lines);
+
+	// 限制级态：无条件推一帧（不是「变了才推」）。重建把帧缓冲整个换掉了，之后才连上来的舞台
+	// 只看得到这条新帧流——漏掉它，通道开着而角标不亮。
+	deps.onNsfw?.(sessionId, nsfw);
 
 	hub.appendBeat(sessionId, running ? 'start' : 'end');
 	deps.onRebuilt?.(sessionId);
@@ -233,6 +262,7 @@ export class StageLog {
 			...(this.deps.onRebuilt ? { onRebuilt: this.deps.onRebuilt } : {}),
 			...(this.deps.onRebuildStart ? { onRebuildStart: this.deps.onRebuildStart } : {}),
 			...(this.deps.onEvent ? { onEvent: this.deps.onEvent } : {}),
+			...(this.deps.onNsfw ? { onNsfw: this.deps.onNsfw } : {}),
 		});
 		return true;
 	}

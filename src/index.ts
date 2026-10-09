@@ -245,11 +245,14 @@ export async function apply(ctx: Context, config: Config): Promise<() => void> {
 		onRebuildStart: (sessionId) => tap.resetTerminal(sessionId),
 		// 重放的每一帧转给 tap：重建也要重推出「已结局」的终局态（回退掉结局那一拍则退出终局）。
 		onEvent: (sessionId, event) => tap.noteEvent(sessionId, event),
+		// 限制级通道同理：从日志里的 enter_nsfw / exit_nsfw 重推出开关，角标与打标跟着回来。
+		onNsfw: (sessionId, active) => tap.noteNsfw(sessionId, active),
 		// 提示队列在导演手里，不在会话面上：重置帧清掉客户端那份之后要补回来。
 		pendingGuides: (sessionId) => director.snapshot(sessionId),
 	});
 
-	const tools = installPresetTools(ctx, hub, runtime);
+	// 限制级通道的两个工具经它回调舞台层（状态住在 `stage-tap`）。
+	const tools = installPresetTools(ctx, hub, runtime, tap.nsfw);
 	const presets = await registerPresets(ctx, { shell: runtime.current.capabilities.shell });
 	const disposers: Array<() => void> = [
 		tap.dispose,

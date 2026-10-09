@@ -20,7 +20,8 @@
  *   - 基础：`validate_play`（刚写完剧目文件，问它写得对不对）、`set_stage_style`（皮肤）、
  *     `cut`（抠底）、`import_asset`（登记一张图）；
  *   - 按配置才装：`list_voices` / `web_search` / `generate_image`（纯生成候选）/
- *     `generate_asset`（一键出图入库）/ `generate_bgm`。
+ *     `generate_asset`（一键出图入库）/ `generate_bgm`；
+ *   - 只给剧作家：`enter_nsfw` / `exit_nsfw`（`playwriterOnly`；搭台助手不写剧情，服务端那一位也只授权剧作家）。
  *   - 两预设默认完全一致；按预设禁用走插件配置（`playwriterDisabledTools` / `stagehandDisabledTools`）。
  *
  * **模型用文件工具就能做的事一律不装**（2026-10-06）：`create_play`（写 play.json / 前提 / 角色卡）、
@@ -58,6 +59,8 @@ import type { Exa } from './exa';
 import { stagehandGuide } from './stagehand/prompt';
 import { createCutTool } from './tools/cut';
 import { createAnnotateAssetTool } from './tools/annotate-asset';
+import { createEnterNsfwTool } from './tools/enter-nsfw';
+import { createExitNsfwTool } from './tools/exit-nsfw';
 import { createGenerateAssetTool } from './tools/generate-asset';
 import { createGenerateBgmTool } from './tools/generate-bgm';
 import { createGenerateImageTool } from './tools/generate-image';
@@ -67,7 +70,7 @@ import { createSetStageStyleTool } from './tools/set-stage-style';
 import { createWebSearchTool } from './tools/web-search';
 import type { VoiceCatalog } from './voice/voice-catalog';
 import { gateSatisfied, TOOL_CATALOG, withConcurrency, type ToolSpec } from './tool-catalog';
-import type { PlayContext } from './tools/context';
+import type { NsfwHost, PlayContext } from './tools/context';
 import { createValidatePlayTool } from './tools/validate-play';
 
 /** Agent 的运行时面：`LiveAgent` 再加上它自己的 scope ctx（工具注册在它上面）。 */
@@ -105,6 +108,10 @@ function buildTool(spec: ToolSpec, play: PlayContext, deps: ToolDeps): ToolDefin
 			return createListVoicesTool(deps.voices!);
 		case 'web_search':
 			return createWebSearchTool(deps.exa!);
+		case 'enter_nsfw':
+			return createEnterNsfwTool(play);
+		case 'exit_nsfw':
+			return createExitNsfwTool(play);
 		default:
 			throw new Error(`[dsh-aivn] 未知工具：${spec.id}`);
 	}
@@ -138,7 +145,12 @@ export interface PresetToolsHost {
 	dispose(): void;
 }
 
-export function installPresetTools(ctx: Context, hub: StageHub, runtime: ToolRuntime): PresetToolsHost {
+export function installPresetTools(
+	ctx: Context,
+	hub: StageHub,
+	runtime: ToolRuntime,
+	nsfw: NsfwHost,
+): PresetToolsHost {
 	/** 每个 Agent 已装的工具、签名与它们所属的预设；WeakMap 让 Agent 走掉时不留登记。 */
 	const installed = new WeakMap<object, { signature: string; off: () => void }>();
 
@@ -156,7 +168,7 @@ export function installPresetTools(ctx: Context, hub: StageHub, runtime: ToolRun
 		if (current?.signature === signature) return;
 
 		current?.off();
-		installed.set(agent, { signature, off: install(ctx, hub, agent, preset, runtime) });
+		installed.set(agent, { signature, off: install(ctx, hub, agent, preset, runtime, nsfw) });
 	};
 
 	const onCreated = (payload: unknown): undefined => {
@@ -204,6 +216,7 @@ function install(
 	agent: ToolAgent,
 	preset: string,
 	runtime: ToolRuntime,
+	nsfw: NsfwHost,
 ): () => void {
 	const deps = runtime.current;
 	const sessionId = String(agent.id);
@@ -231,6 +244,12 @@ function install(
 				hub.appendStyle(id, theme);
 			}
 		},
+		// 限制级通道的两个出口：状态在舞台层（`stage-tap`），这里只把本会话绑上去。
+		nsfw: {
+			active: () => nsfw.active(sessionId),
+			enter: (reason) => nsfw.enter(sessionId, reason),
+			exit: (summary) => nsfw.exit(sessionId, summary),
+		},
 	};
 
 	// 工具面从 catalog 派生：先过「配没配」的门控，再减去该预设的禁用集。
@@ -243,9 +262,12 @@ function install(
 		tts: deps.capabilities.voice,
 		search: deps.capabilities.search,
 	};
-	const tools = TOOL_CATALOG.filter((spec) => gateSatisfied(spec, gateCaps) && !disabled.has(spec.id)).map((spec) =>
-		withConcurrency(buildTool(spec, play, deps), spec.concurrent),
-	);
+	const tools = TOOL_CATALOG.filter(
+		(spec) =>
+			gateSatisfied(spec, gateCaps) &&
+			!disabled.has(spec.id) &&
+			(preset === PLAYWRITER_PRESET || !spec.playwriterOnly),
+	).map((spec) => withConcurrency(buildTool(spec, play, deps), spec.concurrent));
 	const offs: Array<() => void> = [];
 
 	for (const tool of tools) {

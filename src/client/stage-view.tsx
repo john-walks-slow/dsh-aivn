@@ -74,7 +74,9 @@ type StageFrame =
 	/** 前面推的一切作废，紧接着的帧才是这条会话现在的样子（回退 / 重写 / 分支 / 重启）。 */
 	| { seq: number; kind: 'reset'; running: boolean }
 	/** 提示队列：全量快照，幂等。 */
-	| { seq: number; kind: 'guide'; items: readonly GuideItem[] };
+	| { seq: number; kind: 'guide'; items: readonly GuideItem[] }
+	/** 限制级（NSFW）通道开着没有（变化时推一次；重建时无条件补一帧）。 */
+	| { seq: number; kind: 'nsfw'; active: boolean };
 
 interface GuideItem {
 	id: string;
@@ -164,6 +166,13 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 	const rebasedTail = useRef(false);
 	/** 提示队列（导演排的话）。全量快照，最后一条就是现值。 */
 	const [guide, setGuide] = useState<readonly GuideItem[]>([]);
+	/**
+	 * 限制级（NSFW）通道开着没有 → 左上角那枚常驻角标。
+	 *
+	 * 只由 `nsfw` 帧驱动：这枚标识报的是**通道**，不是画面里有没有露骨内容（那是剧本的事）。
+	 * 冷开 / 分支走重建那条路，重推出来的态照样走同一帧。
+	 */
+	const [nsfw, setNsfw] = useState(false);
 	/** 正在重投影：这期间画面暂时是空的，别把它当成「还没开演」。 */
 	const [rebuilding, setRebuilding] = useState(false);
 	/** 上面那枚的读数版：SSE 那条 effect 不随它重建，闭包里读到的是旧值，所以状态之外留一份。 */
@@ -408,6 +417,11 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 				return;
 			}
 
+			if (frame.kind === 'nsfw') {
+				setNsfw(frame.active);
+				return;
+			}
+
 			if (frame.event.kind === 'stop') {
 				sawStop.current = true;
 				setStop({
@@ -640,6 +654,11 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 		>
 			{themeVars === '' ? null : <style data-aivn-theme>{themeVars}</style>}
 			<FullscreenButton state={fullscreen} />
+			{nsfw ? (
+				<span className="aivn-nsfw" title="限制级通道">
+					限制级
+				</span>
+			) : null}
 			<StageTheater
 				visual={playback.visual}
 				playback={playback}

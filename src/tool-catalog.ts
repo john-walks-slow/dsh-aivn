@@ -48,6 +48,13 @@ export interface ToolSpec {
 	 */
 	readonly concurrent: boolean;
 	readonly gate: ToolGate;
+	/**
+	 * 只给剧作家（搭台助手不装）。
+	 *
+	 * 两个预设共用一张工具面，所以「谁装」这件事基本不需要说；这一格留给**只有一边说得通**的工具：
+	 * 限制级通道是剧作家的（搭台助手不写剧情，给它两个开关没有意义），服务端那一位也只授权剧作家。
+	 */
+	readonly playwriterOnly?: boolean;
 }
 
 export const TOOL_CATALOG: readonly ToolSpec[] = [
@@ -121,6 +128,25 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
 		sideEffects: '外部 API',
 		concurrent: true,
 		gate: 'search',
+	},
+	{
+		// 限制级这一对只给剧作家（服务端那一位也是 `roles: ["playwriter"]`）。
+		// 不按配置门控：模型没配时回落成主模型（服务端同款），通道本身照旧成立。
+		// 独占：两头翻的是会话状态、还要广播，与 `set_stage_style` 同类；它们本来就一拍调一次，串行没有代价。
+		id: 'enter_nsfw',
+		job: '进入限制级（NSFW）通道：这条会话打上限制级标，舞台左上角亮起角标',
+		sideEffects: '改本会话的限制级态、向舞台广播',
+		concurrent: false,
+		gate: 'none',
+		playwriterOnly: true,
+	},
+	{
+		id: 'exit_nsfw',
+		job: '退出限制级通道：轮尾合闸，舞台角标熄灭',
+		sideEffects: '改本会话的限制级态、向舞台广播',
+		concurrent: false,
+		gate: 'none',
+		playwriterOnly: true,
 	},
 ];
 

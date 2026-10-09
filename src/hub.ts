@@ -34,6 +34,8 @@ export type BeatState = 'start' | 'end';
  *   就是「（点击开始）」而不是重投影出来的正文。
  * - `guide`：提示队列的**全量快照**（与 `style` 同一个口径，幂等）。导演排了一句提示、
  *   或那句提示真的进了会话时各推一次，舞台的 pending 面板据此显示「排队中 / 已送出」。
+ * - `nsfw`：限制级（NSFW）通道的开关，**状态变化时推一次**（值没变不发，与服务端同款）。
+ *   客户端据此亮灭左上角那枚常驻角标；重建时无条件补一帧（`stage-log` 把帧流整个换掉了）。
  */
 export type StageFrame = StageFrameBody & { seq: number };
 
@@ -45,7 +47,9 @@ type StageFrameBody =
 	| { kind: 'style'; theme: Record<string, string> }
 	/** `running` = 重建这一刻 Agent 在不在跑（见 `StageHub.reset`）。 */
 	| { kind: 'reset'; running: boolean }
-	| { kind: 'guide'; items: readonly GuideFrameItem[] };
+	| { kind: 'guide'; items: readonly GuideFrameItem[] }
+	/** 限制级（NSFW）通道开着没有（`enter` 那一刻就亮，退出那一拍收尾后才灭）。 */
+	| { kind: 'nsfw'; active: boolean };
 
 /** `guide` 帧里的一条：面板只读它（id 用来配对，text 是玩家写的那句原文）。 */
 export interface GuideFrameItem {
@@ -91,6 +95,11 @@ export class StageHub {
 	/** 收下一帧提示队列（全量快照）。导演排队与送出各推一次，舞台的面板据此翻状态。 */
 	appendGuide(sessionId: string, items: readonly GuideFrameItem[]): StageFrame {
 		return this.push(sessionId, { kind: 'guide', items });
+	}
+
+	/** 收下一帧限制级通道的开关（通道值一变才推，判定与去重在 `stage-tap`）。 */
+	appendNsfw(sessionId: string, active: boolean): StageFrame {
+		return this.push(sessionId, { kind: 'nsfw', active });
 	}
 
 	/**

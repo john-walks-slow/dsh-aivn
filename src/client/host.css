@@ -200,6 +200,30 @@
 }
 
 /**
+ * 限制级（NSFW）通道的常驻角标。
+ *
+ * 摆在左上角那枚全屏键的**下面**一行，而不是并排：那一枚的宽度随字面变（「全屏」/「退出全屏」），
+ * 并排就得跟着算它多宽。位置与长相跟着 AIVN app 那枚同款标识走（`@aivn/stage` 的 `.stage-modes`
+ * 起在 60px、`.stage-mode-nsfw` 是一行无边框无底色的淡痕）——它是 HUD，不是一块面板。
+ *
+ * 净画面态不藏它：全屏键可以藏（那是个控件），这一枚报的是状态，藏了玩家就不知道此刻开着通道。
+ * `pointer-events: none`：压在画面上的一行字不该吃掉舞台的点击（那一下是「继续」）。
+ */
+.aivn-nsfw {
+	position: absolute;
+	z-index: 45;
+	top: calc(56px + env(safe-area-inset-top, 0px));
+	left: 12px;
+	color: var(--dialog-ink-faint);
+	font-size: 11.5px;
+	font-weight: 600;
+	letter-spacing: 0.12em;
+	line-height: 1;
+	text-shadow: var(--dialog-text-shadow);
+	pointer-events: none;
+}
+
+/**
  * 新会话上的「开始游戏」。
  *
  * 坐在宿主的 Hero 那行里、**紧挨着预设名 chip 的右边**（`[data-slot="conversation.hero.agentPreset"]`

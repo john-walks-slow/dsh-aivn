@@ -19,6 +19,10 @@
  *   按 id 摘出去——它们不是玩家说的话，摆上时间线就是替玩家编了一句台词。
  * - 玩家的**第一条**消息：顺手把剧目的开局指令（`play.json` 的 `opening`）补进去，与玩家
  *   那一句同轮送到，见 `openPlay`。
+ *
+ * 限制级（NSFW）通道的 per-session 态也住在这里（`nsfw`）：剧作家调 `enter_nsfw` / `exit_nsfw`
+ * 翻它，它推一帧给舞台（左上角角标）。**进出的时机照服务端那条同款通道**——进入在调用那一刻就算
+ * 限制级、下一拍才兑现；退出那一拍仍是限制级（那一段正文是限制级原文），闸在轮尾合上。
  */
 import type { Context } from '@deepseek-ai/cordis';
 import { StageDslParser, type StageEvent } from '@aivn/core';
@@ -29,6 +33,7 @@ import type { InjectedMessages } from '../injected';
 import type { EndingsLedger } from '../play/ledger';
 import { loadPlaySync, type Play } from '../play/play';
 import { resetPlayState } from '../play/play-state';
+import type { NsfwHost } from '../tools/context';
 import type { VoiceHost } from '../voice/voice-host';
 import type { VoicePipeline } from '../voice/voice';
 import { PLAYWRITER_PRESET, sessionPreset, sessionWorkspace, type LiveAgent } from '../session';
@@ -69,6 +74,51 @@ export function installStageTap(
 	const ended = new Set<string>();
 	/** 已经登记过「新周目开始」的会话（onInput 一轮里可能被调多次）。 */
 	const begun = new Set<string>();
+	/** 每会话的限制级（NSFW）通道态，见 `NsfwState`。 */
+	const nsfw = new Map<string, NsfwState>();
+
+	const nsfwOf = (sessionId: string): NsfwState => {
+		let state = nsfw.get(sessionId);
+		if (!state) {
+			state = { active: false, pendingEnter: false, pendingExit: false, signalled: false };
+			nsfw.set(sessionId, state);
+		}
+		return state;
+	};
+
+	/**
+	 * 这条会话现在算不算限制级：`active || pendingEnter`（服务端 `beatChannelNsfw()` 的同一口径）。
+	 *
+	 * 进入那一拍照它算——标识在工具调用那一刻就亮，而不是等下一拍专用模型接手（本步也还没有
+	 * 「下一拍换模型」这回事，但两边的时机口径现在就对齐，第 2 步不用再改这里）。
+	 */
+	const nsfwChannel = (state: NsfwState): boolean => state.active || state.pendingEnter;
+
+	/** 通道值一变就推一帧。值没变不发：重复调用、进入兑现那一步都不该再推一次。 */
+	const signalNsfw = (sessionId: string, state: NsfwState): void => {
+		const next = nsfwChannel(state);
+		if (next === state.signalled) return;
+		state.signalled = next;
+		hub.appendNsfw(sessionId, next);
+	};
+
+	/**
+	 * 工具侧的限制级面（`preset-tools` 装配时把它绑到本会话，见 `NsfwControl`）。
+	 *
+	 * 两个出口都只是**翻旗标**：「已在态内」的判断归工具（与服务端同一个口径，两边不重判）。
+	 */
+	const nsfwHost: NsfwHost = {
+		active: (sessionId) => nsfwChannel(nsfwOf(sessionId)),
+		enter: (sessionId) => {
+			const state = nsfwOf(sessionId);
+			state.pendingEnter = true;
+			signalNsfw(sessionId, state);
+		},
+		exit: (sessionId) => {
+			// 只记下「这一拍要退出」：这一拍的正文还是限制级原文，闸到轮尾才合上（见 `onStatus`）。
+			nsfwOf(sessionId).pendingExit = true;
+		},
+	};
 
 	const pipelineFor = (sessionId: string): VoicePipeline | null => {
 		if (voices.has(sessionId)) return voices.get(sessionId) ?? null;
@@ -153,6 +203,21 @@ export function installStageTap(
 	const onStatus = (payload: StatusPayload): void => {
 		const sessionId = payload.agent.id;
 		if (!isPlaywriter(sessionId)) return;
+		// 轮边界也是限制级通道的兑现点：进入在下一拍开头生效，退出在这一拍末尾合闸。
+		const state = nsfw.get(sessionId);
+		if (state) {
+			if (payload.status === 'running') {
+				if (state.pendingEnter) {
+					state.pendingEnter = false;
+					state.active = true;
+				}
+			} else if (state.pendingExit) {
+				state.active = false;
+				state.pendingEnter = false;
+				state.pendingExit = false;
+				signalNsfw(sessionId, state);
+			}
+		}
 		hub.appendBeat(sessionId, payload.status === 'running' ? 'start' : 'end');
 	};
 
@@ -226,6 +291,7 @@ export function installStageTap(
 		voices.delete(sessionId);
 		ended.delete(sessionId);
 		begun.delete(sessionId);
+		nsfw.delete(sessionId);
 		voice.disposeSession(sessionId);
 		injected.forget(sessionId);
 		ledger.forget(sessionId);
@@ -246,6 +312,7 @@ export function installStageTap(
 			voices.clear();
 			ended.clear();
 			begun.clear();
+			nsfw.clear();
 		},
 		forgetParser: (sessionId) => {
 			// 重建把这条会话的帧流整个换掉了，解析器手里那半行文本（以及没闭合的包裹标签）
@@ -254,9 +321,20 @@ export function installStageTap(
 			voices.delete(sessionId);
 			voice.disposeSession(sessionId);
 		},
+		nsfw: nsfwHost,
 		hasEnded: (sessionId) => ended.has(sessionId),
 		// 重建（`stage-log`）重放助手文本时调它重推终局标记；`live=false` 表示只重放、不落账。
 		noteEvent: (sessionId, event) => trackEvent(sessionId, event, false),
+		// 重建重推出的限制级态：覆盖现值并**无条件推一帧**——重建把帧流整个换掉了（`hub.reset`），
+		// 之后才连上来的舞台只看得到新帧流，漏掉这一帧它永远不知道通道开着。
+		noteNsfw: (sessionId, active) => {
+			const state = nsfwOf(sessionId);
+			state.active = active;
+			state.pendingEnter = false;
+			state.pendingExit = false;
+			state.signalled = active;
+			hub.appendNsfw(sessionId, active);
+		},
 		// 重建开始前清掉上一遍推出来的终局标记：回退掉结局那一拍后不再有 ending 事件，
 		// 终局据此正确退出；旧标记不清的话它会一直挂着，把玩家永久锁在门外。
 		resetTerminal: (sessionId) => {
@@ -271,8 +349,31 @@ export function installStageTap(
  * `hasEnded` / `noteEvent` 是结局这条线的两个出口：前者给路由拦终局后的玩家输入，后者让
  * **重建**也能重推终局态（冷开 / 分支 / 回看之后「已结局」不丢），但绝不重复落账。
  */
+/**
+ * 每会话的限制级（NSFW）通道态。
+ *
+ * `active` 与 `pendingEnter` 分开（而不是一个布尔）是为了对齐服务端那条同款通道的时机：
+ * 进入请求在**调用那一刻**就该让标识亮起来，而「限制级模型接管中」要等下一拍才成立。
+ * 通道值读的是两者之或（`nsfwChannel`）。
+ */
+interface NsfwState {
+	/** 限制级模型接管中（进入的下一拍兑现；本步还没有换模型，先把这个时机留着）。 */
+	active: boolean;
+	/** 本拍刚请求进入：通道值当场为真。 */
+	pendingEnter: boolean;
+	/** 本拍请求退出：这一拍仍算限制级，闸在轮尾合上。 */
+	pendingExit: boolean;
+	/** 上一次推给客户端的通道值（值没变不重复推）。 */
+	signalled: boolean;
+}
+
 export interface StageTap {
 	dispose(): void;
+	/**
+	 * 限制级通道的宿主面：`enter_nsfw` / `exit_nsfw` 按会话调它（装配期交给 `preset-tools`，
+	 * 见 `PlayContext.nsfw`）。
+	 */
+	readonly nsfw: NsfwHost;
 	/** 这条会话的流式解析器与语音管线作废（会话被重投影了）。 */
 	forgetParser(sessionId: string): void;
 	/** 这条会话是否已到达结局（终局态：拒绝玩家继续）。 */
@@ -281,6 +382,8 @@ export interface StageTap {
 	resetTerminal(sessionId: string): void;
 	/** 重建期间重放一帧 IR：只重推终局状态，不落账。 */
 	noteEvent(sessionId: string, event: StageEvent): void;
+	/** 重建从会话日志里重推出的限制级态（冷开 / 分支 / 回看之后角标与打标跟着回来）。 */
+	noteNsfw(sessionId: string, active: boolean): void;
 }
 
 /**

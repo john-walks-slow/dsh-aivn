@@ -547,12 +547,14 @@ check(
 /* ── 19. 并发：catalog 里谁声明了可重叠，提示词里怎么教 ── */
 
 // 并发的开关是工具定义上的 `isConcurrencySafe`，声明在 catalog 的 `concurrent`（缺省即独占）。
-// 这里锁住「谁独占」这件事：set_stage_style 读-改-写 theme.json 且没有锁，只有它不能并发。
+// 这里锁住「谁独占」这件事：set_stage_style 读-改-写 theme.json 且没有锁；限制级那两位翻的是
+// 会话状态、还要广播（一拍调一次，串行没有代价）——这三只不能并发。
 const exclusive = TOOL_CATALOG.filter((spec) => !spec.concurrent).map((spec) => spec.id);
+const EXPECTED_EXCLUSIVE = ['enter_nsfw', 'exit_nsfw', 'set_stage_style'];
 check(
 	'M45',
-	exclusive.length === 1 && exclusive[0] === 'set_stage_style',
-	`只有 set_stage_style 声明独占（实际：${exclusive.join('、') || '无'}）`,
+	exclusive.length === EXPECTED_EXCLUSIVE.length && EXPECTED_EXCLUSIVE.every((id) => exclusive.includes(id)),
+	`独占的只有 ${EXPECTED_EXCLUSIVE.join('、')}（实际：${exclusive.join('、') || '无'}）`,
 );
 
 // 教学：persona 教「独立的调用放同一批」（每轮契约），素材那层的食谱（一批几张、候选取几张）在技能里。

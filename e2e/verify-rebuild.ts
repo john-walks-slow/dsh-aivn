@@ -44,35 +44,62 @@ const BEATS = [
 	{ id: 'beat5', text: `${SAY('终幕。')}\n<ending id="true_sunrise" name="晨光" subtitle="这一次，她没有回头" summary="她把三年的沉默一次说完。"/>\n${SAY('结局之后不该出现。')}` },
 ];
 
-/** 一条假的会话事件：只要 `seq` / `type` / 投影出来的消息。 */
+/**
+ * 一条假的会话事件：只要 `seq` / `type` / 投影出来的消息。
+ *
+ * 限制级通道的段起止只认那两次工具调用，靠**配对的 `tool/result`** 认（`tool/call` 不在会话面上，
+ * 见 `stage-log.ts` 的 `tool/result` 那一支），所以夹具要能造出这一对。
+ */
 interface FakeEvent {
 	seq: number;
-	type: 'assistant/message' | 'user/message';
+	type: 'assistant/message' | 'user/message' | 'tool/call' | 'tool/result';
 	message: unknown;
+	/** 工具事件走真实形状的 `data`（`stage-log` 读的是 `event.data.*`，不是 `message`）。 */
+	data?: unknown;
 }
 
 /**
  * 手写的转写：一排开局指令 + 玩家的一句话，然后四拍，每拍之间插一句玩家输入。
  * 事件 seq 与 `surface.nodes` 都用同一串（真实会话里 surface 是事件的一个子序列）。
  */
-function buildTranscript(): { events: FakeEvent[]; nodes: number[] } {
+function buildTranscript(options?: {
+	beats?: readonly { id: string; text: string }[];
+	/** 在第几拍之后插一次限制级工具调用（`enter` / `exit`），以及它的结果上不上会话面。 */
+	tools?: readonly { afterBeat: number; name: 'enter_nsfw' | 'exit_nsfw'; resultOnSurface: boolean }[];
+}): { events: FakeEvent[]; nodes: number[] } {
+	const beats = options?.beats ?? BEATS;
+	const tools = options?.tools ?? [];
 	const events: FakeEvent[] = [];
-	const push = (type: FakeEvent['type'], content: unknown, source?: unknown): void => {
+	const surface: number[] = [];
+	const push = (event: Omit<FakeEvent, 'seq'>): void => {
 		const seq = events.length + 1;
-		const id = `fixture-${seq}`;
-		events.push({
-			seq,
-			type,
-			message: { id, content, role: type === 'user/message' ? 'user' : 'assistant', ...(source ? { source } : {}) },
-		});
+		events.push({ ...event, seq } as FakeEvent);
+		if (event.type !== 'tool/call') surface.push(seq);
 	};
+	const message = (type: FakeEvent['type'], content: unknown, source?: unknown): unknown => ({
+		id: `fixture-${events.length + 1}`,
+		content,
+		role: type === 'user/message' ? 'user' : 'assistant',
+		...(source ? { source } : {}),
+	});
 
-	push('user/message', [{ type: 'text', text: '（游戏开始，请演出第一轮）' }], { kind: 'user' });
-	for (const [index, beat] of BEATS.entries()) {
-		if (index > 0) push('user/message', [{ type: 'text', text: `玩家第 ${index} 句` }], { kind: 'user' });
-		push('assistant/message', [{ type: 'text', text: beat.text }]);
+	push({ type: 'user/message', message: message('user/message', [{ type: 'text', text: '（游戏开始，请演出第一轮）' }], { kind: 'user' }) });
+	for (const [index, beat] of beats.entries()) {
+		if (index > 0) {
+			push({ type: 'user/message', message: message('user/message', [{ type: 'text', text: `玩家第 ${index} 句` }], { kind: 'user' }) });
+		}
+		push({ type: 'assistant/message', message: message('assistant/message', [{ type: 'text', text: beat.text }]) });
+		for (const tool of tools.filter((item) => item.afterBeat === index + 1)) {
+			const callId = `call-${tool.name}-${index}`;
+			push({ type: 'tool/call', message: null, data: { callId, name: tool.name } });
+			// `resultOnSurface: false` = 这次调用被回退 / 重写抹掉了：调用还在日志里，结果不在面上。
+			if (tool.resultOnSurface) {
+				const result = { id: `result-${callId}`, role: 'tool', content: [], toolCallId: callId };
+				push({ type: 'tool/result', message: result, data: { message: result } });
+			}
+		}
 	}
-	return { events, nodes: events.map((event) => event.seq) };
+	return { events, nodes: surface };
 }
 
 /** 把假转写包成一个 `LiveSession`：只实现重建真正用到的那四个口子。 */
@@ -166,6 +193,52 @@ const stopAfterEnding = frames.some(
 	(frame, i) => i > indexOfEnding && frame.kind === 'ir' && frame.event.kind === 'stop',
 );
 check('R13', indexOfEnding >= 0 && !stopAfterEnding, '结局那一拍不给停止点（ending 取代 stop）');
+
+/* ── 限制级（NSFW）通道：段起止从会话面重推 ───────────────────────────── */
+
+/**
+ * 限制级态的重建判据。
+ *
+ * 角标与「哪几拍属于那一段」都从**会话面**重推，所以重建是这条通道最容易出错的地方：
+ * 冷开、分支、回退之后，标识必须回到那一版该有的样子。三个场景各自跑一遍真实 `rebuildStage`：
+ *
+ * | 场景 | 会话面里有什么 | 重推出来的态 |
+ * |---|---|---|
+ * | 进了没退 | `enter_nsfw` 的结果在面上 | **亮** |
+ * | 进了又退 | 再加一次 `exit_nsfw` 的结果 | **灭** |
+ * | 调用被抹掉 | `enter_nsfw` 的调用在日志里、结果不在面上（回退/重写） | **灭**（认配对的结果，不认调用） |
+ */
+function rebuildWithNsfw(tools: readonly { afterBeat: number; name: 'enter_nsfw' | 'exit_nsfw'; resultOnSurface: boolean }[]): boolean {
+	const h = new StageHub();
+	const t = buildTranscript({ tools });
+	rebuildStage('fixture-nsfw', fakeSession(t), false, {
+		hub: h,
+		injected: new InjectedMessages(),
+		voice: { replayCached: () => {} } as unknown as VoiceHost,
+		onNsfw: (sessionId, active) => h.appendNsfw(sessionId, active),
+	});
+	const last = h.history('fixture-nsfw').filter((frame) => frame.kind === 'nsfw').at(-1);
+	return last?.kind === 'nsfw' ? last.active : false;
+}
+
+check(
+	'R14',
+	rebuildWithNsfw([{ afterBeat: 2, name: 'enter_nsfw', resultOnSurface: true }]) === true,
+	'段内重建：进了没退 → 标识亮',
+);
+check(
+	'R15',
+	rebuildWithNsfw([
+		{ afterBeat: 2, name: 'enter_nsfw', resultOnSurface: true },
+		{ afterBeat: 4, name: 'exit_nsfw', resultOnSurface: true },
+	]) === false,
+	'出了段重建：进了又退 → 标识灭',
+);
+check(
+	'R16',
+	rebuildWithNsfw([{ afterBeat: 2, name: 'enter_nsfw', resultOnSurface: false }]) === false,
+	'被回退抹掉的调用不算数：结果不在面上 → 标识不亮（只认配对的 tool/result）',
+);
 
 let failed = 0;
 for (const [id, ok, note] of checks) {
