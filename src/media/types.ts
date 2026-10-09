@@ -5,25 +5,14 @@
  * 候选、`import_asset` 登记的东西、`commit` 写出来的素材表条目，指的都是同一批形状。
  * 行为的家在哪，见同一目录下各 use case 文件的头注。
  */
+import type { AssetKind, DraftRecord, KeyBackgroundColor, LedgerEntry, LedgerKind } from '@aivn/agent';
 import type { SpriteFraming, SpriteStature } from '@aivn/core';
 import type { CutoutTuning } from './cutout';
 import type { ImageAspect, ImageBackend } from './image';
 import type { MusicBackend } from './music';
 
 export type { ImageAspect };
-
-/** 素材类目：背景、事件插图、立绘。BGM 走单独那条路（没有草稿与抠底）。 */
-export type AssetKind = 'background' | 'cg' | 'sprite';
-/** 台账的键（`assets/generated.json`）按类目加一位音乐。 */
-export type LedgerKind = AssetKind | 'bgm';
-
-/**
- * 立绘的色键底色：纯绿（默认）或纯品红（主体自己就是绿色系时）。
- *
- * **由调用方显式给**，不由引擎猜：底色与角色配色撞上，色键抠底会把角色身上那种颜色一起抠掉，
- * 而「算不算绿色系」是个判断，不该藏在提示词的措辞里让生图模型自己决定。
- */
-export type KeyBackgroundColor = 'green' | 'magenta';
+export type { AssetKind, DraftRecord, KeyBackgroundColor, LedgerEntry, LedgerKind };
 
 /** 一张要出的图：类目 + 身份（背景/插图给 id，立绘给主体与差分）+ 这次的参数。 */
 export interface AssetTarget {
@@ -81,15 +70,6 @@ export interface GeneratedAsset {
 	sourcePath?: string;
 }
 
-/** `assets/generated.json` 的一条：这张图当初用什么描述生成、落在哪。 */
-export interface LedgerEntry {
-	kind: LedgerKind;
-	path: string;
-	prompt: string;
-	model?: string;
-	createdAt: string;
-}
-
 /** 把「要一张什么图」解析成的落盘规格（目录、文件名主体、画幅、垫图基准）。 */
 export interface AssetSpec {
 	kind: AssetKind;
@@ -114,27 +94,6 @@ export interface ResolvedReference {
 	mimeType: string;
 	data: Buffer;
 	name: string | null;
-}
-
-/** 草稿区一份记录（`media-cache/drafts/<id>/draft.json`）：出图意图 + 落盘细节。 */
-export interface DraftRecord {
-	draftId: string;
-	/** 剧目目标；通用出图的记录没有它。 */
-	kind?: AssetKind;
-	name?: string;
-	spriteId?: string;
-	variant?: string;
-	framing?: SpriteFraming;
-	stature?: SpriteStature;
-	title?: string;
-	aspect: ImageAspect;
-	prompt: string;
-	/** 成图扩展名（含点）；立绘是抠底后的 `.png`。 */
-	imageExt: string;
-	/** 抠底前原片的扩展名（立绘才有）。 */
-	sourceExt?: string;
-	createdAt: string;
-	committedAt?: string;
 }
 
 /**

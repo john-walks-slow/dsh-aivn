@@ -35,6 +35,12 @@ export async function generateBgm(
 	await writeAtomic(abs, music.bytes);
 	const path = `${kindPath}/${file}`;
 	await declareBgmSource(dir, stem);
-	await recordLedger(dir, stem, { kind: 'bgm', path: `assets/${path}`, prompt, createdAt: new Date().toISOString() });
+	await recordLedger(dir, {
+		id: stem,
+		kind: 'bgm',
+		path: `assets/${path}`,
+		prompt,
+		at: new Date().toISOString(),
+	});
 	return { kind: 'bgm', path: `assets/${path}`, absPath: abs, replaced };
 }
