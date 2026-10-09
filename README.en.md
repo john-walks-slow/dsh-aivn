@@ -172,13 +172,18 @@ When the story reaches its true end, the playwright writes an ending tag as the 
 (it **replaces** that beat's `<stop>`):
 
 ```xml
-<ending id="true_sunrise" title="晨光" subtitle="这一次，她没有回头"/>
+<ending id="true_sunrise" name="晨光" subtitle="这一次，她没有回头"
+         summary="她把三年的沉默一次说完，然后走进了那片光里。"/>
 ```
 
-Reaching an ending puts the stage into a **terminal state**: no buttons, no continuing — to play again you
-branch before the ending with DSH's native "branch in new conversation", or start a new session. After the
-ending the engine opens **one extra turn** and asks the playwright for a closing prose passage
-(`<epilogue>…</epilogue>`), which streams into the ending card.
+`<ending/>` is a **pure archival tag that produces no visuals**: all four fields (`id` / `name` /
+`subtitle` / `summary`) go only into the ledger and none of them reaches the screen. Any closing tableau
+is built by the playwright itself from the ordinary `<scene>` / `<title>` / `<narrate>` tags — every play
+wants a different ending.
+
+Reaching an ending puts the stage into a **terminal state**: no buttons, no continuing, and no
+"tap the stage to continue" — to play again you branch before the ending with DSH's native "branch in new
+conversation", or start a new session.
 
 The engine records endings automatically in `endings.json` at the workspace root: accumulated across
 playthroughs, deduplicated by `id`, with `reachedIn` recording which playthrough reached it. The engine owns

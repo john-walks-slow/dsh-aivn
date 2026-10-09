@@ -22,7 +22,8 @@ const LEDGER_VERSION = 1;
 
 /** 账本里一条结局。字段都可缺省（老账本 / 手写账本），解码时逐项归一。 */
 export interface EndingRecord {
-  title?: string;
+  /** 人话名（`<ending name=…>`）；缺省时渲染回落 id。 */
+  name?: string;
   subtitle?: string;
   /** 首次达成（ISO）。 */
   firstAt: string;
@@ -30,7 +31,7 @@ export interface EndingRecord {
   lastAt: string;
   /** 在哪些周目达成过（升序、去重）。 */
   reachedIn: number[];
-  /** 收束散文（`<epilogue>` 落地时回填，取最后一次）。 */
+  /** 归档摘要（`<ending summary=…>`，落账时随属性一起来）。 */
   summary?: string;
 }
 
@@ -109,7 +110,9 @@ function decodeRecord(value: unknown): EndingRecord | null {
       ).sort((a, b) => a - b)
     : [];
   return {
-    ...(text('title') ? { title: text('title') } : {}),
+    // 老账本用的是改名前那个键（`title`），缺 `name` 时回落读它——账本是用户可达的数据，
+    // 一次改名不该让旧周目的人话名消失（读到的仍是同一条记录）。
+    ...(text('name') ?? text('title') ? { name: text('name') ?? text('title') } : {}),
     ...(text('subtitle') ? { subtitle: text('subtitle') } : {}),
     firstAt: text('firstAt') ?? now,
     lastAt: text('lastAt') ?? now,
@@ -158,7 +161,13 @@ export class EndingsLedger {
     return data.playthroughs;
   }
 
-  /** 结局达成：以 id 去重，`reachedIn` 取并集；已存在的 title/subtitle/summary 不被空值抹掉。 */
+  /**
+   * 结局达成：以 id 去重，`reachedIn` 取并集、`lastAt` 刷新。
+   *
+   * `name` / `subtitle` / `summary` 三个归档字段全在 `EndingAttrs` 上（`<ending …/>` 自带），
+   * 所以这条落账**一次到位**——不像从前要等收束散文那一轮回来再回填。缺省字段不抹掉旧值
+   * （同一个结局重达成时，模型这一轮没写 `summary` 不该把上一轮的归档摘要清空）。
+   */
   recordEnding(dir: string, sessionId: string, attrs: EndingAttrs): void {
     const data = this.load(dir);
     if (data === null) return;
@@ -167,25 +176,13 @@ export class EndingsLedger {
     const prev = data.endings[attrs.id];
     const reachedIn = Array.from(new Set([...(prev?.reachedIn ?? []), playthrough])).sort((a, b) => a - b);
     data.endings[attrs.id] = {
-      ...(attrs.title ? { title: attrs.title } : prev?.title ? { title: prev.title } : {}),
+      ...(attrs.name ? { name: attrs.name } : prev?.name ? { name: prev.name } : {}),
       ...(attrs.subtitle ? { subtitle: attrs.subtitle } : prev?.subtitle ? { subtitle: prev.subtitle } : {}),
       firstAt: prev?.firstAt ?? now,
       lastAt: now,
       reachedIn,
-      ...(prev?.summary ? { summary: prev.summary } : {}),
+      ...(attrs.summary ? { summary: attrs.summary } : prev?.summary ? { summary: prev.summary } : {}),
     };
-    this.save(dir, data);
-  }
-
-  /** 收束散文回填（取最后一次）。没有这条结局就不凭空造一条。 */
-  recordSummary(dir: string, id: string, summary: string): void {
-    const text = summary.trim();
-    if (text === '') return;
-    const data = this.load(dir);
-    if (data === null) return;
-    const prev = data.endings[id];
-    if (!prev) return;
-    data.endings[id] = { ...prev, summary: text };
     this.save(dir, data);
   }
 

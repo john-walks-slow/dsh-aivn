@@ -28,7 +28,6 @@ import {
 	SETTING_VOICE,
 	StageTheater,
 	StopPanel,
-	EndingCard,
 	ToastStack,
 	VoiceDirector,
 	buildAssetIndex,
@@ -39,7 +38,6 @@ import {
 	useToasts,
 	writeFlag,
 	type DirectorTargets,
-	type EndingCardData,
 } from '@aivn/stage';
 import type { AssetMeta, PlayConfig, StageEvent, StopPayload } from '@aivn/core';
 import stageCss from '@aivn/stage/stage.css';
@@ -132,17 +130,13 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 	const [stop, setStop] = useState<StopPayload | null>(null);
 	const [isNoStop, setIsNoStop] = useState(false);
 	/**
-	 * 已到达的结局（终局态）。null = 还没结局。
+	 * 已到达的结局。null = 还没结局。
 	 *
 	 * 它像 `stop` 一样从 IR 里捕获——冷开 / 分支 / 回看都靠重放重新推出，不引入只活在内存里的终局标记。
+	 * `<ending/>` 是**纯归档标签、不上屏**：这里只留一个布尔，用来给 `stopAffordance` / `StageTheater`
+	 * 上终局闸（终幕画面由剧本自己用 `<scene>` / `<title>` / `<narrate>` 搭）。
 	 */
-	const [ending, setEnding] = useState<EndingCardData | null>(null);
-	/** 收束散文（`<epilogue>` 累积出来的）。 */
-	const [epilogue, setEpilogue] = useState('');
-	/** 收束散文写完了没有：没写完时结局卡摆占位。 */
-	const [epilogueDone, setEpilogueDone] = useState(false);
-	/** 收束那一轮是否已经开始：它一开始就把结局卡重新摆出来（收束是结局卡的一部分）。 */
-	const [epilogueStarted, setEpilogueStarted] = useState(false);
+	const [ended, setEnded] = useState(false);
 	const [turbo, setTurbo] = useState(false);
 	const [play, setPlay] = useState<PlayPayload | null>(null);
 	const [assets, setAssets] = useState<AssetsPayload | null>(null);
@@ -265,6 +259,7 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 		continued.current = false;
 		setStop(null);
 		setIsNoStop(false);
+		setEnded(false);
 		setLive(false);
 		setGuide([]);
 		rebuildingRef.current = false;
@@ -291,10 +286,7 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 				sawStop.current = false;
 				setStop(null);
 				setIsNoStop(false);
-				setEnding(null);
-				setEpilogue('');
-				setEpilogueDone(false);
-				setEpilogueStarted(false);
+				setEnded(false);
 				lastSeq.current = frame.seq - 1;
 			}
 			if (frame.seq <= lastSeq.current) return;
@@ -308,12 +300,9 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 				sawStop.current = false;
 				setStop(null);
 				setIsNoStop(false);
-				// 结局 / 收束也跟着重放重推：回退掉结局那一拍后这里清空、退出终局；
-				// 分支 / 冷开带着结局前缀时，重放的 ending IR 会把它重新摆回来。
-				setEnding(null);
-				setEpilogue('');
-				setEpilogueDone(false);
-				setEpilogueStarted(false);
+				// 终局态也跟着重放重推：回退掉结局那一拍后这里清空、退出终局；
+				// 分支 / 冷开带着结局前缀时，重放的 ending IR 会把它重新推回来。
+				setEnded(false);
 				// 提示队列**不清**：它不在会话面上，重建的尾巴上宿主会补一帧现值回来。
 				// 重建帧紧跟着就来；这中间的空白不是「还没开演」，先别把「开演」摆出来。
 				rebuildingRef.current = true;
@@ -375,26 +364,10 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 					...(frame.event.placeholder ? { placeholder: frame.event.placeholder } : {}),
 				});
 			}
-			// 结局与收束散文：像 `stop` 一样从 IR 捕获（`ScriptBuilder` 忽略它们，不进台词时间线）。
-			if (frame.event.kind === 'ending') {
-				setEnding({
-					id: frame.event.id,
-					...(frame.event.title ? { title: frame.event.title } : {}),
-					...(frame.event.subtitle ? { subtitle: frame.event.subtitle } : {}),
-				});
-				setEpilogue('');
-				setEpilogueDone(false);
-				setEpilogueStarted(false);
-			} else if (frame.event.kind === 'epilogue_start') {
-				setEpilogue('');
-				setEpilogueDone(false);
-				setEpilogueStarted(true);
-			} else if (frame.event.kind === 'epilogue_text') {
-				const { delta } = frame.event;
-				setEpilogue((prev) => prev + delta);
-			} else if (frame.event.kind === 'epilogue_end') {
-				setEpilogueDone(true);
-			}
+			// 结局：纯归档标签，从 IR 里捕获一个终局态（`ScriptBuilder` 忽略它，不进台词时间线）。
+			// 它**不产生任何画面**——终幕画面由剧本自己用 `<scene>` / `<title>` / `<narrate>` 搭，
+			// 这里只把 `ended` 转成闸：不给「点舞台继续」、点画面也不推进。
+			if (frame.event.kind === 'ending') setEnded(true);
 			builder.apply(frame.event, frame.seq);
 			requestRender();
 		});
@@ -557,7 +530,7 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 		// 读那个 flag 恒为 false（等于一段永远进不去的分支），所以先按关着算。
 		continueCardOn: false,
 		// 终局：不给任何出口。结局那一轮没有 `<stop>`，不显式挡掉就会摆出「点舞台继续」。
-		ended: ending !== null,
+		ended,
 	});
 
 	/**
@@ -651,12 +624,9 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 				onTurbo={setTurbo}
 				canContinue={affordance.clickToContinue}
 				onContinue={continueOn}
-				ended={ending !== null}
+				ended={ended}
 				overlay={
-					playback.scrubbed || rebuilding ? null : ending && (panelReady || epilogueStarted) ? (
-						/* 终局：结局卡（标题 / 副标题 / 收束散文）。无按钮、点它也不继续。 */
-						<EndingCard ending={ending} summary={epilogue} summaryPending={!epilogueDone} />
-					) : lines.length === 0 ? (
+					playback.scrubbed || rebuilding ? null : lines.length === 0 ? (
 						/* 空舞台：摆一个「开演」，等玩家按第一下。开局指令是剧目自己的 opening。 */
 						<div className="choice-overlay" role="group" aria-label="开演">
 							<div className="choices">

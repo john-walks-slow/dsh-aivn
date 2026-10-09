@@ -15,7 +15,7 @@
  * | 2 | `<stop placeholder="想对他说什么？"/>` | **一帧** `ir` / `stop` / `stopType: "free"` / `placeholder: "想对他说什么？"` |
  * | 3 | `<stop/>` | **没有** `stop` 帧（这一段自然演完；客户端走 no_stop 的「继续」卡） |
  * | 4 | 一个停止点标签都没写（旧会话就长这样） | **没有** `stop` 帧（与第 3 拍同构） |
- * | 5 | `<ending id title subtitle/>` + 其后又写了一句 | **一帧** `ending`（字段完整）；其后那句被丢弃 |
+ * | 5 | `<ending id name subtitle summary/>` + 其后又写了一句 | **一帧** `ending`（四字段完整）；其后那句被丢弃 |
  *
  * 另有几条结构断言：
  *   A. 重建的第一帧是 `reset`（「前面推的一切作废」），末帧是 `beat/end`；
@@ -41,7 +41,7 @@ const BEATS = [
 	{ id: 'beat2', text: `${SAY('第二拍。')}\n<stop placeholder="想对他说什么？"/>` },
 	{ id: 'beat3', text: `${SAY('第三拍。')}\n<stop/>` },
 	{ id: 'beat4', text: `${SAY('第四拍。')}` },
-	{ id: 'beat5', text: `${SAY('终幕。')}\n<ending id="true_sunrise" title="晨光" subtitle="这一次，她没有回头"/>\n${SAY('结局之后不该出现。')}` },
+	{ id: 'beat5', text: `${SAY('终幕。')}\n<ending id="true_sunrise" name="晨光" subtitle="这一次，她没有回头" summary="她把三年的沉默一次说完。"/>\n${SAY('结局之后不该出现。')}` },
 ];
 
 /** 一条假的会话事件：只要 `seq` / `type` / 投影出来的消息。 */
@@ -146,9 +146,10 @@ check(
 	endings.length === 1 &&
 		one?.kind === 'ending' &&
 		one.id === 'true_sunrise' &&
-		one.title === '晨光' &&
-		one.subtitle === '这一次，她没有回头',
-	`重建后恰好一帧 ending，字段完整（实际 ${endings.length} 帧：${one?.kind === 'ending' ? JSON.stringify(one) : '无'}）`,
+		one.name === '晨光' &&
+		one.subtitle === '这一次，她没有回头' &&
+		one.summary === '她把三年的沉默一次说完。',
+	`重建后恰好一帧 ending、四字段完整（实际 ${endings.length} 帧：${one?.kind === 'ending' ? JSON.stringify(one) : '无'}）`,
 );
 check('R11', !texts.some((text) => text.includes('<ending')), '结局标签没被当成台词念上台');
 check('R12', !texts.some((text) => text.includes('不该出现')), '结局之后的内容被丢弃（终局是确定的）');

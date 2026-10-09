@@ -411,9 +411,11 @@ function renderEndings(dir: string, newGamePlus: boolean): string {
 
 	const list = rows
 		.map(([id, record]) => {
-			const title = record.title?.trim() || id;
+			// 人话名缺省回落 id（`<ending name=…>` 是可选属性）。这里只列名与副标题；
+			// `summary` 是给账本／画廊用的长散文，塞进 A 区会把提示词撑肿，不在这儿复述。
+			const name = record.name?.trim() || id;
 			const subtitle = record.subtitle?.trim();
-			return subtitle ? `${title}（${subtitle}）` : title;
+			return subtitle ? `${name}（${subtitle}）` : name;
 		})
 		.join('、');
 

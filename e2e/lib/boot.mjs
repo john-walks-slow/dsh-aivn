@@ -63,16 +63,33 @@ export async function gotoGui(page) {
 	await page.waitForTimeout(6_000);
 }
 
-/** 关掉首次进入的「添加 API key」引导弹窗（不配 key 的实例每次都会弹）。 */
+/**
+ * 关掉首次进入的浮层（每次新浏览器上下文都会重来，必须每轮都点）。
+ *
+ * 两类：
+ * - 「添加 API key」引导（不配 key 的实例每次都会弹）——「稍后配置」；
+ * - dsh 0.2.0 的「Preview Notice」公告浮层——「Continue」。它盖在会话主区上，不点掉的话
+ *   `sendMessage` 点输入框会被它 intercept pointer events（2026-10-09 实测）。
+ *
+ * 逐个点、直到没有可点的（两类可能前后脚出现）。
+ */
 export async function dismissOnboarding(page) {
-	const clicked = await page.evaluate(() => {
-		const buttons = [...document.querySelectorAll('button, [role="button"]')];
-		const target = buttons.find((el) => /Configure later|稍后配置|以后再说/i.test((el.textContent ?? '').trim()));
-		if (!target) return false;
-		target.click();
-		return true;
-	});
-	if (clicked) await page.waitForTimeout(1_500);
+	const patterns = ['Configure later|稍后配置|以后再说', '^Continue$|^继续$'];
+	let clicked = false;
+	for (let round = 0; round < 3; round += 1) {
+		const hit = await page.evaluate((sources) => {
+			const regexps = sources.map((source) => new RegExp(source, 'i'));
+			const target = [...document.querySelectorAll('button, [role="button"]')].find((el) =>
+				regexps.some((regexp) => regexp.test((el.textContent ?? '').trim())),
+			);
+			if (!target) return false;
+			target.click();
+			return true;
+		}, patterns);
+		if (!hit) break;
+		clicked = true;
+		await page.waitForTimeout(1_200);
+	}
 	return clicked;
 }
 
