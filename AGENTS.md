@@ -57,9 +57,15 @@ agent 提示词分三层，**每一类知识只有一个家**。改任何提示�
 
 | 层 | 载体 | 改完 | 生效 |
 | --- | --- | --- | --- |
-| **Skill** | `skills/aivn-play-setup/`、`aivn-visual-craft/`、`aivn-audio/` | 直接改 markdown | 宿主把 name+description 恒列进技能清单（一条 `available_skills` 上下文消息），模型按需 `skill` 加载全文；**改完即生效** |
+| **Skill** | `skills/aivn-play-setup/`、`aivn-visual-craft/`（手写）；`skills/aivn-audio/`（**生成物**） | 手写的直接改 markdown；`aivn-audio` 改共享正文后跑那边包内的 `sync:skills` | 宿主把 name+description 恒列进技能清单（一条 `available_skills` 上下文消息），模型按需 `skill` 加载全文；**改完即生效** |
 | **persona + 注入段** | 硬编码 TS（下表） | `npm run build` 并提交 `lib/` | `persona.prefix` 装载时烘焙；`systemPrompt.section` 每轮现读 |
 | **运行期剧目文件** | `<剧目>/premise.md`、`craft.md`、`play.json`、`characters/*`、`memory/*`、`assets/manifest.json`、`theme.json` | 直接改 | 条件化渲染进 A 区注入；属「内容」，不是提示词本体 |
+
+**`aivn-audio` 是生成物、不要手改**：正文住在共享包 `packages/agent/skills/aivn-audio.md`
+（两个宿主共用一份，只有 frontmatter 与「出曲机制」那一小段按宿主替换），
+`skills/aivn-audio/SKILL.md` 由共享包的 `skills/sync-skills.mjs` 生成（跑 `pnpm --dir ../stage-ai-shared sync:skills --plugin-dir .`）。
+`node build.mjs --check` 会比对它是否跟得上共享正文——改了共享正文要重跑同步并一起提交。
+另两份（play-setup / visual-craft）是**同题重写**的两份，各写各的、直接改。
 
 **分层规约（单一真相源）**：
 

@@ -112,6 +112,21 @@ function surroundings(deps) {
 	return lines.join('\n');
 }
 
+/**
+ * 共享技能正文是否与生成结果一致；一致返回 null。
+ *
+ * 技能文件由共享包的 `skills/sync-skills.mjs` 生成（两宿主共用一份正文，
+ * 只有 frontmatter 与一小段宿主变量不同），这里把插件那份重渲染一遍来比对。
+ */
+async function skillDrift() {
+	const script = 'node_modules/@aivn/agent/skills/sync-skills.mjs';
+	if (!existsSync(script)) return '找不到 @aivn/agent 的共享正文生成器（先 npm install 指到兄弟仓）';
+	const { renderSkill } = await import(`./${script}`);
+	const { file, text } = renderSkill('aivn-audio', 'plugin', process.cwd());
+	const onDisk = existsSync(file) ? readFileSync(file, 'utf8') : null;
+	return onDisk === text ? null : `${file} 与共享正文不一致（跑 node ${script} --plugin-dir .）`;
+}
+
 /** 逐字节比对，返回 null 表示一致。 */
 function difference(built, path) {
 	if (!existsSync(path)) return '磁盘上没有这个文件';
@@ -153,9 +168,19 @@ if (CHECK) {
 		}
 	}
 
+	// 共享技能正文：这份 SKILL.md 由 packages/agent/skills/ 生成，不该手改。
+	// 兄弟仓（@aivn/core 所指的那个检出）里才有生成器，所以这条守在这边。
+	const skillProblem = await skillDrift();
+	if (skillProblem === null) {
+		console.log('  ✓ skills/  与共享正文一致');
+	} else {
+		failed += 1;
+		console.log(`  ✗ skills/  ${skillProblem}`);
+	}
+
 	console.log('');
 	if (failed) {
-		console.log(`${failed} 个产物没跟上源码——跑 npm run build 重建并提交。`);
+		console.log(`${failed} 处没跟上源码——重建产物（npm run build）/ 重跑技能同步。`);
 	} else if (cautioned) {
 		console.log('宿主半边与源码一致；客户端半边因兄弟检出是脏的而未判定。');
 	} else {
