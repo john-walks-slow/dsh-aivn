@@ -29,6 +29,7 @@ import {
 	type AssetMeta,
 	type CharacterDocument,
 } from '@aivn/core';
+import { AUDIO_RULES, renderAssetSections, renderMemoryIndex } from '@aivn/agent';
 import { listAssets, readManifest } from './assets';
 import { loadPlaySync } from './play';
 import { assetCapabilitiesOf, renderCraftParams, resolveCraft } from './craft';
@@ -111,7 +112,7 @@ export function readPlaySnapshot(dir: string, canImage: () => boolean = () => fa
 		cast: renderCast(cards, index, notes),
 		assets: renderAssets(index, notes),
 		craft,
-		memoryIndex: renderMemoryIndex(dir),
+		memoryIndex: renderMemoryIndexSection(dir),
 		endings: renderEndings(dir, play.config.newGamePlus === true),
 		state: renderState(dir, play.config.characters?.map((card) => card.id) ?? []),
 	};
@@ -249,26 +250,7 @@ function renderCast(
  * 剧作家挑素材靠的是「这一张画的是什么」。
  */
 function renderAssets(index: Record<string, string[]>, notes: (id: string, charId?: string) => AssetMeta): string {
-	const stems = (kind: string): string[] => (index[kind] ?? []).map((file) => file.replace(/\.\w+$/, ''));
-	const section = (heading: string, kind: string, tail = ''): string => {
-		const list = stems(kind);
-		if (list.length === 0) return '';
-		const rows = list.map((id) => {
-			const detail = describeAsset(notes(id));
-			return `- ${detail ? `${id}（${detail}）` : id}`;
-		});
-		return `\n# ${heading}\n\n${rows.join('\n')}${tail}\n`;
-	};
-
-	const audio = stems('bgm').length > 0 || stems('sfx').length > 0 ? AUDIO_RULES : '';
-	const body = [
-		section('可用背景 bg', 'backgrounds', '\n<scene> 的 bg 优先取这些 id。'),
-		section('可用音乐 bgm', 'bgm'),
-		section('可用音效 sfx', 'sfx'),
-		audio,
-		section('已有插图 cg', 'cg'),
-	].join('');
-
+	const body = renderAssetSections(index, (id) => notes(id), { audioRules: AUDIO_RULES });
 	const empty = body === '' ? '\n（这座剧目的 `assets/` 还是空的。）\n' : '';
 	return `# 素材清单\n\n素材在 \`assets/\` 下按类目放；清单里没有的 id 不要写——写了不会有画面（那一行照常演，只是空着）。\n${body}${empty}\n缺素材就换一段能演的戏，用旁白交代；也可以让玩家手工放文件进 \`assets/\`。`;
 }
@@ -280,18 +262,6 @@ function renderAssets(index: Record<string, string[]>, notes: (id: string, charI
  * 引擎行为是 bgm/ambient 缺省保持、`none` 停，换曲与停乐自动交叉淡入淡出。
  * 「换场景顺手重写一遍 bgm」是模型最常犯的毛病，所以这条写得最重。
  */
-const AUDIO_RULES = `
-## 配乐与音效（怎么用）
-
-- **缺省 = 保持当前**：<scene> 不写 bgm/ambient 就继续放现在这首。换场景通常不换乐，
-  只有情绪或地点真的变了才换 id。
-- 想停：<scene bgm="none"/>，ambient 同理。
-- 音量自己给：<scene bgm_volume="0.4"/>、<scene ambient_volume="0.3"/>、<sfx src="…" volume="0.6"/>。
-  音乐与音效都给台词让位——拿不准就调小。
-- 换曲与停乐会自动交叉淡入淡出，不用自己写淡出。
-- ambient 是持续的环境底噪（雨、风、人声、车流），比 bgm 轻，一场戏给一次就够。
-- sfx 放在动作发生的那一行之前：开门、转身、翻书、东西落地，一个动作一条，别连着堆。
-- 只挑清单里真有的 id；没有合适的宁可不给，别拿别的曲子顶上。`;
 
 /* ── 记忆索引 ───────────────────────────────────────────────────────────── */
 
@@ -301,13 +271,11 @@ const AUDIO_RULES = `
  * 卡格式照 AIVN 的 `parseCard`：首个 `# 标题` 是名字，其后的首个非空行是摘要。
  * 路径必须写出来——标题与文件名可以不一样，模型推不出文件在哪。
  */
-function renderMemoryIndex(dir: string): string {
-	const cards = collectCards(join(dir, 'memory', 'index'));
-	if (cards.length === 0) return '';
-	const rows = cards.map(
-		(card) => `- ${card.layer ? `[${card.layer}] ` : ''}${card.name}（${card.path}）：${card.summary}`,
+function renderMemoryIndexSection(dir: string): string {
+	return renderMemoryIndex(
+		collectCards(join(dir, 'memory', 'index')),
+		'要某条的完整内容就 read 它的路径；写过的东西要能被下一轮认出来，就按《记忆卡》的规矩落盘。',
 	);
-	return `# 记忆索引（按需查详情）\n\n${rows.join('\n')}\n\n要某条的完整内容就 read 它的路径；写过的东西要能被下一轮认出来，就按《记忆卡》的规矩落盘。`;
 }
 
 interface MemoryCard {
