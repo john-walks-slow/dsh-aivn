@@ -15,6 +15,7 @@ import { GeminiImageGen } from './gemini-image';
 import { ModelsLabImageGen } from './modelslab-image';
 import { OpenAiImageGen } from './openai-image';
 import { GeminiMusicGen, type MusicBackend } from './music';
+import type { PlayAssetsOptions } from './types';
 
 export const IMAGE_FORMATS = ['gemini', 'openai', 'modelslab'] as const;
 export type ImageFormat = (typeof IMAGE_FORMATS)[number];
@@ -87,4 +88,18 @@ export function createImageBackend(opts: ImageConfigShape): ImageBackend {
 	if (opts.format === 'gemini') return new GeminiImageGen({ ...shared, size: opts.size });
 	if (opts.format === 'modelslab') return new ModelsLabImageGen({ ...shared, size: opts.size });
 	return new OpenAiImageGen({ ...shared, size: opts.size });
+}
+
+/** 出图前拿后端：没配就如实报错（各 use case 的守卫都从这里走，只写一遍那句话）。 */
+export function requireImageBackend(opts: PlayAssetsOptions): ImageBackend {
+	const backend = opts.image;
+	if (!backend) throw new Error('没有配生图后端（image.baseUrl / image.model），出不了图');
+	return backend;
+}
+
+/** 出 BGM 前拿后端：没配就如实报错。 */
+export function requireMusicBackend(opts: PlayAssetsOptions): MusicBackend {
+	const backend = opts.music;
+	if (!backend) throw new Error('没有配音乐后端（music.baseUrl / music.model），出不了 BGM');
+	return backend;
 }
