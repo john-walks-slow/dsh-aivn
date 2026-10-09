@@ -10,26 +10,21 @@
  */
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
-import { readPlayReadiness, renderReadiness } from '../play/readiness';
+import { playReadiness } from '@aivn/agent';
+import { readPlayReadiness } from '../play/readiness';
 import type { PlayContext } from './context';
-
-const DESCRIPTION = [
-	'检查这座剧目：play.json 读不读得出来，还缺什么（故事前提 / 角色卡 / 立绘 / 背景图 / 素材清单）。',
-	'刚写过 play.json、角色卡或改了剧目结构之后调它——报出来的错误与缺项就是接下来该修的东西。',
-	'**没有硬门槛**：缺什么都能开演，这个工具不拦任何事。',
-].join('\n');
 
 export function createValidatePlayTool(ctx: PlayContext) {
 	return defineTool({
 		name: 'validate_play',
-		description: DESCRIPTION,
+		description: playReadiness.doc,
 		parameters: {},
 		output: {
 			schema: { type: 'string' } as const,
 			render: (_args: unknown, text: string): ContentBlock[] => [{ type: 'text', text }],
 		},
 		async execute() {
-			return renderReadiness(readPlayReadiness(ctx.playDir()));
+			return playReadiness.execute({}, { read: () => readPlayReadiness(ctx.playDir()) });
 		},
 	});
 }
