@@ -140,7 +140,7 @@ check(
 // 2. 重抠：对留底原片重跑 cut（只重跑抠底、画面不变），覆盖同一张 PNG；台账不许动
 const ledgerBefore = JSON.parse(await readFile(join(dir, 'assets', 'generated.json'), 'utf8'));
 const keptSource = 'media-cache/sprite-sources/probe_girl/neutral.png';
-const recut = await assets.cutFile(keptSource, spriteAsset.path, { tolerance: 56 });
+const recut = await assets.cut({ source: keptSource, output: spriteAsset.path, tuning: { tolerance: 56 } });
 const ledgerAfter = JSON.parse(await readFile(join(dir, 'assets', 'generated.json'), 'utf8'));
 check('M8', recut.cutout.coverage > 0 && existsSync(spriteAsset.absPath), '重抠：对留底原片重跑 cut 覆盖同一张立绘');
 check(
@@ -148,6 +148,22 @@ check(
 	spriteAsset.sourcePath === keptSource && ledgerAfter['probe_girl/neutral']?.prompt === ledgerBefore['probe_girl/neutral']?.prompt,
 	'入库回执带出抠底前原片路径，且重抠不改台账',
 );
+
+// 2b. 引用寻址：source 给 `sprite:<主体id>`、不给 output = 原地重抠（宿主自己去找留底原片）
+const inPlace = await assets.cut({ target: { kind: 'sprite', spriteId: 'probe_girl', variant: 'neutral' } });
+check(
+	'M8c',
+	inPlace.path === spriteAsset.path &&
+		(await readFile(inPlace.absPath)).equals(await readFile(spriteAsset.absPath)),
+	'素材引用寻址：sprite:<主体id> 原地重抠（模型不必知道 media-cache 的路径）',
+);
+let bgRefError = '';
+try {
+	await assets.cut({ target: { kind: 'background', name: 'rooftop_dusk' } });
+} catch (error) {
+	bgRefError = error instanceof Error ? error.message : String(error);
+}
+check('M8d', bgRefError.includes('只有立绘'), '背景引用不给抠底（抠底是立绘的事）');
 
 // 3. 背景：草稿 + 入库
 const bg = await assets.draft({ kind: 'background', name: 'rooftop_dusk' }, 'empty school rooftop at dusk');
@@ -236,7 +252,7 @@ check(
 
 const srcSprite = join(dir, 'assets', 'external_sprite_src.png');
 await writeFile(srcSprite, await keyedSprite(1080, 1920));
-const extCut = await assets.cutFile('assets/external_sprite_src.png');
+const extCut = await assets.cut({ source: 'assets/external_sprite_src.png' });
 await assets.register(
 	extCut.path,
 	{ kind: 'sprite', spriteId: 'ext_girl', variant: 'smile', framing: 'full' },

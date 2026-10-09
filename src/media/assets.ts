@@ -25,11 +25,10 @@
 import { draft as draftOf, createGeneric } from './generate-image';
 import { generate as generateOf, exists as existsOf } from './generate';
 import { commit as commitOf } from './commit';
-import { cutFile as cutFileOf, type CutResult } from './cut';
+import { cutFile as cutFileOf, type CutRequest, type CutResult } from './cut';
 import { register as registerOf } from './import';
 import { generateBgm as generateBgmOf } from './bgm';
 import type { ImageAspect, ImageBackend } from './image';
-import type { CutoutTuning } from './cutout';
 import type { MusicBackend } from './music';
 import type { AssetTarget, DraftedAsset, GeneratedAsset, PlayAssetsOptions } from './types';
 
@@ -80,9 +79,9 @@ export class PlayAssets {
 		return commitOf(this.opts, draftId);
 	}
 
-	/** 抠底：纯色底图 → 透明 PNG，只写输出。 */
-	cutFile(source: string, output?: string, tuning?: Partial<CutoutTuning>): Promise<CutResult> {
-		return cutFileOf(this.opts, source, output, tuning);
+	/** 抠底：纯色底图 → 透明 PNG，只写输出（源图给路径或素材引用）。 */
+	cut(request: CutRequest): Promise<CutResult> {
+		return cutFileOf(this.opts, request);
 	}
 
 	/** 把一张图登记成剧目素材（不抠底）。 */

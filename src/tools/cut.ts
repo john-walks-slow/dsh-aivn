@@ -34,9 +34,10 @@ export function createCutTool(ctx: PlayContext, media: MediaBackends) {
 		async execute(args) {
 			const assets = playAssetsOf(ctx.playDir(), media);
 			const result = await imageCutout.execute(args as Parameters<typeof imageCutout.execute>[0], {
-				// 插件的落盘：源图必须在剧目内、输出走原子写（那两件事在 cutFile 里）
+				// 插件的落盘：源图必须在剧目内、输出走原子写（那两件事在 cutFile 里）；
+				// 素材引用（sprite:<主体id>）在这里换成留底原片，不给 output 就是原地重抠。
 				cut: async (request) => {
-					const cut = await assets.cutFile(request.source, request.output, request.tuning);
+					const cut = await assets.cut(request);
 					return { path: cut.path, absPath: cut.absPath, ...cut.cutout };
 				},
 			});
@@ -50,8 +51,8 @@ export function createCutTool(ctx: PlayContext, media: MediaBackends) {
 			}
 			lines.push(
 				'下一步：把这张透明 PNG 交给 `import_asset`（kind=sprite）登记。' +
-					'要重抠一张已入库的立绘：源图就是它的抠底前原片（`media-cache/sprite-sources/<主体id>/`，' +
-					'登记时的 `original` 或生成时的留底），`output` 指回 `assets/sprites/<主体id>/<差分>.png`。',
+					'**要重抠一张已入库的立绘**：`source` 给 `sprite:<主体id>[/<差分名>]`，不给 `output` 就是原地重抠' +
+					'（拿它的抠底前原片重跑，画面不变、只改透明边缘）。',
 			);
 			return lines.join('\n');
 		},
