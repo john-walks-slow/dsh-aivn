@@ -13,6 +13,7 @@ import { DEFAULT_SPRITE_FRAMING } from '@aivn/core';
 import { NEUTRAL_LEAD } from './prompts';
 import { NEUTRAL, resolve, spriteStems, existingAsset } from './target';
 import { draft, type DraftOptions } from './generate-image';
+import type { DraftedAsset } from './types';
 import { commit } from './commit';
 import { declareDescription } from './catalog';
 import type { AssetSpec, AssetTarget, GeneratedAsset, PlayAssetsOptions } from './types';
@@ -23,26 +24,30 @@ import type { AssetSpec, AssetTarget, GeneratedAsset, PlayAssetsOptions } from '
  * 必须挂在**模块级**而不是调用者实例上：工具每次调用现建一个素材面，去重表若挂在实例上，
  * 两次调用各锁各的，等于没锁（同一目标会被并发出两张、白烧配额）。
  */
-const generationInflight = new Map<string, Promise<GeneratedAsset>>();
+const generationInflight = new Map<string, Promise<ProducedImage>>();
 
-/** 出图并**入库**：`draft` + `commit` 的组合。剧作家的缺图补位走这条——那张图一出来就是要用的。 */
-export async function generate(
-	opts: PlayAssetsOptions,
-	target: AssetTarget,
-	prompt: string,
-	extra: DraftOptions = {},
-): Promise<GeneratedAsset> {
+/** 出图这一步的产物：候选（草稿）+ 顺手补出来的定妆照（没有则 null）。 */
+export interface ProducedImage {
+	drafted: DraftedAsset;
+	autoNeutral: GeneratedAsset | null;
+}
+
+/**
+ * 只**出图**（候选落草稿区），不落库：差分的定妆照缺了就顺手补一张、同一目标的并发只跑一次。
+ *
+ * 这是 `generate_asset` 那条编排的前半段——它随后自己抠底、自己登记（`asset.generate` 宏）。
+ * `generate` 则是「出图 + 入库」的老路，两条共用这一格，保证去重与定妆照补位只有一份实现。
+ */
+export async function produce(opts: PlayAssetsOptions, target: AssetTarget, prompt: string): Promise<ProducedImage> {
 	const spec = await resolve(opts.dir, target);
 	// 去重键带剧目根：去重表是**模块级**的（工具每次调用现建素材面，挂在实例上等于没挂）。
 	const key = `${opts.dir}\u0000${spec.kindPath}/${spec.stem}`;
 	const running = generationInflight.get(key);
 	if (running) return running;
-	const job = (async (): Promise<GeneratedAsset> => {
+	const job = (async (): Promise<ProducedImage> => {
 		const auto = await ensureNeutral(opts, spec, prompt);
 		const drafted = await draft(opts, target, prompt);
-		const committed = await commit(opts, drafted.draftId);
-		if (extra.description?.trim()) await declareDescription(opts.dir, spec, extra.description.trim());
-		return auto ? { ...committed, autoNeutral: auto } : committed;
+		return { drafted, autoNeutral: auto };
 	})();
 	generationInflight.set(key, job);
 	try {
@@ -50,6 +55,20 @@ export async function generate(
 	} finally {
 		if (generationInflight.get(key) === job) generationInflight.delete(key);
 	}
+}
+
+/** 出图并**入库**：`produce` + `commit` 的组合。剧作家的缺图补位走这条——那张图一出来就是要用的。 */
+export async function generate(
+	opts: PlayAssetsOptions,
+	target: AssetTarget,
+	prompt: string,
+	extra: DraftOptions = {},
+): Promise<GeneratedAsset> {
+	const spec = await resolve(opts.dir, target);
+	const { drafted, autoNeutral } = await produce(opts, target, prompt);
+	const committed = await commit(opts, drafted.draftId);
+	if (extra.description?.trim()) await declareDescription(opts.dir, spec, extra.description.trim());
+	return autoNeutral ? { ...committed, autoNeutral } : committed;
 }
 
 /**

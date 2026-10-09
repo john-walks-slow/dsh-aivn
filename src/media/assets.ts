@@ -23,7 +23,7 @@
  * 推出。没有队列、没有到货广播——那是独立版的宿主机制，不往这里搬。
  */
 import { draft as draftOf, createGeneric } from './generate-image';
-import { generate as generateOf, exists as existsOf } from './generate';
+import { generate as generateOf, exists as existsOf, produce as produceOf, type ProducedImage } from './generate';
 import { commit as commitOf } from './commit';
 import { cutFile as cutFileOf, type CutRequest, type CutResult } from './cut';
 import { register as registerOf } from './import';
@@ -56,9 +56,14 @@ export class PlayAssets {
 		return draftOf(this.opts, target, prompt);
 	}
 
-	/** 出图并**入库**：`draft` + `commit` 的组合（`generate_asset`）。 */
+	/** 出图并**入库**：`draft` + `commit` 的组合。 */
 	generate(target: AssetTarget, prompt: string, extra: { description?: string } = {}): Promise<GeneratedAsset> {
 		return generateOf(this.opts, target, prompt, extra);
+	}
+
+	/** 只出图（候选落草稿区）：差分的定妆照缺了就顺手补一张（`asset.generate` 宏的前半段）。 */
+	produce(target: AssetTarget, prompt: string): Promise<ProducedImage> {
+		return produceOf(this.opts, target, prompt);
 	}
 
 	/** 通用出图：只把 prompt 变成候选图，不绑剧目目标（`generate_image`）。 */
