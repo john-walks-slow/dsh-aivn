@@ -47,6 +47,10 @@ export const MODULES = {
 		description: '插件设置面：Plugins 页里的配置卡、写入落点、就地生效、密钥脱敏与清除',
 		suites: ['verify-settings'],
 	},
+	entry: {
+		description: '新会话的「开始游戏」与全屏：剧作家 chip 右边那一枚、按一下发 START 并落到舞台、舞台左上角全屏键',
+		suites: ['verify-entry'],
+	},
 };
 
 const rawArg = process.argv[2];

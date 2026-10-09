@@ -148,3 +148,91 @@
 .aivn-stage-view:has(.theater.bare) .aivn-pending {
 	display: none;
 }
+
+/**
+ * 舞台左上角的全屏键。
+ *
+ * 舞台自己的 `.theater-bar` 顶栏（退出 / 回顾 / 侧栏）没有搬进 `@aivn/stage`——那是 AIVN app
+ * 的东西，插件这边舞台上没有它的落点，所以左上角是空出来的。这一枚就摆在那儿，与右上的导演栏
+ * 分列两侧。
+ *
+ * 底色沿用台词条那一套深色玻璃（`--dialog-*` 声明在 `.stage-root` 上，本元素正在那棵子树里）：
+ * 压在画面上的一律是「窗」，用浅色卡片会跟画面里的亮处打架。
+ *
+ * 净画面态（HIDE）跟着台词条一起藏：那一态要的就是只剩画面。
+ */
+.aivn-fullscreen {
+	position: absolute;
+	z-index: 45;
+	top: calc(8px + env(safe-area-inset-top, 0px));
+	left: 10px;
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	min-height: 40px;
+	padding: 0 10px;
+	border: 1px solid var(--dialog-line);
+	border-radius: var(--stage-radius);
+	background: var(--dialog-bg);
+	box-shadow: var(--dialog-shadow);
+	color: var(--dialog-ink-soft);
+	font: inherit;
+	font-size: 11.5px;
+	letter-spacing: 0.04em;
+	cursor: pointer;
+	transition:
+		color var(--hover-ms) ease,
+		background-color var(--hover-ms) ease;
+}
+
+.aivn-fullscreen:hover {
+	background: var(--dialog-hover);
+	color: var(--dialog-ink);
+}
+
+.aivn-fullscreen:focus-visible {
+	outline: 1px solid var(--accent);
+	outline-offset: 2px;
+}
+
+.aivn-stage-view:has(.theater.bare) .aivn-fullscreen {
+	display: none;
+}
+
+/**
+ * 新会话上的「开始游戏」。
+ *
+ * 坐在宿主的 Hero 那行里、**紧挨着预设名 chip 的右边**（`[data-slot="conversation.hero.agentPreset"]`
+ * 的后面一格）。它属于**宿主界面**、不属于舞台，所以配色一律走 `currentColor` 与透明底：
+ * 那一行跟着宿主的主题走，自带一套颜色会在换皮时露馅；也不去抄宿主的哈希类名。
+ *
+ * 描边用当前色、比正文小一号、圆角胶囊——与它左边那个 chip 是同一族的形状语言。
+ */
+.aivn-start-game {
+	display: inline-flex;
+	align-items: center;
+	height: 28px;
+	margin-left: 8px;
+	padding: 0 12px;
+	border: 1px solid currentcolor;
+	border-radius: 999px;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	font-size: 12.5px;
+	line-height: 1;
+	white-space: nowrap;
+	opacity: 0.75;
+	cursor: pointer;
+	transition: opacity 120ms ease;
+}
+
+.aivn-start-game:hover {
+	opacity: 1;
+}
+
+.aivn-start-game:focus-visible {
+	outline: 1px solid currentcolor;
+	outline-offset: 2px;
+}
+

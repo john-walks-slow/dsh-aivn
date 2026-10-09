@@ -20,6 +20,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client';
 import hostCss from './host.css';
 import { injectCss } from './inject-css';
 import { AivnConfigCard, AivnConfigController, NS as CONFIG_NS } from './settings-card';
+import { installStageEntry } from './stage-entry';
 import { StageView } from './stage-view';
 
 /**
@@ -118,4 +119,7 @@ export function apply(ctx: ClientContext): void {
 			};
 		}, 'dsh-aivn:stage view'),
 	);
+
+	// 新会话上的「开始游戏」，见 stage-entry.ts 的文件头（为什么只能是 DOM 接缝）。
+	ctx.effect(() => installStageEntry(services), 'dsh-aivn:stage entry');
 }

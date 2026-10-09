@@ -26,6 +26,7 @@
 		"e2e:stage": "dsh-e2e run e2e/run.mjs stage",
 		"e2e:director": "dsh-e2e run e2e/run.mjs director",
 		"e2e:stagehand": "dsh-e2e run e2e/run.mjs stagehand",
+		"e2e:entry": "dsh-e2e run e2e/run.mjs entry",
 		"e2e:media": "esbuild e2e/verify-media.ts --bundle --platform=node --format=esm --target=node22 --external:sharp --outfile=e2e/.media-check.mjs && node e2e/.media-check.mjs; rm -f e2e/.media-check.mjs",
 		"prepublishOnly": "npm run build && npm run typecheck",
 		"release": "npm run build && npm run typecheck && npm version patch && npm pack --pack-destination /tmp",

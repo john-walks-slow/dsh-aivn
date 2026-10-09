@@ -142,11 +142,13 @@ E2E_ONLY=D16           dsh-e2e run e2e/verify-director.mjs   # 按判据 id 挑�
   0 / 62 / 67 / 71 帧——0 帧那次舞台其实好着，人却为此重跑了一遍全量）。
 - 套件分组都在 `e2e/run.mjs` 的 `MODULES` 里（`dsh-e2e run e2e/run.mjs --list` 看全），例如
   `stage`（演出闭环，`verify-stage.mjs` + `verify-opening.mjs`）、
+  `entry`（「开始游戏」与全屏，`verify-entry.mjs`——剧作家 chip 右边那一枚、按一下发 START 并落到
+  舞台、舞台左上角全屏键；只花一拍 LLM，比 `stage` 便宜）、
   `injection`（A 区注入，`verify-injection.mjs`，从**会话日志**取系统提示词断言——日志是多帧 zstd，
   用 `zstd -dc` 解）、`voice`（台词语音，`verify-voice.mjs`，真打 Fish Audio，跑之前要 export
   `DSH_AIVN_TTS_KEYS`；它在页面里给 `AudioContext` / `decodeAudioData` / `AudioBufferSourceNode.start`
   挂钩子，断言的是「浏览器真的解出 PCM 并起播」，不是「帧到了」）。
-- 诊断 / 截图脚本在 `e2e/diag/`（`css-diag.mjs` / `shot-tabs.mjs` / `shot-voice.mjs` / `b1-probe.sh`），
+- 诊断 / 截图脚本在 `e2e/diag/`（`css-diag.mjs` / `shot-tabs.mjs` / `shot-voice.mjs` / `shot-entry.mjs` / `b1-probe.sh`），
   不进 `MODULES`、手动 `dsh-e2e run`；`style-tokens.check.ts` **不是**诊断脚本——它是 `verify-style.mjs`
   的夹具，留在 `e2e/` 根。
 - **`rebuild` 是唯一不需要实例的套件**（`node e2e/run.mjs rebuild` 直接跑，不占 run 锁）：
@@ -192,6 +194,12 @@ git **静默跳过**（实测退出码 0，不报错）——所以`.githooks/` 
   e2e 用 `openViewTabWhenReady(page, '<label>')` 等它，标签对不上就是一直等到超时。2026-10-06
   查出 `e2e/verify-voice.mjs` 与 `e2e/diag/css-diag.mjs` 还在等改名前的「舞台」——语音套件因此注定
   失败，几周里一直被当成「没配 TTS key」。
+  **页签 id**（`id: 'aivn-stage'`）另有一处硬引用：`src/client/stage-entry.ts` 那一枚「开始游戏」
+  按标签名找页签来点（`STAGE_TAB_LABEL`），而 DSH 自己按 id 记住选择（`dsh.conversation.<会话>`）。
+- **「开始游戏」发出去的正文**：`src/client/stage-entry.ts` 发的就是 `play.json` 的 `opening`
+  （缺省那份字面与 `@aivn/core` 的 `DEFAULT_OPENING` 是**刻意重复**的，改了 core 要同步），
+  与舞台「开演」走同一条 `/aivn/input`。它落点的那一格是 `[data-slot="conversation.hero.agentPreset"]`
+  ——宿主 Hero 行上画预设名的槽（`data-*` 是稳定钩子，别改成哈希类名）。
 - **路由**：`src/routes.ts` 里 `PREFIX`（`/aivn`）下的路径，客户端与 e2e 两处都要跟着改。
 - **工具名**：`src/**/tools/*.ts` 里的 `name`，与 `e2e/verify-injection.mjs` 的工具面断言成对
   （2026-10-06 拆掉 `beat_done` 改的就是这里）。

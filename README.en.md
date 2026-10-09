@@ -110,6 +110,43 @@ configurable. **Changing config requires a dsh restart**: the capability set is 
 The AIVN tab is the third tab in the session header (Chat / Trajectory / AIVN), and it **only
 appears while the session's preset is the playwright**.
 
+#### Getting into the stage from a new session
+
+In the row above the input box, right of the **playwright** chip, there is a **"开始游戏" (start the
+game)** button — it appears once the preset is **playwright** and the working directory has a
+`play.json`. Pressing it:
+
+1. delivers the play's opening instruction (`play.json`'s `opening`, default
+   "（游戏开始，请演出第一轮）") to the playwright — the very same message the stage's own "开演"
+   button sends;
+2. the moment the playwright starts writing and that brings the tab strip in, **the page switches
+   to AIVN by itself**.
+
+It switches for you exactly once: switching back to Chat by hand afterwards is never overridden.
+Once you have been on the stage, DSH remembers that choice itself (reopen the session or reload the
+page and you are still on the stage).
+
+> Why this button exists: while a session has no messages yet, DSH doesn't even render the tab
+> strip, so there is **no "AIVN" to click** at that point. "开始游戏" folds "send the first message"
+> and "switch to the stage" into a single click.
+
+You don't have to use it: say something in the input box yourself, then click the "AIVN" tab —
+same result.
+
+### Fullscreen
+
+The stage has a **fullscreen** button in its **top-left** corner (the top-right is the director
+toolbar). Pressing it fills the screen with the whole stage — picture, dialog bar and tools together:
+
+- Desktop and Android use the browser's native fullscreen, which takes the status bar with it. Leave
+  it with that button (its label becomes **"退出全屏" (exit fullscreen)**) or with the browser's own
+  **Esc**.
+- **Safari on iPhone does not support element fullscreen** (only Safari on iPad / macOS does), so
+  that platform falls back to filling the viewport: it covers the DSH interface but cannot take
+  Safari's own address bar away — that is the ceiling that platform offers.
+
+The button hides along with the dialog bar when the player presses HIDE (bare-picture mode).
+
 ### Starting a new play
 
 No `play.json` in the workspace means "this isn't a play yet" — **writing one is what starts a
@@ -690,5 +727,14 @@ Suites:
   source actually starts** (hooks are installed on `AudioContext` / `decodeAudioData` /
   `AudioBufferSourceNode.start` inside the page rather than guessing from frames), and that the
   master voice switch really reaches the host. Export `DSH_AIVN_TTS_KEYS` before running it.
+- `entry` (`dsh-e2e run e2e/run.mjs entry`) — "start the game" plus fullscreen: that button does
+  **not** appear on a stage-hand session; on a blank playwright session it sits on the same row,
+  immediately right of the playwright chip; pressing it **delivers START to the playwright and lands
+  on the stage** — whether START really went out is judged from the **session log**'s player message
+  (the same technique as the `opening` suite) rather than from the HTTP response — and the selected
+  tab really is AIVN. Fullscreen: the button sits at the stage's top-left, and pressing it makes
+  `document.fullscreenElement` **the stage layer itself** (not some inner element — that would leave
+  the dialog bar off-screen), with the label flipping to "exit fullscreen" and back. Costs one LLM
+  beat, so it is cheaper than `stage`.
 
 Screenshots land in `e2e-artifacts/` (not tracked by git).

@@ -41,6 +41,7 @@ import {
 } from '@aivn/stage';
 import type { AssetMeta, PlayConfig, StageEvent, StopPayload } from '@aivn/core';
 import stageCss from '@aivn/stage/stage.css';
+import { FullscreenButton, fullscreenCss, useFullscreen } from './fullscreen';
 import { injectCss } from './inject-css';
 import { PendingPanel, type PendingItem } from './pending-panel';
 
@@ -48,6 +49,7 @@ import { PendingPanel, type PendingItem } from './pending-panel';
 const CONTINUE = '（继续）';
 
 injectCss('@aivn/stage/stage.css', stageCss);
+injectCss('dsh-aivn/fullscreen.css', fullscreenCss);
 
 /** 语音总开关的持久化键（与 AIVN 同一个 localStorage 键，切换过来时沿用玩家的选择）。 */
 const VOICE_FLAG = SETTING_VOICE;
@@ -186,6 +188,15 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 	const directorRef = useRef<VoiceDirector | null>(null);
 	if (directorRef.current === null) directorRef.current = new VoiceDirector();
 	const director = directorRef.current;
+
+	/**
+	 * 舞台这一层就是全屏的目标：整块视图（画面 + 台词条 + 演出栏）一起铺满。
+	 *
+	 * 挂在外层这个 div 上而不是里面 `.theater`：`.theater` 只是画面那一栏，全屏它会把台词条
+	 * 留在屏幕外。用 CSS 那一档（iPhone Safari）时，`position: fixed` 也挂在这个 div 上。
+	 */
+	const viewRef = useRef<HTMLDivElement | null>(null);
+	const fullscreen = useFullscreen(viewRef);
 
 	const sawStop = useRef(false);
 	/**
@@ -622,8 +633,13 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 	const themeVars = themeCss(theme);
 
 	return (
-		<div className="stage-root aivn-stage-view" style={{ height: '100%', minHeight: 0 }}>
+		<div
+			ref={viewRef}
+			className={`stage-root aivn-stage-view${fullscreen.css ? ' aivn-css-full' : ''}`}
+			style={{ height: '100%', minHeight: 0 }}
+		>
 			{themeVars === '' ? null : <style data-aivn-theme>{themeVars}</style>}
+			<FullscreenButton state={fullscreen} />
 			<StageTheater
 				visual={playback.visual}
 				playback={playback}
