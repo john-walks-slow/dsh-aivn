@@ -14,6 +14,12 @@
 
 ![AIVN tab：背景、立绘、台词条，右下角是语音开关与「重听这句」](screenshots/screenshot-1.png)
 
+> **这是 AIVN 的 DSH 适配版。** 同名的 [`stage-ai`](https://github.com/john-walks-slow/aivn)
+> 是**独立版**（自包含桌面应用 / 独立 Web 站）。两者共用同一套引擎与领域
+> （`@aivn/core`、`@aivn/stage`），差别只在宿主：独立版有路线树、周目存档与完整工坊，
+> 这边用 DSH 的原生会话、文件侧栏与技能机制。**想要完整产品体验用独立版；
+> 已经在用 DSH、想要 AIVN 能力而不另开一个应用，用这个插件。**
+
 ## 装
 
 包是 DSH 的 bundle（`package.json` 里声明了 `dsh.bundle.patch`）：

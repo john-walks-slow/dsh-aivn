@@ -11,6 +11,8 @@ AIVN's stage engine, inside DSH.
 
 ![AIVN tab: background, sprites, dialogue bar; the voice toggle and "replay this line" sit in the bottom right](screenshots/screenshot-1.png)
 
+> **This is the DSH port of AIVN.** The same-named [`stage-ai`](https://github.com/john-walks-slow/aivn) is the **standalone edition** (a self-contained desktop app / standalone web site). Both share one engine and domain (`@aivn/core`, `@aivn/stage`); they differ only in host: the standalone edition has the route tree, playthrough saves and the full workshop, while this plugin leans on DSH's native sessions, file sidebar and skill mechanism. **Want the full product experience? Use the standalone edition. Already live in DSH and want AIVN's capabilities without opening another app? Use this plugin.**
+
 ## Install
 
 The package is a DSH bundle (`package.json` declares `dsh.bundle.patch`):
