@@ -475,7 +475,7 @@ DSH 的「在新对话中分支」与舞台重建（只重放助手文本）都�
 | `import_asset` | — | 把一张**图登记**成剧目素材：写 `assets/`、补素材表（呈现声明 + 描述）、记台账，**不抠底**。`source` 给剧目内相对路径或 http(s) 网址；落位**显式给**——`kind`（background / cg / sprite）必填，立绘再给 `spriteId` / `variant` / `framing` / `stature` / `title`。立绘要传**已抠好的透明 PNG**（外部来源先 `cut`）；`original` 可留抠底前原片以便重抠。**不依赖生图后端** |
 | `generate_asset` | 生图后端 | **一键**：出图 +（立绘）自动抠底 + 登记，一次完成，回执给最终素材路径。参数与 `import_asset` 的落位一致（`kind` + `name` / `spriteId` / `variant` / `framing` / `stature`），立绘另收 `keyColor`（色键底色，见下）。**只有这条路**由引擎自动做色键底、身份锁、差分垫 neutral；同名素材已有则直接跳过 |
 | `generate_bgm` | 音乐后端 | 生成一首 BGM 落 `assets/bgm/`；**同步等待**（约 84 秒），`name` 就是剧本里 `<scene bgm="…">` 引用的 id |
-| `list_voices` | `tts.keys` | 查 Fish 音色库挑音色：按语言 / 标签 / 标题关键词取窗口，本地按 `gender` 筛，按热度排序出前 25 条。挑好的 id 填进角色卡的 `voice` |
+| `list_voices` | `tts.keys` | 查 Fish 音色库挑音色：按语言 / 标签 / 标题关键词取窗口，本地按 `gender` 筛，按热度排序，一页 25 条（`page` 从 1 起，结果末尾会提示下一页）。挑好的 id 填进角色卡的 `voice` |
 | `web_search` | `search.keys` | 联网检索：一次调用同时拿回结果与正文。只查剧目之外的事实——设定、角色、剧情都在工作区文件里 |
 
 `list_voices` / `web_search` / `generate_image` / `generate_asset` / `generate_bgm` 在没配对应 key / 后端时

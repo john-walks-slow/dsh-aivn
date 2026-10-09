@@ -6,13 +6,18 @@
  * 热度是 Fish 给的可信度信号，同条件下没有理由优先选冷门的。
  *
  * 挑音色的依据是 `description`（这个嗓子听起来什么样：年龄感、语气、语速），不是名字。
+ * 窗口动辄上千条，一次全列出去能把一轮预算烧光——所以一次只列一页，`page` 从 1 起翻页。
+ *
+ * 页码是**窗口内**的：窗口由 `voice-catalog` 抓取并缓存（12h、上限 16 窗），Fish 自己也会把
+ * `total` 封顶（实测无过滤与按语言都报 1000、按标题报 200），所以「最后一页」只保证这是本窗口的
+ * 最后一页，不等于全库到底。窗口过期或挤出缓存后重取，页码可能整体重排。
  */
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import type { VoiceCatalog, VoiceEntry } from '../voice/voice-catalog';
 
-/** 一次列多少条：够挑就行，音色库动辄上千条。 */
-const LIST_LIMIT = 25;
+/** 一页列多少条：够挑就行，音色库动辄上千条。别与 `voice-catalog` 的 `PAGE_SIZE`（上游抓取页）混用。 */
+const VOICES_PER_PAGE = 25;
 const DESC_MAX = 90;
 
 const DESCRIPTION = [
@@ -22,7 +27,7 @@ const DESCRIPTION = [
 	'条件越具体越准：给 language（如 ja / zh / en，服务端统一小写）、给 tags（如 anime / female）、',
 	'给 query 搜标题关键词。tags 是作者自己打的、**大小写敏感**，猜不到就只按 query/language 查。',
 	'gender 是本地按标签筛（Fish 没有性别参数），只在标签里写着 male/female 的音色上生效。',
-	'结果按热度降序，最多列 ' + String(LIST_LIMIT) + ' 条。',
+	'结果按热度降序分页返回；这一页没有合适的，就把末尾给的下一页页码填进 page。',
 ].join('\n');
 
 const textOutput = {
@@ -49,6 +54,11 @@ export function createListVoicesTool(catalog: VoiceCatalog) {
 				type: 'array',
 				items: { type: 'string', description: '一个标签，原样透传（大小写敏感）' },
 				description: '若干标签，取**并集**（Fish 的多 tag 参数就是并集）。',
+			},
+			page: {
+				type: 'integer',
+				default: 1,
+				description: `第几页，从 1 起，每页 ${VOICES_PER_PAGE} 条；小于 1 按 1 算。结果超过一页时看末尾给的下一页页码。`,
 			},
 		},
 		output: textOutput,
@@ -79,11 +89,28 @@ export function createListVoicesTool(catalog: VoiceCatalog) {
 				);
 			}
 
-			const shown = matched.slice(0, LIST_LIMIT);
+			const totalPages = Math.ceil(matched.length / VOICES_PER_PAGE);
+			const page = Math.max(1, args.page ?? 1);
+			const start = (page - 1) * VOICES_PER_PAGE;
+			const shown = matched.slice(start, start + VOICES_PER_PAGE);
+			if (shown.length === 0) {
+				return (
+					`第 ${page} 页没有内容：共 ${matched.length} 条匹配` +
+					`（本窗口 ${window.entries.length} 条，全库 ${window.total}），只有 ${totalPages} 页（page 从 1 起）。`
+				);
+			}
+
 			const lines = shown.map((entry) => render(entry));
-			const tail = [`共 ${matched.length} 条匹配（本窗口 ${window.entries.length} 条，全库 ${window.total}）`];
-			if (matched.length > shown.length) tail.push(`只列了前 ${shown.length} 条，用条件缩小范围`);
+			const tail = [
+				`共 ${matched.length} 条匹配（本窗口 ${window.entries.length} 条，全库 ${window.total}）`,
+				`第 ${page}/${totalPages} 页`,
+			];
+			if (page < totalPages) tail.push(`下一页 page=${page + 1}`);
+			else if (page > 1) tail.push('已是本窗口最后一页');
 			lines.push(tail.join('；'));
+			if (page === 1 && totalPages > 1) {
+				lines.push('条件越具体越准：先用 language / tags / query 收窄，比一页页翻省预算。');
+			}
 			return lines.join('\n');
 		},
 	});
