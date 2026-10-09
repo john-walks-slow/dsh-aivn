@@ -20,7 +20,7 @@ import { cutout } from '../src/media/cutout';
 import { PLAYWRITER_PROMPT, playwriterTail } from '../src/playwriter/prompt';
 import { readPlayReadiness } from '../src/play/readiness';
 import { stagehandPrompt } from '../src/stagehand/prompt';
-import { TOOL_CATALOG } from '../src/tool-catalog';
+import { TOOL_CATALOG, withConcurrency } from '../src/tool-catalog';
 import type { GeneratedImage, ImageBackend, ImageRequest } from '../src/media/image';
 import type { GeneratedMusic, MusicBackend } from '../src/media/music';
 
@@ -709,13 +709,21 @@ const writerOn = playwriterTail({ image: true });
 check(
 	'M47',
 	// 《你怎么工作》在 persona 前缀里，《缺图怎么办》在尾段里——两段都要教到。
-	PLAYWRITER_PROMPT.includes('同一批发出的工具调用会并发跑') && writerOn.includes('放进同一批发出去'),
+	PLAYWRITER_PROMPT.includes('同一批发出去，一轮往返就办完几件事') && writerOn.includes('放进同一批发出去'),
 	'剧作家：读回一次拿、缺图多张同批发',
 );
 check(
 	'M48',
 	['aivn-visual-craft', 'aivn-audio', 'aivn-play-setup'].every((name) => (skillFiles[name] ?? '').includes('同一批')),
 	'三份技能的素材食谱都写明「同一批」并发',
+);
+
+// 装配那一步（`withConcurrency`）本身也是机制：它被删掉时，上面几条照样全绿、并行却没了。
+check(
+	'M49',
+	withConcurrency({ name: 'probe' } as never, true).isConcurrencySafe?.({}) === true &&
+		withConcurrency({ name: 'probe' } as never, false).isConcurrencySafe === undefined,
+	'装配把 concurrent 落成 isConcurrencySafe（true 挂上、false 原样交回）',
 );
 
 await rm(dir, { recursive: true, force: true });

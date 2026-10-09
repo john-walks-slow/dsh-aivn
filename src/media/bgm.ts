@@ -6,10 +6,11 @@
  * 「减少无意分歧」而非消灭分歧）。
  */
 import { existsSync } from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { requireMusicBackend } from './backends';
 import { declareBgmSource, recordLedger } from './catalog';
+import { writeAtomic } from './storage';
 import { assertStem } from './target';
 import type { GeneratedAsset, PlayAssetsOptions } from './types';
 
@@ -30,7 +31,8 @@ export async function generateBgm(
 	const file = `${stem}${music.ext}`;
 	const abs = join(dir, relDir, file);
 	const replaced = existsSync(abs);
-	await writeFile(abs, music.bytes);
+	// 原子落盘：同批里两次出同一 id 的曲子时，留下完整的一首，而不是两份音频交错。
+	await writeAtomic(abs, music.bytes);
 	const path = `${kindPath}/${file}`;
 	await declareBgmSource(dir, stem);
 	await recordLedger(dir, stem, { kind: 'bgm', path: `assets/${path}`, prompt, createdAt: new Date().toISOString() });

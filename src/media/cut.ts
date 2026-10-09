@@ -5,11 +5,12 @@
  * 即可；立绘先 `cut`、再登记那张透明 PNG。`opts.tuning` 之外可传一次性调参（对着同一张源图再跑）。
  */
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { resolveInPlay } from '../play/assets';
 import { cutout, resolveTuning, type CutoutTuning } from './cutout';
 import { newDraftId, draftDir } from './draft-store';
+import { writeAtomic } from './storage';
 import type { PlayAssetsOptions } from './types';
 
 /** 抠底结果：输出路径（剧目内相对 + 绝对）与体检。 */
@@ -39,7 +40,8 @@ export async function cutFile(
 		: join(draftDir(dir, newDraftId()), 'cut.png');
 	if (!outAbs) throw new Error(`cut 的 output 路径越界：${output}（只能给剧目内的相对路径）`);
 	await mkdir(dirname(outAbs), { recursive: true });
-	await writeFile(outAbs, cut.data);
+	// 原子落盘：同批里两次抠底写到同一个 output 时，「整体生效」而不是两份内容交错。
+	await writeAtomic(outAbs, cut.data);
 	return {
 		path: relative(dir, outAbs).split(/[\\/]/).join('/'),
 		absPath: outAbs,

@@ -391,8 +391,9 @@ voice: 短句，少用形容词
 **工具面也完全一致**（见「Agent 工具」），角色差别只剩 persona、注入内容与舞台管线。
 **预设里不会再列一行 `dsh-aivn`**——宿主已经装了本插件，再来一行会把路由与事件订阅重复装一遍。
 
-两个预设都**不看宿主的技能与指令**：不装 `dsh-agent-instructions`，`$DSH_HOME/AGENTS.md` 与
-工作区的 `AGENTS.md` 都不进提示词（剧目上下文全由 A 区注入）；技能库挂在自己的 `isolate`
+两个预设**不吃宿主的技能与指令**：`dsh-agent-instructions` 一行不装——web 部署里宿主那一行本身
+也是关的，所以 `$DSH_HOME/AGENTS.md` 与工作区的 `AGENTS.md` 都不进提示词（剧目上下文全由 A 区注入；
+直出 `dsh-base` 的剖面里宿主那一行还在，那一层得在剖面里自己关）。技能库挂在自己的 `isolate`
 realm 里，宿主行与第三方插件注册的全局技能都不会漏进清单。
 
 只有剧作家预设的会话会进舞台管线。搭台助手说什么都不上台。
@@ -461,10 +462,12 @@ DSH 的「在新对话中分支」与舞台重建（只重放助手文本）都�
 **两个预设装同一套 AIVN 工具**（工具清单见 `src/tool-catalog.ts`）；「门控」列只有配了对应后端 / key 才注册的项。
 按预设禁用某几个工具，用插件配置 `playwriterDisabledTools` / `stagehandDisabledTools`（逗号分隔的工具名，默认空 = 两预设完全一致）。
 
-**同一批里的工具调用会并发跑**：一条 assistant 消息里发几个互不依赖的调用（读几个文件、出几张图、
-抠几张底），DSH 把它们放进同一个并行池，等待不叠加；`set_stage_style` 是唯一的例外——它读-改-写
-`theme.json` 且没有锁，保持逐个执行。开关是 `src/tool-catalog.ts` 里每个工具的 `concurrent` 声明
-（缺省即独占），装配时落成工具定义上的 `isConcurrencySafe`。
+**独立的事放同一批**：一条 assistant 消息里发几个互不依赖的调用（读几个文件、出几张图、抠几张底），
+一轮往返就能办完几件事；其中 `read` 与素材类工具（出图 / 抠底 / 登记 / 配乐 / 检索）声明了**可重叠**，
+DSH 把它们放进同一个并行池，等待不叠加。`set_stage_style` 是唯一不能重叠的 AIVN 工具——它读-改-写
+`theme.json` 且没有锁；宿主自带的 `glob` / `grep` / `write` / `edit` / `bash` 也独占
+（同批只省往返，等待照样逐个来）。开关是 `src/tool-catalog.ts` 里每个工具的 `concurrent` 声明
+（缺省即独占），装配时由 `withConcurrency` 落成工具定义上的 `isConcurrencySafe`。
 
 | 工具 | 门控 | 作用 |
 | --- | --- | --- |

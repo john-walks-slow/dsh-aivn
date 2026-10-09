@@ -9,8 +9,9 @@
  * `stagehandDisabledTools`），不靠「两个分支碰巧相同」。
  *
  * **并发**也在表里（`concurrent`）：只有声明了 `isConcurrencySafe` 的工具才会被 DSH 放进并行池，
- * 缺省即独占。`preset-tools` 按这一格给工具挂上它，见 `ToolSpec.concurrent` 的说明。
+ * 缺省即独占。`withConcurrency` 就是「声明 → 真定义」的那一步，装配时调（`preset-tools.ts`）。
  */
+import type { ToolDefinition } from '@deepseek-ai/dsh-tools';
 
 /** 一项工具「配了才算」的依赖。 */
 export type ToolGate =
@@ -117,6 +118,20 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
 ];
 
 export const TOOL_IDS: readonly string[] = TOOL_CATALOG.map((tool) => tool.id);
+
+/**
+ * 把 `concurrent` 落成工具定义上的 `isConcurrencySafe`（装配时调，见 `preset-tools.ts`）。
+ *
+ * DSH 只把声明了它的调用放进并行池；`dsh-tools` 的 `executionMode` 对没有这个字段的定义一律返回
+ * `exclusive`——所以独占的工具原样交回即可，不必写一个恒 false 的分类器。
+ *
+ * 放在这里而不是 `preset-tools.ts`：它是「声明 → 真定义」这一步，与 `concurrent` 同处一个文件；
+ * 顺带让离线 e2e（`e2e/verify-media.ts` 的 M49）验得到它——`preset-tools` 那边 import 了
+ * `@deepseek-ai/dsh-tools`，在离线夹具里打不开。
+ */
+export function withConcurrency(tool: ToolDefinition, concurrent: boolean): ToolDefinition {
+	return concurrent ? { ...tool, isConcurrencySafe: () => true } : tool;
+}
 
 /** 这一项在当前能力下面是否装得上（不看按预设禁用）。 */
 export function gateSatisfied(

@@ -32,8 +32,13 @@ export function withFileLock<T>(file: string, job: () => Promise<T>): Promise<T>
 	return next;
 }
 
-/** 先写临时文件再改名：中途崩溃不会留下半份 JSON。 */
-export async function writeAtomic(file: string, body: string): Promise<void> {
+/**
+ * 先写临时文件再改名：中途崩溃不会留下半份 JSON。
+ *
+ * 也收字节（`cut` / `generate_bgm` 直接写最终路径时用它）：并发写同一个目标时，改名让每次写
+ * 要么整体生效、要么完全不见，而不是两份内容交错进同一个文件。
+ */
+export async function writeAtomic(file: string, body: string | Uint8Array): Promise<void> {
 	await mkdir(dirname(file), { recursive: true });
 	const tmp = `${file}.${randomUUID().slice(0, 8)}.tmp`;
 	await writeFile(tmp, body);

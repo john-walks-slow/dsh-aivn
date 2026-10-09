@@ -423,12 +423,14 @@ see "Endings and new game plus").
 To disable tools per preset, use the plugin config `playwriterDisabledTools` / `stagehandDisabledTools`
 (comma-separated tool names; empty by default = the two presets are identical).
 
-**Tool calls issued in one batch run concurrently**: put several independent calls in a single assistant
-message (read a few files, generate a few images, cut a few backgrounds) and DSH schedules them in one
-parallel pool — the waits do not add up. `set_stage_style` is the one exception: it does a
-read-modify-write of `theme.json` without a lock, so it stays one at a time. The switch is the
-`concurrent` flag on each tool in `src/tool-catalog.ts` (omitted = exclusive); the assembly turns it
-into `isConcurrencySafe` on the tool definition.
+**Independent jobs go in one batch**: put several independent calls in a single assistant message
+(read a few files, generate a few images, cut a few backgrounds) and one round trip settles them all.
+`read` and the asset tools (generate / cut / register / BGM / search) are declared **overlappable**, so
+DSH schedules them in one parallel pool and the waits do not add up. `set_stage_style` is the one AIVN
+tool that is not — it does a read-modify-write of `theme.json` without a lock; the host's own `glob` /
+`grep` / `write` / `edit` / `bash` are exclusive too (batching them saves round trips, not waits). The
+switch is the `concurrent` flag on each tool in `src/tool-catalog.ts` (omitted = exclusive); the
+assembly stamps it onto the tool definition with `withConcurrency`.
 
 | Tool | Gate | What it does |
 | --- | --- | --- |
