@@ -285,7 +285,8 @@ function install(
 						// 通道现值：中途进出会立刻换掉提示词那一段（`aivn:play-nsfw`）。
 						channel: () => nsfw.active(sessionId),
 						// 这两位被用户在配置里禁掉时，连入口指针也不提——不能让提示词教一个不存在的工具。
-						available: () => !disabled.has('enter_nsfw'),
+						// 成对看：只禁掉其中一个就没有完整的通道可言（进得去出不来），那就两位都不提。
+						available: () => !disabled.has('enter_nsfw') && !disabled.has('exit_nsfw'),
 						// 补充提示词的插件级缺省（逐剧目那份 `play.json` 优先，见 `play-context`）。
 						prompt: () => runtime.current.nsfwPrompt,
 					}),

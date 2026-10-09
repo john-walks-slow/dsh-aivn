@@ -264,7 +264,8 @@ export async function apply(ctx: Context, config: Config): Promise<() => void> {
 		// 重放的每一帧转给 tap：重建也要重推出「已结局」的终局态（回退掉结局那一拍则退出终局）。
 		onEvent: (sessionId, event) => tap.noteEvent(sessionId, event),
 		// 限制级通道同理：从日志里的 enter_nsfw / exit_nsfw 重推出开关，角标与打标跟着回来。
-		onNsfw: (sessionId, active) => tap.noteNsfw(sessionId, active),
+		// 第三个参数是「进段之前那条模型选择」——段内冷开后退出要切回它，别在这一层把它吞掉。
+		onNsfw: (sessionId, active, main) => tap.noteNsfw(sessionId, active, main),
 		// 提示队列在导演手里，不在会话面上：重置帧清掉客户端那份之后要补回来。
 		pendingGuides: (sessionId) => director.snapshot(sessionId),
 	});

@@ -33,7 +33,7 @@ import type { InjectedMessages } from '../injected';
 import type { EndingsLedger } from '../play/ledger';
 import { loadPlaySync, type Play } from '../play/play';
 import { resetPlayState } from '../play/play-state';
-import { NSFW_FOLD_KIND, nsfwFoldMarker } from './nsfw';
+import { foldRangeStart, NSFW_COMPLIANCE_KIND, NSFW_FOLD_KIND, nsfwFoldMarker } from './nsfw';
 import type { NsfwHost } from '../tools/context';
 import type { VoiceHost } from '../voice/voice-host';
 import type { VoicePipeline } from '../voice/voice';
@@ -176,7 +176,10 @@ export function installStageTap(
 	const injectCompliance = (sessionId: string, state: NsfwState): void => {
 		const agent = attachedAgent(ctx, sessionId);
 		if (!agent) return;
-		const message = createUserMessage({ content: [{ type: 'text', text: NSFW_COMPLIANCE }], source: { kind: 'user' } });
+		const message = createUserMessage({
+			content: [{ type: 'text', text: NSFW_COMPLIANCE }],
+			source: { kind: NSFW_COMPLIANCE_KIND } as unknown as MessageSource,
+		});
 		injected.remember(sessionId, message.id);
 		state.complied = true;
 		agent.inject(message);
@@ -276,9 +279,10 @@ export function installStageTap(
 		const startSeq = state.startSeq;
 		if (!session || startSeq === undefined) return;
 		const nodes = session.surface.nodes;
-		const at = nodes.indexOf(startSeq);
-		if (at < 0) return;
-		const shadowed = nodes.slice(at);
+		// 从边界**下一条**开始：边界那一条是进段前的最后一条，它不该被折进摘要里（见 `foldRangeStart`）。
+		const from = foldRangeStart(nodes, startSeq);
+		if (from < 0 || from >= nodes.length) return;
+		const shadowed = nodes.slice(from);
 		const endSeq = shadowed[shadowed.length - 1];
 		if (endSeq === undefined) return;
 		const marker = createUserMessage({

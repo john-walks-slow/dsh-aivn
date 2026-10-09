@@ -27,7 +27,9 @@
  *
  *     node e2e/run.mjs rebuild        # 或直接 node e2e/verify-rebuild.mjs
  */
+import { readFileSync } from 'node:fs';
 import { StageHub } from '../src/hub';
+import { foldRangeStart } from '../src/stage/nsfw';
 import { InjectedMessages } from '../src/injected';
 import { rebuildStage } from '../src/stage/stage-log';
 import type { LiveSession } from '../src/session';
@@ -356,6 +358,28 @@ check(
 	'R19',
 	!foldInputs.some((text) => text.includes('已收束为剧情摘要')),
 	'折叠标记不会被念成玩家台词（来源种类不是 user）',
+);
+
+/* ── 折叠区间的起点：边界那一条不折 ─────────────────────────────────── */
+
+/**
+ * 折叠区间从「进段那一刻的最后一条」的**下一条**开始——这个 +1 是要紧的：不加就会把进段前那条
+ * 普通剧情的台词也折进摘要里（检视 S-02）。这条判据锁住那个语义，纯函数、零成本。
+ */
+const foldSeqs = [1, 2, 3] as never[];
+check('R20', foldRangeStart(foldSeqs, 1 as never) === 1, '折叠从边界那一条的下一条开始');
+check('R21', foldRangeStart(foldSeqs, 3 as never) === 3, '边界就是最后一条时，起点落在末尾（这一段没有产出 → 调用方跳过）');
+check('R22', foldRangeStart(foldSeqs, 9 as never) === -1, '边界不在面上（被回退抹掉）→ 不折');
+
+/**
+ * S-01 那类缺陷（包装层漏透传参数）**重放判据照不到**：夹具直调回调，绕过了 `index.ts` 的接线。
+ * 所以这里用一条静态锚点盯住它——改了接线而没同步改这里，判据会红。
+ */
+const indexSource = readFileSync('src/index.ts', 'utf8');
+check(
+	'R23',
+	/onNsfw:\s*\(sessionId, active, main\)\s*=>\s*tap\.noteNsfw\(sessionId, active, main\)/.test(indexSource),
+	'接线把「进段前的主模型」从 stage-log 透传给 tap（漏了的话段内冷开后退出切不回主模型）',
 );
 
 let failed = 0;
