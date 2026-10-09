@@ -11,10 +11,8 @@
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { extname, join, normalize, resolve, sep } from 'node:path';
+import { listPlayAssets, type AssetIndex } from '@aivn/agent';
 import { parseCharacterCard, spriteIdOf, type AssetMeta } from '@aivn/core';
-
-/** 图片与音频扩展名白名单：与素材表的过滤口径一致。 */
-const MEDIA = /\.(png|jpe?g|webp|mp3|ogg|wav|m4a)$/i;
 
 const CONTENT_TYPES: Record<string, string> = {
 	'.png': 'image/png',
@@ -29,33 +27,11 @@ const CONTENT_TYPES: Record<string, string> = {
 	'.md': 'text/markdown; charset=utf-8',
 };
 
-export type AssetIndex = Record<string, string[]>;
+export type { AssetIndex };
 
-/** 剧目里现有的素材：`{backgrounds: [...], 'sprites/alice': [...]}`。 */
+/** 剧目里现有的素材：`{backgrounds: [...], 'sprites/alice': [...]}`（实现在共享包）。 */
 export function listAssets(dir: string): AssetIndex {
-	const root = join(dir, 'assets');
-	const index: AssetIndex = {};
-	if (!existsSync(root)) return index;
-
-	for (const kind of ['backgrounds', 'cg', 'sprites', 'sfx', 'bgm']) {
-		const kindDir = join(root, kind);
-		if (!existsSync(kindDir)) continue;
-
-		if (kind === 'sprites') {
-			for (const entry of readdirSync(kindDir, { withFileTypes: true })) {
-				if (!entry.isDirectory()) continue;
-				const files = readdirSync(join(kindDir, entry.name)).filter((name) => MEDIA.test(name));
-				// 排序：引擎在找不到指定差分时取第一个兜底，顺序不定会让兜底每次挑到不同的脸。
-				index[`sprites/${entry.name}`] = files.sort((a, b) => a.localeCompare(b));
-			}
-		} else {
-			// 同样排序：素材清单要稳定，剧作家两次读到的顺序不该变。
-			index[kind] = readdirSync(kindDir)
-				.filter((name) => MEDIA.test(name))
-				.sort((a, b) => a.localeCompare(b));
-		}
-	}
-	return index;
+	return listPlayAssets(dir);
 }
 
 /**
