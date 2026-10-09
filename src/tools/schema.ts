@@ -12,7 +12,7 @@ import type { ParameterPropertySpec, ParameterSchemaSpec } from '@deepseek-ai/ds
 import type { FieldMap, SchemaNode } from '@aivn/agent';
 
 /** 共同子集之外的关键字在这里当场拒绝，别让它悄悄落到 dsh 的校验器上。 */
-const HOST_ONLY_KEYWORDS = ['minLength', 'maxLength', 'minimum', 'maximum'];
+const HOST_ONLY_KEYWORDS = ['minLength', 'maxLength', 'minimum', 'maximum', 'minItems', 'maxItems'];
 
 export function toDsh(fields: FieldMap): ParameterSchemaSpec {
 	const out: Record<string, ParameterPropertySpec> = {};
