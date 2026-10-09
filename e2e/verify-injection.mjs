@@ -218,6 +218,15 @@ try {
 	// 出现的短语判定——`aivn-visual-craft` 这个名字在《演出中引入新主体》指针里也会无条件出现。
 	// **耦合锚点**：改 `IMAGE_POINTER`（src/playwriter/prompt.ts）里这个短语或
 	// `aivn-visual-craft` §八标题时，同步改这条断言。
+	// 限制级通道：剧作家恒装那两位（`playwriterOnly`，服务端那一位也是 playwriter only），
+	// 所以没进通道时提示词里应当**只有入口指针**——通道内的创作指引不许漏进日常演出。
+	// **耦合锚点**：改 `nsfwEntryPointer` / `nsfwGuidance`（src/playwriter/prompt.ts）的标题时同步改。
+	check(
+		'A14c',
+		prompt.includes('## 亲密/限制级剧情入口（enter_nsfw）') && !prompt.includes('限制级（NSFW）创作指引'),
+		'没进限制级通道：只有入口指针，没有通道内的创作指引',
+	);
+
 	check(
 		'A14b',
 		hasImage === prompt.includes('「演出中缺图」一节'),

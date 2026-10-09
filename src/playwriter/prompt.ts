@@ -219,6 +219,36 @@ const IMAGE_POINTER = `# 缺图怎么办（generate_asset / generate_image）
  *
  * 《写作参数》不在这里：它按 `play.json` 的 `craft` 段每轮渲染，在 A 区里。
  */
+/**
+ * 限制级（NSFW）通道的两段提示词——与服务端 `prompt.ts` 那两段**逐字同源**。
+ *
+ * 通道没开时给的是**入口指针**（教它什么时候调 `enter_nsfw`），开着时给创作指引；
+ * 两段都按会话的通道现值逐轮取（`play-context` 的 `text: () =>`），所以中途进出会立刻换文本。
+ * 工具本身只在剧作家的工具面上（`playwriterOnly`），搭台助手两个都看不到。
+ */
+export function nsfwEntryPointer(): string {
+	return `## 亲密/限制级剧情入口（enter_nsfw）
+
+当剧情推进至即将发生亲密、成人或限制级（NSFW）接触时，不要在当前模型下直接描写露骨细节。
+调用 \`enter_nsfw\` 开启限制级剧情通道：调用后写完本轮正文与末行的停止点标签即可停笔，
+下一轮起将由限制级专用模型和专属提示词接管展开细腻描写。`;
+}
+
+/** 通道内：创作指引 +（有的话）剧目自己的 `memory/always/nsfw.md` 与 `nsfwPrompt`。 */
+export function nsfwGuidance(input: { memory: string; prompt: string }): string {
+	const memory = input.memory.trim();
+	const prompt = input.prompt.trim();
+	return `# 限制级（NSFW）创作指引
+
+你当前正处于限制级剧情通道。
+- 专注于亲密接触中的情感张力、双方的心理起伏、生理与感官细节反应的细腻刻画；
+- 保持角色一贯的性格与说话风格，将人设融入亲密互动中；
+- 结合 Stage DSL：合理使用 <actor action="..." variant="..."> 配合肢体反应与微表情，用 <sfx> 辅助营造氛围；
+- 当这段亲密情节告一段落、即将回归正常日常时，调用 exit_nsfw 退出限制级模式，并在这一轮正文末行照常写下停止点标签。${
+		memory ? `\n\n## 剧目限制级专属口径\n${memory}` : ''
+	}${prompt ? `\n\n## 补充限制级提示词\n${prompt}` : ''}`;
+}
+
 export function playwriterTail(can: { image: boolean }): string {
 	return `${FORMAT_RULES}
 

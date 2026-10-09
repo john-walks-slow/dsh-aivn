@@ -39,7 +39,7 @@ import { listAssets, readManifest } from './assets';
 import { loadPlaySync } from './play';
 import { assetCapabilitiesOf, renderCraftParams, resolveCraft } from './craft';
 import { readLedger } from './ledger';
-import { playwriterTail } from '../playwriter/prompt';
+import { nsfwEntryPointer, nsfwGuidance, playwriterTail } from '../playwriter/prompt';
 
 /** 一次快照的存活时间：够覆盖一个 turn 的多个 step，又保证跨轮必重读。 */
 const TTL_MS = 1_000;
@@ -57,6 +57,7 @@ const ORDER = {
 	memory: 150,
 	endings: 160,
 	tail: 200,
+	nsfw: 210,
 };
 
 /** 【状态】区的位置：跟在宿主自己的运行时上下文（沙箱/审批/子代理）之后。 */
@@ -71,6 +72,10 @@ export interface PlaySnapshot {
 	memoryIndex: string;
 	endings: string;
 	state: string;
+	/** 限制级通道开着时，剧目自己的 `memory/always/nsfw.md` 正文（没有就是空串）。 */
+	nsfwMemory: string;
+	/** 限制级通道开着时的补充提示词（`agents.playwriter.nsfwPrompt`，没有就是空串）。 */
+	nsfwPrompt: string;
 }
 
 /**
@@ -99,6 +104,9 @@ export function readPlaySnapshot(dir: string, canImage: () => boolean = () => fa
 			)}写，**不要跟随玩家的输入语言**。角色 id、素材 id、DSL 标签名保持原样（英文/拼音）。`
 		: '';
 
+	const nsfwMemory = readText(join(dir, 'memory', 'always', 'nsfw.md')).trim();
+	const nsfwPrompt = (play.config.agents?.playwriter?.nsfwPrompt ?? '').trim();
+
 	const premise = play.config
 		? `# 剧目设定\n\n${
 				readText(join(dir, 'memory', 'always', 'premise.md')).trim() ||
@@ -120,6 +128,8 @@ export function readPlaySnapshot(dir: string, canImage: () => boolean = () => fa
 		memoryIndex: renderMemoryIndexSection(dir),
 		endings: renderEndings(dir, play.config.newGamePlus === true),
 		state: renderState(dir, play.config.characters?.map((card) => card.id) ?? []),
+		nsfwMemory,
+		nsfwPrompt,
 	};
 }
 
@@ -133,6 +143,7 @@ export function registerPlayContext(
 	agentCtx: Context,
 	playDir: () => string,
 	canImage: () => boolean,
+	nsfw: { channel: () => boolean; available: () => boolean },
 ): () => void {
 	let cache: { at: number; snapshot: PlaySnapshot } | null = null;
 	const snapshot = (): PlaySnapshot => {
@@ -158,6 +169,19 @@ export function registerPlayContext(
 		// 静态尾段（格式契约、记忆卡规则、引入新角色、演出契约）跟着动态段一起挂：
 		// 这几章只有剧作家要，而 persona 那一格装不下两段。位置紧接 A 区之后，与 AIVN 同序。
 		agentCtx.systemPrompt.section({ name: 'aivn:playwriter-tail', order: ORDER.tail, text: () => playwriterTail({ image: canImage() }) }),
+		// 限制级通道：开着给创作指引，没开给入口指针（两段与服务端逐字同源，见 `nsfwEntryPointer`）。
+		// 这一位在插件上是恒装的，所以只有「用户在配置里禁用了这两个工具」才会整段不出现。
+		agentCtx.systemPrompt.section({
+			name: 'aivn:play-nsfw',
+			order: ORDER.nsfw,
+			text: () => {
+				if (nsfw.channel()) {
+					const snap = snapshot();
+					return nsfwGuidance({ memory: snap.nsfwMemory, prompt: snap.nsfwPrompt });
+				}
+				return nsfw.available() ? nsfwEntryPointer() : '';
+			},
+		}),
 		agentCtx.systemPrompt.context({ name: 'aivn:play-state', order: CONTEXT_ORDER, text: () => snapshot().state }),
 	];
 
@@ -175,6 +199,8 @@ const EMPTY: PlaySnapshot = {
 	memoryIndex: '',
 	endings: '',
 	state: '',
+	nsfwMemory: '',
+	nsfwPrompt: '',
 };
 
 /* ── 角色表 ─────────────────────────────────────────────────────────────── */

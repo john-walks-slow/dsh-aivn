@@ -278,7 +278,13 @@ function install(
 		// 只有剧作家的 scope 上有这些段：搭台助手不写剧本，不该看见舞台契约。
 		offs.push(
 			agent.ctx.effect(
-				() => registerPlayContext(agent.ctx, () => safePlayDir(play), () => runtime.current.capabilities.image),
+				() =>
+					registerPlayContext(agent.ctx, () => safePlayDir(play), () => runtime.current.capabilities.image, {
+						// 通道现值：中途进出会立刻换掉提示词那一段（`aivn:play-nsfw`）。
+						channel: () => nsfw.active(sessionId),
+						// 这两位被用户在配置里禁掉时，连入口指针也不提——不能让提示词教一个不存在的工具。
+						available: () => !disabled.has('enter_nsfw'),
+					}),
 				'dsh-aivn:play-context',
 			),
 		);
