@@ -66,6 +66,8 @@ function buildTranscript(options?: {
 	beats?: readonly { id: string; text: string }[];
 	/** 在第几拍之后插一次限制级工具调用（`enter` / `exit`），以及它的结果上不上会话面。 */
 	tools?: readonly { afterBeat: number; name: 'enter_nsfw' | 'exit_nsfw'; resultOnSurface: boolean }[];
+	/** 宿主建会话时记下的那条模型选择（`model/selection`，日志里一条 log-only 事件）。 */
+	selection?: { provider: string; model: string };
 }): { events: FakeEvent[]; nodes: number[] } {
 	const beats = options?.beats ?? BEATS;
 	const tools = options?.tools ?? [];
@@ -83,6 +85,9 @@ function buildTranscript(options?: {
 		...(source ? { source } : {}),
 	});
 
+	if (options?.selection) {
+		push({ type: 'model/selection', message: null, data: options.selection });
+	}
 	push({ type: 'user/message', message: message('user/message', [{ type: 'text', text: '（游戏开始，请演出第一轮）' }], { kind: 'user' }) });
 	for (const [index, beat] of beats.entries()) {
 		if (index > 0) {
@@ -208,22 +213,35 @@ check('R13', indexOfEnding >= 0 && !stopAfterEnding, '结局那一拍不给停�
  * | 进了又退 | 再加一次 `exit_nsfw` 的结果 | **灭** |
  * | 调用被抹掉 | `enter_nsfw` 的调用在日志里、结果不在面上（回退/重写） | **灭**（认配对的结果，不认调用） |
  */
-function rebuildWithNsfw(tools: readonly { afterBeat: number; name: 'enter_nsfw' | 'exit_nsfw'; resultOnSurface: boolean }[]): boolean {
+interface NsfwRebuild {
+	readonly active: boolean;
+	/** 重建推出来的「退出时要切回的主模型」（进段之前那条 `model/selection`）。 */
+	readonly main: { provider: string; model: string } | undefined;
+}
+
+function rebuildWithNsfw(
+	tools: readonly { afterBeat: number; name: 'enter_nsfw' | 'exit_nsfw'; resultOnSurface: boolean }[],
+	selection?: { provider: string; model: string },
+): NsfwRebuild {
 	const h = new StageHub();
-	const t = buildTranscript({ tools });
+	const t = buildTranscript({ tools, ...(selection ? { selection } : {}) });
+	let main: NsfwRebuild['main'];
 	rebuildStage('fixture-nsfw', fakeSession(t), false, {
 		hub: h,
 		injected: new InjectedMessages(),
 		voice: { replayCached: () => {} } as unknown as VoiceHost,
-		onNsfw: (sessionId, active) => h.appendNsfw(sessionId, active),
+		onNsfw: (sessionId, active, fromLog) => {
+			main = fromLog;
+			h.appendNsfw(sessionId, active);
+		},
 	});
 	const last = h.history('fixture-nsfw').filter((frame) => frame.kind === 'nsfw').at(-1);
-	return last?.kind === 'nsfw' ? last.active : false;
+	return { active: last?.kind === 'nsfw' ? last.active : false, main };
 }
 
 check(
 	'R14',
-	rebuildWithNsfw([{ afterBeat: 2, name: 'enter_nsfw', resultOnSurface: true }]) === true,
+	rebuildWithNsfw([{ afterBeat: 2, name: 'enter_nsfw', resultOnSurface: true }]).active === true,
 	'段内重建：进了没退 → 标识亮',
 );
 check(
@@ -231,13 +249,24 @@ check(
 	rebuildWithNsfw([
 		{ afterBeat: 2, name: 'enter_nsfw', resultOnSurface: true },
 		{ afterBeat: 4, name: 'exit_nsfw', resultOnSurface: true },
-	]) === false,
+	]).active === false,
 	'出了段重建：进了又退 → 标识灭',
 );
 check(
 	'R16',
-	rebuildWithNsfw([{ afterBeat: 2, name: 'enter_nsfw', resultOnSurface: false }]) === false,
+	rebuildWithNsfw([{ afterBeat: 2, name: 'enter_nsfw', resultOnSurface: false }]).active === false,
 	'被回退抹掉的调用不算数：结果不在面上 → 标识不亮（只认配对的 tool/result）',
+);
+// 段内重建还要知道「退出时切回哪个模型」：冷开时宿主给的是主模型还是限制级模型，只看现值认不出来，
+// 得从日志里进段**之前**那条 `model/selection` 认。
+const rebuiltInSegment = rebuildWithNsfw(
+	[{ afterBeat: 2, name: 'enter_nsfw', resultOnSurface: true }],
+	{ provider: 'cpa', model: 'main-model' },
+);
+check(
+	'R17',
+	rebuiltInSegment.active && rebuiltInSegment.main?.provider === 'cpa' && rebuiltInSegment.main.model === 'main-model',
+	`段内重建记住进段前的主模型（实际 ${JSON.stringify(rebuiltInSegment.main ?? null)}）`,
 );
 
 let failed = 0;

@@ -20,7 +20,8 @@ import type { StageHub } from '../hub';
 export interface NsfwControl {
 	/** 这条会话现在是不是限制级态（含「本拍刚请求进入」——标识在工具调用那一刻就亮）。 */
 	active(): boolean;
-	enter(reason?: string): void;
+	/** 异步：进入时要先把本剧目配的限制级模型解析成 provider + model（见 `stage-tap` 的解析器）。 */
+	enter(reason?: string): Promise<void>;
 	exit(summary?: string): void;
 }
 
@@ -32,7 +33,7 @@ export interface NsfwControl {
  */
 export interface NsfwHost {
 	active(sessionId: string): boolean;
-	enter(sessionId: string, reason?: string): void;
+	enter(sessionId: string, reason?: string): Promise<void>;
 	exit(sessionId: string, summary?: string): void;
 }
 

@@ -21,7 +21,7 @@ import { StageDslParser, type StageEvent } from '@aivn/core';
 import type { Context } from '@deepseek-ai/cordis';
 import { isReplacementSurfaceEvent, type SessionEvent, type SessionId } from '@deepseek-ai/dsh-session';
 import type { Message } from '@deepseek-ai/dsh-llm';
-import type {} from '@deepseek-ai/dsh-api-session-controller';
+import type { ModelSelection } from '@deepseek-ai/dsh-api-session-controller';
 import type { GuideFrameItem, StageHub } from '../hub';
 import type { InjectedMessages } from '../injected';
 import { loadPlaySync } from '../play/play';
@@ -86,7 +86,7 @@ export interface RebuildDeps {
 	 * 冷开 / 分支 / 回看之后，左上角角标与「这一段带不带标」都得跟着回到正确的那一版；
 	 * 增量那一路的开关值不能当数——帧流整个换掉了。
 	 */
-	onNsfw?: ((sessionId: string, active: boolean) => void) | undefined;
+	onNsfw?: ((sessionId: string, active: boolean, main?: ModelSelection) => void) | undefined;
 	/** 提示队列的现值（导演排的话）。重置帧把客户端那份清了，这里补一帧回来。 */
 	pendingGuides?: ((sessionId: string) => readonly GuideFrameItem[]) | undefined;
 }
@@ -116,13 +116,39 @@ export function rebuildStage(
 	const events = new Map(snapshot.map((event) => [event.seq, event] as const));
 	const lines: VoicedLine[] = [];
 	let current: VoicedLine | null = null;
-	/** 限制级通道的两个出口重推出来的现值（只有开关，没有段起止的其它形态）。 */
+	/**
+	 * 限制级通道的段起止：**按顺序扫整个日志**推出来（不是扫会话面）。
+	 *
+	 * 两件事都要求看全量日志，所以合在这一个循环里：
+	 * - `tool/call` 自己不在会话面上（`tool/call` 不在 `SurfaceEventType` 里），得先按 callId 记下名字；
+	 * - `model/selection` 是 log-only 事件（没有消息、也不在面上），而「退出时切回哪个模型」要的
+	 *   正是**进段之前**那一条。
+	 * 段起止本身仍然只认**在会话面上**的 `tool/result`——被回退 / 重写抹掉的调用照样躺在日志里，
+	 * 认它会把标识推亮。
+	 */
 	let nsfw = false;
-	// 工具调用自己不是会话面上的事件（`tool/call` 不在 `SurfaceEventType` 里），所以按配对的
-	// callId 找回它的名字：见下面 `tool/result` 那一支。
+	let mainBeforeEnter: ModelSelection | null = null;
+	let lastSelected: ModelSelection | null = null;
 	const callNames = new Map<string, string>();
+	const onSurface = new Set(session.surface.nodes);
 	for (const event of snapshot) {
-		if (event.type === 'tool/call') callNames.set(event.data.callId, event.data.name);
+		if (event.type === 'tool/call') {
+			callNames.set(event.data.callId, event.data.name);
+			continue;
+		}
+		if (event.type === 'model/selection') {
+			lastSelected = event.data;
+			continue;
+		}
+		if (event.type !== 'tool/result' || !onSurface.has(event.seq)) continue;
+		const name = callNames.get(event.data.message.toolCallId);
+		if (name === 'enter_nsfw' && !nsfw) {
+			nsfw = true;
+			// 进段之前那一条选择就是主模型（进段时插件会记一条换到限制级模型的），退出要切回它。
+			mainBeforeEnter = lastSelected;
+		} else if (name === 'exit_nsfw') {
+			nsfw = false;
+		}
 	}
 
 	/** 与实时那一路同一个解析器：重建出来的 IR 与流式写字时逐帧同构。 */
@@ -152,15 +178,6 @@ export function rebuildStage(
 			}
 			continue;
 		}
-		if (event.type === 'tool/result') {
-			// 限制级通道：段起止只认那两次工具调用（`enter_nsfw` / `exit_nsfw`，id 见 `tool-catalog.ts`），
-			// 认**配对的 `tool/result`** 而不是直接扫 `tool/call`——被回退 / 重写抹掉的那一段调用
-			// 照样躺在日志里，扫它会把标识推亮；`tool/result` 在会话面上，抹掉的就不在。
-			const name = callNames.get(event.data.message.toolCallId);
-			if (name === 'enter_nsfw') nsfw = true;
-			else if (name === 'exit_nsfw') nsfw = false;
-			continue;
-		}
 		if (event.type !== 'user/message') continue;
 		// 玩家说过的话才上时间线。引擎自己投的（开局指令、继续、导演指令）不算——
 		// 与实时那一路同一个口径，见 `injected.ts`。
@@ -175,7 +192,7 @@ export function rebuildStage(
 
 	// 限制级态：无条件推一帧（不是「变了才推」）。重建把帧缓冲整个换掉了，之后才连上来的舞台
 	// 只看得到这条新帧流——漏掉它，通道开着而角标不亮。
-	deps.onNsfw?.(sessionId, nsfw);
+	deps.onNsfw?.(sessionId, nsfw, nsfw ? (mainBeforeEnter ?? undefined) : undefined);
 
 	hub.appendBeat(sessionId, running ? 'start' : 'end');
 	deps.onRebuilt?.(sessionId);

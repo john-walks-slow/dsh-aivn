@@ -25,8 +25,8 @@
  * 限制级、下一拍才兑现；退出那一拍仍是限制级（那一段正文是限制级原文），闸在轮尾合上。
  */
 import type { Context } from '@deepseek-ai/cordis';
-import { StageDslParser, type StageEvent } from '@aivn/core';
-import type {} from '@deepseek-ai/dsh-agent';
+import { StageDslParser, type StageEvent, type ThinkingLevel } from '@aivn/core';
+import type { ModelSelection } from '@deepseek-ai/dsh-api-session-controller';
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm';
 import type { StageHub } from '../hub';
 import type { InjectedMessages } from '../injected';
@@ -89,10 +89,100 @@ export function installStageTap(
 	/**
 	 * 这条会话现在算不算限制级：`active || pendingEnter`（服务端 `beatChannelNsfw()` 的同一口径）。
 	 *
-	 * 进入那一拍照它算——标识在工具调用那一刻就亮，而不是等下一拍专用模型接手（本步也还没有
-	 * 「下一拍换模型」这回事，但两边的时机口径现在就对齐，第 2 步不用再改这里）。
+	 * 进入那一拍照它算——标识在工具调用那一刻就亮，专用模型从**下一拍**起接手。
 	 */
 	const nsfwChannel = (state: NsfwState): boolean => state.active || state.pendingEnter;
+
+	const sameSelection = (a: ModelSelection, b: ModelSelection): boolean =>
+		a.provider === b.provider && a.model === b.model;
+
+	/**
+	 * 这条会话当下的模型选择（下一次请求会用哪一个）。
+	 *
+	 * 走投影那条公开读：`modelSelection.next` 是「下一次请求该用的」，它为空时回落 `lastUsed`
+	 * （宿主刚建会话、还没记过任何选择的情形）。
+	 */
+	const readSelection = async (sessionId: string): Promise<ModelSelection | null> => {
+		const baseline = await ctx.sessionController.projections(
+			{ sessionId: sessionId as never },
+			new AbortController().signal,
+		);
+		const folded = baseline?.values.modelSelection;
+		return folded?.next ?? folded?.lastUsed ?? null;
+	};
+
+	/**
+	 * 换模型：走公开的 `selectModel`（GUI 里手动换模型也是这一条），它校验、落事件、让下一次装配生效。
+	 *
+	 * 失败只告警不抛：轮边界不是炸掉一拍的地方——模型没换成，通道照旧（这一段用主模型演完）。
+	 */
+	const selectModel = async (sessionId: string, selection: ModelSelection): Promise<void> => {
+		try {
+			await ctx.sessionController.selectModel({ sessionId: sessionId as never, ...selection });
+		} catch (error) {
+			ctx.logger.warn(
+				`[dsh-aivn] 限制级通道换模型失败（${selection.provider}/${selection.model}）：${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	};
+
+	/**
+	 * 本剧目配的限制级模型 → DSH 的模型选择（provider + model + 思考档）。
+	 *
+	 * `play.json` 那一格是**一个模型 id**（服务端读的是同一个字段）；DSH 的选择要 provider 与 model
+	 * 成对，所以两种写法都收：`provider/model` 直接拆，光一个 id 就去各 provider 的目录里找。
+	 * 找不到返回 `null`——通道照旧成立，只是继续用主模型（与服务端没配 `nsfwModel` 时的行为一致），
+	 * 但要**出声**：不然用户配了模型却没生效，只能从「怎么没换」里猜。
+	 */
+	const resolveNsfwPlan = async (sessionId: string): Promise<ModelSelection | null> => {
+		const configured = loadPlaySync(sessionWorkspace(ctx, sessionId))?.config.agents?.playwriter;
+		const model = (configured?.nsfwModel ?? '').trim();
+		if (model === '') return null;
+		const thinking: ThinkingLevel | undefined = configured?.nsfwThinking;
+		// `default` 等于不指定：清掉继承来的档位，跟着这个模型自己的默认走（见 installModelSelection）。
+		const effort = thinking && thinking !== 'default' ? thinking : undefined;
+		const slash = model.indexOf('/');
+		if (slash > 0) {
+			const selection: ModelSelection = { provider: model.slice(0, slash), model: model.slice(slash + 1) };
+			return effort ? { ...selection, reasoningEffort: effort as never } : selection;
+		}
+		for (const provider of ctx.llm.listProviders()) {
+			const models = await ctx.llm.listModels(provider.id);
+			if (models.some((entry) => entry.id === model)) {
+				const selection: ModelSelection = { provider: provider.id, model };
+				return effort ? { ...selection, reasoningEffort: effort as never } : selection;
+			}
+		}
+		ctx.logger.warn(
+			`[dsh-aivn] 限制级模型「${model}」在已注册的 provider 里找不到，这一段仍用主模型（写成 provider/model 可消歧）`,
+		);
+		return null;
+	};
+
+	/**
+	 * 换到限制级专用模型，并把「当下的位置」记下来当退出时的回路。
+	 *
+	 * 在两拍之间调（这一拍收完、下一拍还没开笔），所以异步的 `selectModel` 有整个间隔可用，
+	 * 不会跟下一拍的提示词装配抢时间。记的是**换之前**读到的那一个：那一拍跑在主模型上。
+	 * 已经在限制级模型上就不再记（重建会再调一次）。
+	 */
+	const switchToNsfw = async (sessionId: string, state: NsfwState): Promise<void> => {
+		if (state.plan === undefined) state.plan = await resolveNsfwPlan(sessionId);
+		if (!state.plan) return;
+		const current = await readSelection(sessionId);
+		if (current && sameSelection(current, state.plan)) return;
+		// `remembered` 可能已经由重建那条路填好了（见 `noteNsfw`）——那是从会话日志里读出来的
+		// 真正的主模型，比这里读到的「现值」更可信，别覆盖它。
+		if (current && !state.remembered) state.remembered = current;
+		await selectModel(sessionId, state.plan);
+	};
+
+	/** 退出限制级：切回进来的位置（记不到就不动——宁可留在限制级模型上，也不猜一个）。 */
+	const restoreModel = async (sessionId: string, state: NsfwState): Promise<void> => {
+		const remembered = state.remembered;
+		state.remembered = undefined;
+		if (remembered) await selectModel(sessionId, remembered);
+	};
 
 	/** 通道值一变就推一帧。值没变不发：重复调用、进入兑现那一步都不该再推一次。 */
 	const signalNsfw = (sessionId: string, state: NsfwState): void => {
@@ -109,8 +199,11 @@ export function installStageTap(
 	 */
 	const nsfwHost: NsfwHost = {
 		active: (sessionId) => nsfwChannel(nsfwOf(sessionId)),
-		enter: (sessionId) => {
+		enter: async (sessionId) => {
 			const state = nsfwOf(sessionId);
+			// 解析放在这里而不是轮间：`listModels` 要问各 provider 的目录，早一步问掉，
+			// 两拍之间那次切换就只剩「读现值 + 写新值」。
+			if (state.plan === undefined) state.plan = await resolveNsfwPlan(sessionId);
 			state.pendingEnter = true;
 			signalNsfw(sessionId, state);
 		},
@@ -211,11 +304,17 @@ export function installStageTap(
 					state.pendingEnter = false;
 					state.active = true;
 				}
-			} else if (state.pendingExit) {
-				state.active = false;
-				state.pendingEnter = false;
-				state.pendingExit = false;
-				signalNsfw(sessionId, state);
+			} else {
+				// 两拍之间：这一拍收完、下一拍还没开笔。换模型的事放在这里做（见 `switchToNsfw`）。
+				// 同一拍里既进又退（模型自己写反了）就不换：这个通道从头到尾没真开过。
+				if (state.pendingEnter && !state.pendingExit && !state.active) void switchToNsfw(sessionId, state);
+				if (state.pendingExit) {
+					state.active = false;
+					state.pendingEnter = false;
+					state.pendingExit = false;
+					void restoreModel(sessionId, state);
+					signalNsfw(sessionId, state);
+				}
 			}
 		}
 		hub.appendBeat(sessionId, payload.status === 'running' ? 'start' : 'end');
@@ -327,13 +426,19 @@ export function installStageTap(
 		noteEvent: (sessionId, event) => trackEvent(sessionId, event, false),
 		// 重建重推出的限制级态：覆盖现值并**无条件推一帧**——重建把帧流整个换掉了（`hub.reset`），
 		// 之后才连上来的舞台只看得到新帧流，漏掉这一帧它永远不知道通道开着。
-		noteNsfw: (sessionId, active) => {
+		noteNsfw: (sessionId, active, main) => {
 			const state = nsfwOf(sessionId);
+			// 段内重建：把日志里读到的主模型记成回路——冷开时宿主给的是主模型还是限制级模型
+			// 取决于日志里最后一条 `model/selection`，光看「现值」认不出来（见 `stage-log`）。
+			if (active && main) state.remembered = main;
 			state.active = active;
 			state.pendingEnter = false;
 			state.pendingExit = false;
 			state.signalled = active;
 			hub.appendNsfw(sessionId, active);
+			// 段内重建：冷开/分支进来的会话默认是主模型，限制级这一段得换回去（解析是异步的，
+			// 不挡重建——帧已经推了，模型下一次装配前到位即可）。
+			if (active) void switchToNsfw(sessionId, state);
 		},
 		// 重建开始前清掉上一遍推出来的终局标记：回退掉结局那一拍后不再有 ending 事件，
 		// 终局据此正确退出；旧标记不清的话它会一直挂着，把玩家永久锁在门外。
@@ -357,7 +462,7 @@ export function installStageTap(
  * 通道值读的是两者之或（`nsfwChannel`）。
  */
 interface NsfwState {
-	/** 限制级模型接管中（进入的下一拍兑现；本步还没有换模型，先把这个时机留着）。 */
+	/** 限制级模型接管中（进入的下一拍兑现）。 */
 	active: boolean;
 	/** 本拍刚请求进入：通道值当场为真。 */
 	pendingEnter: boolean;
@@ -365,6 +470,15 @@ interface NsfwState {
 	pendingExit: boolean;
 	/** 上一次推给客户端的通道值（值没变不重复推）。 */
 	signalled: boolean;
+	/**
+	 * 本剧目配的限制级模型解析出来的选择。
+	 *
+	 * 三态：`undefined` = 还没解析过；`null` = 解析过、这个 id 在已注册的 provider 里找不到
+	 * （通道照旧，模型不换）；有值 = 进入时切到它。
+	 */
+	plan?: ModelSelection | null;
+	/** 进来的位置：退出时切回它（记不到就不动，见 `restoreModel`）。 */
+	remembered?: ModelSelection;
 }
 
 export interface StageTap {
@@ -383,7 +497,7 @@ export interface StageTap {
 	/** 重建期间重放一帧 IR：只重推终局状态，不落账。 */
 	noteEvent(sessionId: string, event: StageEvent): void;
 	/** 重建从会话日志里重推出的限制级态（冷开 / 分支 / 回看之后角标与打标跟着回来）。 */
-	noteNsfw(sessionId: string, active: boolean): void;
+	noteNsfw(sessionId: string, active: boolean, main?: ModelSelection): void;
 }
 
 /**

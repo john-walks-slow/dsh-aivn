@@ -35,7 +35,7 @@ export function createEnterNsfwTool(ctx: PlayContext) {
 		output: textOutput,
 		async execute(args) {
 			if (ctx.nsfw.active()) return '当前已经处于限制级剧情通道中，无需重复调用 enter_nsfw。';
-			ctx.nsfw.enter(args.reason);
+			await ctx.nsfw.enter(args.reason);
 			return '已请求进入限制级（NSFW）剧情通道。请写完本轮正文并在末行写下停止点标签，下一轮起将由限制级专用模型与专属提示词接管展开细腻描写。';
 		},
 	});
