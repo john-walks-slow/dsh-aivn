@@ -141,10 +141,12 @@ Ultra-fine whisper-light colored outlines, clean translucent coloring, no thick 
   - **一键（`generate_asset`）**：出图 +（立绘）自动抠底 + 登记，一次到位。给 `kind`（background / cg / sprite）；
     立绘再给 `spriteId` + `variant`，画幅跟着 `framing`（full / half / square）走。回执给最终路径，这一轮就能引用。
     剧目后缀（色键底、身份锁、差分自动垫 neutral）只在**这条路**里由引擎自动拼——prompt 里别再写抠底与画幅。
+    底色默认**纯绿 `#00FF00`**；**主体自己是绿色系（绿发 / 绿衣 / 绿瞳）时给 `keyColor: "magenta"`** 换成纯品红
+    `#FF00FF`——抠底是全局色键，底色与角色撞色会把角色身上那片绿色一起抠掉。别的情况不用给，也不要自己在 prompt 里写底色。
   - **原子三件套（要挑候选 / 图来自别处 / 要重抠）**：
     - `generate_image`：**纯生成**，只把 prompt 变成一张候选图（回执给图片路径与预览）。它不绑剧目目标、
-      不做色键底、不抠底——**通用出图，画幅用 `aspectRatio`（默认 16:9）**。要立绘就在这里自己把纯色底、
-      平涂、景别写进 prompt。
+      不做色键底、不抠底——**通用出图，画幅用 `aspectRatio`（默认 16:9）**。要立绘就在这里自己把纯色底
+      （默认纯绿 `#00FF00`；绿色系主体换纯品红 `#FF00FF`）、平涂、景别写进 prompt。
     - `cut`：把纯色底候选抠成透明 PNG（`source` + 可选调参）；抠脏了对**同一张**重调再跑，别重新出图。
     - `import_asset`：把一张图登记成素材（`source` 给剧目内路径 / 网址，`kind` 必填；立绘登记**已抠好的透明 PNG**，
       再给 `spriteId` / `variant` / `framing` / `stature` / `description`；`original` 留抠底前原片以便重抠）。

@@ -9,7 +9,7 @@
  *   只是七濑长成了澪。
  */
 import { DEFAULT_SPRITE_FRAMING, SPRITE_FRAMING_SHOT, type SpriteFraming } from '@aivn/core';
-import type { AssetSpec, ResolvedReference } from './types';
+import type { AssetSpec, KeyBackgroundColor, ResolvedReference } from './types';
 
 /**
  * 立绘后缀：**只写与「主体是人还是物」无关的构图与画风约束**，不描述任何人物特征——
@@ -23,12 +23,35 @@ const STYLE_TAIL =
 	'. Japanese anime style 2D illustration, flat cel shading with clean crisp lineart, NOT a 3D render, ' +
 	'no 3D CGI look. ';
 
-/** 色键底：只认一种颜色，任何渐变、投影、纹理都是抠不干净的白边。 */
-const KEY_BACKGROUND =
-	'Background is one single flat solid colour used as a chroma key, chosen to appear nowhere on the ' +
-	'character themselves; always use pure green #00FF00, unless the character\'s own colouring is ' +
-	'greenish (green hair, green clothing, green eyes), in which case use pure magenta #FF00FF instead. ' +
-	'No gradient, no shadow, no texture, no decoration, no text.';
+/** 立绘色键底的两种选色（顺序即工具 schema 的 enum）。 */
+export const KEY_BACKGROUND_COLORS = ['green', 'magenta'] as const;
+/** 不给 `keyColor` 时的底色：纯绿。它对深色描边、暖色皮肤、深发色都是最远的色距。 */
+export const DEFAULT_KEY_COLOR: KeyBackgroundColor = 'green';
+
+/** 色键色的英文措辞（拼进提示词的就是它）。 */
+const KEY_BACKGROUND_WORD: Record<KeyBackgroundColor, string> = {
+	green: 'pure green #00FF00',
+	magenta: 'pure magenta #FF00FF',
+};
+
+export function isKeyBackgroundColor(value: unknown): value is KeyBackgroundColor {
+	return (KEY_BACKGROUND_COLORS as readonly unknown[]).includes(value);
+}
+
+/**
+ * 色键底：只认一种颜色，任何渐变、投影、纹理都是抠不干净的白边。
+ *
+ * **颜色是拼进来的，不是让模型挑的**：句子里的色值是调用方（`keyColor`）定的死值，
+ * 不留「除非角色是绿色系就换一个」这种要模型自己判断的分支——那种分支下模型会把
+ * 绿瞳、绿配饰也算成绿色系，底色就变得不可预期。
+ */
+function keyBackground(color: KeyBackgroundColor | undefined): string {
+	return (
+		'Background is one single flat solid colour used as a chroma key: ' +
+		`${KEY_BACKGROUND_WORD[color ?? DEFAULT_KEY_COLOR]}, and that is the only colour behind and around the ` +
+		'character. No gradient, no shadow, no texture, no decoration, no text. '
+	);
+}
 
 /**
  * 留白约束：人形专属（非人走 `square`，不拼它——给猫套上「手臂与躯干不能留窄缝」只会得到人形猫）。
@@ -90,7 +113,7 @@ export function suffixFor(spec: AssetSpec, prompt: string, sent: ResolvedReferen
 			: `${prompt}. ${genericReferenceSuffix(sent)}`;
 	}
 	if (spec.variant === 'neutral') {
-		const base = `${prompt}, ${neutralSuffix(spec.framing)}`;
+		const base = `${prompt}, ${neutralSuffix(spec.framing, spec.keyColor)}`;
 		// 定妆照垫的是**外部**图（用户给的既有角色图、原画）：底色与画风归构图段管，这一句只补身份。
 		return sent.length > 0 ? `${base} ${neutralReferenceTail(spec.framing)}` : base;
 	}
@@ -145,16 +168,16 @@ function neutralReferenceTail(framing: SpriteFraming | undefined): string {
  * 出图与舞台声明对不上，站位又得重新量。`framing` 自己决定的是画幅（像素）与舞台摆位（CSS），
  * 两者都传不进提示词——模型唯一能知道「画到哪儿」的通道就是措辞。
  */
-function humanSuffix(framing: SpriteFraming | undefined): string {
-	return `${SPRITE_FRAMING_SHOT[framing ?? DEFAULT_SPRITE_FRAMING]}${POSE_TAIL}${STYLE_TAIL}${KEY_BACKGROUND}`;
+function humanSuffix(framing: SpriteFraming | undefined, keyColor: KeyBackgroundColor | undefined): string {
+	return `${SPRITE_FRAMING_SHOT[framing ?? DEFAULT_SPRITE_FRAMING]}${POSE_TAIL}${STYLE_TAIL}${keyBackground(keyColor)}`;
 }
 
 /** 定妆照后缀：`square` 是非人主体的唯一入口，人形与非人的差别只有留白那两句。 */
-function neutralSuffix(framing: SpriteFraming | undefined): string {
+function neutralSuffix(framing: SpriteFraming | undefined, keyColor: KeyBackgroundColor | undefined): string {
 	const f = framing ?? DEFAULT_SPRITE_FRAMING;
 	return f === 'square'
-		? `${SPRITE_FRAMING_SHOT[f]}${PROP_TAIL}${STYLE_TAIL}${KEY_BACKGROUND}`
-		: humanSuffix(f);
+		? `${SPRITE_FRAMING_SHOT[f]}${PROP_TAIL}${STYLE_TAIL}${keyBackground(keyColor)}`
+		: humanSuffix(f, keyColor);
 }
 
 /**

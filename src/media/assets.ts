@@ -38,6 +38,7 @@ export type {
 	AssetTarget,
 	DraftedAsset,
 	GeneratedAsset,
+	KeyBackgroundColor,
 	LedgerEntry,
 	LedgerKind,
 	PlayAssetsOptions,

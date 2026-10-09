@@ -13,7 +13,8 @@
  */
 import { COMMON_SPRITE_VARIANTS } from '@aivn/core';
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
-import type { AssetTarget, DraftedAsset, GeneratedAsset } from './assets';
+import { KEY_BACKGROUND_COLORS } from './prompts';
+import type { AssetTarget, DraftedAsset, GeneratedAsset, KeyBackgroundColor } from './assets';
 
 /** 参数名与语义逐条对齐 AIVN 的 `generateImageParams`（去掉已下线的 `referenceCharacters` 别名）。 */
 export const IMAGE_PARAMETERS = {
@@ -63,6 +64,15 @@ export const IMAGE_PARAMETERS = {
 			'立绘体量（只对 kind=sprite 生效）：small 猫与小道具 / normal 与人同高 / large 高一档 / huge 机甲巨物。' +
 			'它只管台上多大，与取景是两件事；不给按 normal。',
 	},
+	keyColor: {
+		type: 'string',
+		enum: [...KEY_BACKGROUND_COLORS],
+		description:
+			'立绘的色键底色（只对 kind=sprite 生效）：green 纯绿 #00FF00（默认）/ magenta 纯品红 #FF00FF。' +
+			'**主体自己就是绿色系（绿发 / 绿衣 / 绿瞳）时必须显式给 magenta**——底色与角色配色撞上，' +
+			'色键抠底会把角色身上那片绿色也一起抠掉。别的情况不用给，也不要在 prompt 里自己写底色。' +
+			'这一项只决定定妆照（neutral）的底色；差分跟着垫图的底色走。',
+	},
 	title: {
 		type: 'string',
 		description: '立绘标题（只对 kind=sprite 生效）：没有角色卡时，舞台名牌显示它。',
@@ -94,7 +104,8 @@ export const PROMPT_RULES = [
 	'- **姿势、机位、景别都要显式写**：只说「她站在天台上」出来是对称站立的正面像；要写清机位（平视/俯视/仰视/侧身回眸）、',
 	'  动作（坐/走/倚靠/回头）与景别（full body / medium shot / close-up）。不写景别，袜子鞋子这类细节直接出框。',
 	'- 立绘的抠底构图与画风后缀（单一纯色底、平涂、哪里要留白、景别）由引擎自动拼在 prompt 末尾，别重复也别改写；',
-	'  主体配色与默认的纯绿底撞色时，才在 prompt 里点名换一个纯色底。背景与插图没有这层后缀，构图要自己写。',
+	'  底色默认纯绿，**主体自己是绿色系（绿发 / 绿衣 / 绿瞳）时用 `keyColor: "magenta"` 换纯品红**——',
+	'  撞色的后果是角色身上那片绿色被一起抠掉；**不要**自己在 prompt 里写底色。背景与插图没有这层后缀，构图要自己写。',
 ].join('\n');
 
 /** 垫图规则（两个角色都拿得到 `references`，所以它属于共享契约）。 */
@@ -121,6 +132,7 @@ export interface ImageArgs {
 	aspectRatio?: '16:9' | '3:4' | '1:1' | '9:16' | '4:3';
 	stature?: 'small' | 'normal' | 'large' | 'huge';
 	title?: string;
+	keyColor?: KeyBackgroundColor;
 	style?: string;
 	prompt: string;
 }
@@ -137,6 +149,7 @@ export function toTarget(args: ImageArgs): { target: AssetTarget; prompt: string
 			...(args.variant?.trim() ? { variant: args.variant.trim() } : {}),
 			...(args.framing ? { framing: args.framing } : {}),
 			...(args.stature ? { stature: args.stature } : {}),
+			...(args.keyColor ? { keyColor: args.keyColor } : {}),
 			...(args.title?.trim() ? { title: args.title.trim() } : {}),
 			...(args.references?.length ? { references: args.references } : {}),
 		},

@@ -90,6 +90,8 @@ export async function ensureNeutral(
 			variant: NEUTRAL,
 			framing,
 			...(spec.stature ? { stature: spec.stature } : {}),
+			// 顺手补的这张定妆照跟本次调用同一个底色：底色是**主体级**的选择，差分只是跟着垫图走。
+			...(spec.keyColor ? { keyColor: spec.keyColor } : {}),
 			...(spec.title ? { title: spec.title } : {}),
 		},
 		`${NEUTRAL_LEAD[framing]} ${prompt}`,

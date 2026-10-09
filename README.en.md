@@ -326,12 +326,17 @@ editing: it reports the ones that will be dropped.
 | `aivn-playwriter` | playwright | The one that writes Stage DSL live; its output is piped into the stage |
 | `aivn-stagehand` | stage-hand assistant | Preps material: premise, character cards, creative guidelines, voice picking, image generation and committing, BGM, research |
 
-Both presets have the **same entries**: instruction-file discovery (`AGENTS.md`) + persona
-(that prompt file) + file tools + file search + the skill library (bundled `skills/`, see below)
-+ a `tool-bash` row that stays off unless you set `shell: true`. **The tool surface is identical
-too** (see "Agent tools"); the only differences are persona, injected context, and the stage
-pipeline. **Neither preset lists a `dsh-aivn` entry** — the host already loads the plugin, and
-another entry would install the routes and event subscriptions twice.
+Both presets have the **same entries**: persona (that prompt file) + file tools + file search
++ a **private** skill library (bundled `skills/`, see below) + a `tool-bash` row that stays off
+unless you set `shell: true`. **The tool surface is identical too** (see "Agent tools"); the only
+differences are persona, injected context, and the stage pipeline. **Neither preset lists a
+`dsh-aivn` entry** — the host already loads the plugin, and another entry would install the routes
+and event subscriptions twice.
+
+Neither preset sees the host's **skills or instructions**: no `dsh-agent-instructions` row, so
+neither `$DSH_HOME/AGENTS.md` nor a workspace `AGENTS.md` reaches the prompt (play context is
+injected entirely by the A-block); and the skill library lives in its own `isolate` realm, so
+skills from host rows or third-party plugins never leak into the catalog.
 
 Only sessions on the playwright preset enter the stage pipeline. Nothing the stage-hand assistant
 says goes on stage.
@@ -347,9 +352,10 @@ The plugin ships three how-to references inside the package (`skills/`), mounted
 | `aivn-audio` | Where to find free BGM / SFX, which licences allow commercial use, source picks for six BGM moods and common SFX categories, redistribution and AI-training red lines, and how to write prompts when a music backend is wired up |
 
 Only names and one-line descriptions go into the system prompt; the model loads the full text when
-one looks relevant — all three are long and should not be read every beat. `includeDefaultRoots: false`
-is deliberate: the dozens of host-ops skills installed on the machine have no business crowding
-these presets' catalog.
+one looks relevant — all three are long and should not be read every beat. The library is
+**private** (its own `isolate` realm plus `includeDefaultRoots: false`): neither the dozens of
+host-ops skills installed on the machine nor skills a third-party plugin registers in code have
+any business crowding these presets' catalog.
 
 **The how-to lives in the skill; the persona keeps only a one-line pointer**: edit `skills/*.md` to
 change a recipe (it takes effect immediately, no `lib/` rebuild) and the always-on prompt stays lean.
@@ -431,7 +437,7 @@ into `isConcurrencySafe` on the tool definition.
 | `generate_image` | image backend | **Pure generation**: a description → one **candidate image** (the receipt gives the file path and a preview); it binds no play target, does no cutout and no registration. Aspect via `aspectRatio` (default 16:9); `references` may hold subject ids / play-relative paths / http(s) URLs. To make it an asset, follow up with `cut` / `import_asset` (or just use `generate_asset`) |
 | `cut` | — | **Cutout**: a flat-key-colour image → a transparent PNG (writes the output only, **never touches the source**). `source` is a play-relative path; with no `output` it lands in the candidate area. Five knobs below (`tolerance` / `spill` / `edgeBand` / `keySmooth` / `solidResidual`). Run it before registering a sprite; if the edges are dirty, re-run it **on the same source** with different knobs. **Independent of the image backend** |
 | `import_asset` | — | **Registers** an image as a play asset: writes `assets/`, updates the asset sheet (presentation + description), records the ledger — **no cutout**. `source` is a play-relative path or an http(s) URL; placement is **always explicit** — `kind` (background / cg / sprite) is required, and for a sprite `spriteId` / `variant` / `framing` / `stature` / `title`. A sprite must be an **already-cut transparent PNG** (run `cut` first for external art); `original` keeps the pre-cutout source for re-cutting. **Independent of the image backend** |
-| `generate_asset` | image backend | **One-shot**: generate + (sprite) cutout + register in a single call, returning the final asset path. Same placement args as `import_asset` (`kind` + `name` / `spriteId` / `variant` / `framing` / `stature`). **Only this path** gets the automatic key-colour background, identity lock and variant-leaning-on-neutral; if the asset already exists it is skipped |
+| `generate_asset` | image backend | **One-shot**: generate + (sprite) cutout + register in a single call, returning the final asset path. Same placement args as `import_asset` (`kind` + `name` / `spriteId` / `variant` / `framing` / `stature`), plus `keyColor` for sprites (the key background colour, see below). **Only this path** gets the automatic key-colour background, identity lock and variant-leaning-on-neutral; if the asset already exists it is skipped |
 | `generate_bgm` | music backend | Generates one BGM track into `assets/bgm/`; it **waits** (~84 s). `name` is the id your script references as `<scene bgm="…">` |
 | `list_voices` | `tts.keys` | Searches the Fish voice catalog: builds a window from language / tags / title keywords, filters `gender` locally, sorts by likes and shows the top 25. The id you pick goes into the card's `voice` |
 | `web_search` | `search.keys` | Web search: one call returns results and page text together. For facts **outside** the play — the setting, cast and plot all live in the workspace files |
@@ -503,6 +509,13 @@ candidates and let the user pick" only works if the user can actually see them.
   derived from, and one closeup must not drag the whole subject's placement around.
 - **`stature`** (`small` / `normal` / `large` / `huge`) is only about how big the subject stands on
   stage, independent of framing: a mech is "full framing + huge", a cat is "square framing + small".
+- **`keyColor`** (`green` / `magenta`, default `green`) is the colour value the engine writes into the
+  neutral prompt: `green` = pure `#00FF00`, `magenta` = pure `#FF00FF`. **The colour is passed in
+  explicitly, never picked by the image model** — the cutout is a global chroma key (any pixel close
+  to the key colour counts as background), so a key that clashes with the character's own palette
+  takes that colour off the character too: **a green-coloured subject (green hair / clothing / eyes)
+  must be given `magenta`**. Otherwise leave it out, and never write the background colour yourself
+  in the prompt. It only decides the neutral take's background; variants follow their reference image.
 - **Cutout**: a sprite must be a transparent PNG. Through `generate_asset` the engine cuts it
   automatically (flat key colour, global key, per-pixel edge coverage solve — `src/media/cutout.ts`);
   on the atomic path, call `cut` after `generate_image` produces a candidate. When the edges are

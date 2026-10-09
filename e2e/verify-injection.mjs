@@ -90,6 +90,16 @@ function skillCatalog(events) {
 	return '';
 }
 
+/** 全部事件的可见文本，拼成一份——用来断言「某类消息一条都没进来」。 */
+function allText(events) {
+	return events
+		.map((event) => {
+			const content = event.data?.content ?? event.data?.message?.content ?? [];
+			return Array.isArray(content) ? content.map((block) => block.text ?? '').join('') : '';
+		})
+		.join('\n');
+}
+
 const fixture = seedPlay(WORKSPACE);
 const browser = await launch();
 try {
@@ -154,6 +164,23 @@ try {
 		'A13d',
 		['aivn-play-setup', 'aivn-visual-craft', 'aivn-audio'].every((name) => catalog.includes(name)),
 		'剧作家的技能清单里有三份 aivn-* 技能',
+	);
+	// 隔离（一）：预设不装 `dsh-agent-instructions`——`$DSH_HOME/AGENTS.md` 与工作区的
+	// `AGENTS.md` 都不该进这个会话。e2e 的工作区就是本仓库根，它自带一份 AGENTS.md，
+	// 装了那一行就一定会被读进来。三种文案（首注入 / 替换 / 空）都带 "workspace instruction"。
+	const everything = allText(sessionEvents(sessionDir));
+	check(
+		'A15',
+		!everything.includes('workspace instruction'),
+		'没有宿主的指令注入（全局与工作区的 AGENTS.md 都没进来）',
+	);
+	// 隔离（二）：技能库挂在自己的 `isolate` realm 里，清单里只有随包的那几份——
+	// 公开注册表会把全局层（宿主行、第三方插件注册的 runtime skill）并进每个 agent。
+	const listed = [...catalog.matchAll(/^- `([a-z0-9-]+)`:/gm)].map((match) => match[1]);
+	check(
+		'A16',
+		listed.length > 0 && listed.every((name) => name.startsWith('aivn-')),
+		`技能清单只有随包的 aivn-*（实际：${listed.join(', ') || '空'}）`,
 	);
 	// 生图：generate_image / generate_asset 跟着生图能力位；cut / import_asset 不门控，始终在。
 	const hasImage = tools.includes('generate_image');

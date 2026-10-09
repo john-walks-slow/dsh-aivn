@@ -386,10 +386,14 @@ voice: 短句，少用形容词
 | `aivn-playwriter` | 剧作家 | 实时写 Stage DSL 的那位；它的输出被接进舞台 |
 | `aivn-stagehand` | 搭台助手 | 备料：写设定、角色卡、创作口径、挑音色、出图与入库、配乐、查资料 |
 
-两个预设的行集**同构**：指令文件发现（`AGENTS.md`）+ persona（就是那份提示词）+ 文件工具 +
-文件检索 + 技能库（自带的 `skills/`，见下）+ 一行默认关的 `tool-bash`（`shell: true` 才真装上）。
+两个预设的行集**同构**：persona（就是那份提示词）+ 文件工具 + 文件检索 + 一份**私有**技能库
+（自带的 `skills/`，见下）+ 一行默认关的 `tool-bash`（`shell: true` 才真装上）。
 **工具面也完全一致**（见「Agent 工具」），角色差别只剩 persona、注入内容与舞台管线。
 **预设里不会再列一行 `dsh-aivn`**——宿主已经装了本插件，再来一行会把路由与事件订阅重复装一遍。
+
+两个预设都**不看宿主的技能与指令**：不装 `dsh-agent-instructions`，`$DSH_HOME/AGENTS.md` 与
+工作区的 `AGENTS.md` 都不进提示词（剧目上下文全由 A 区注入）；技能库挂在自己的 `isolate`
+realm 里，宿主行与第三方插件注册的全局技能都不会漏进清单。
 
 只有剧作家预设的会话会进舞台管线。搭台助手说什么都不上台。
 
@@ -404,7 +408,8 @@ voice: 短句，少用形容词
 | `aivn-audio` | 免费 BGM / 音效去哪里找、哪档授权能商用、六大场景与常见音效类别的选源、再分发与 AI 训练红线，以及配了音乐后端时用提示词出曲的写法 |
 
 清单进 system prompt（只列名字与一句话），模型觉得对上了才加载全文——三份都是长篇，不该每轮全读。
-`includeDefaultRoots: false` 是刻意的：宿主上那几十个本机运维技能不该挤进这两个预设的清单。
+技能库是**私有**的（挂在自己的 `isolate` realm 里，`includeDefaultRoots: false`）：宿主上那几十个
+本机运维技能、以及第三方插件代码里注册进来的技能，都不该挤进这两个预设的清单。
 
 **做法正文放在 skill，persona 只留一句指针**：改做法直接改 `skills/*.md`（改完即生效，不必重建
 `lib/`），常驻提示词也更瘦。能力位门控的那几章（缺图、配乐）保留在 persona——skill 清单不受能力位
@@ -468,7 +473,7 @@ DSH 的「在新对话中分支」与舞台重建（只重放助手文本）都�
 | `generate_image` | 生图后端 | **纯生成**：一段画面描述 → 一张**候选图**（回执给文件路径与预览），返回时**不绑定**任何剧目目标、不抠底、不登记。画幅用 `aspectRatio`（默认 16:9）；`references` 可垫主体 id / 剧目内路径 / http(s) 网址。落成素材另走 `cut` / `import_asset`（或直接 `generate_asset`） |
 | `cut` | — | **抠底**：纯色底的图 → 透明 PNG（只写输出，**不改源图**）。`source` 给剧目内相对路径，`output` 不给就写到候选区。五档调参见下（`tolerance` / `spill` / `edgeBand` / `keySmooth` / `solidResidual`）。立绘登记前先跑它；抠脏了就对着**同一张**源图重调再跑。**不依赖生图后端** |
 | `import_asset` | — | 把一张**图登记**成剧目素材：写 `assets/`、补素材表（呈现声明 + 描述）、记台账，**不抠底**。`source` 给剧目内相对路径或 http(s) 网址；落位**显式给**——`kind`（background / cg / sprite）必填，立绘再给 `spriteId` / `variant` / `framing` / `stature` / `title`。立绘要传**已抠好的透明 PNG**（外部来源先 `cut`）；`original` 可留抠底前原片以便重抠。**不依赖生图后端** |
-| `generate_asset` | 生图后端 | **一键**：出图 +（立绘）自动抠底 + 登记，一次完成，回执给最终素材路径。参数与 `import_asset` 的落位一致（`kind` + `name` / `spriteId` / `variant` / `framing` / `stature`）。**只有这条路**由引擎自动做色键底、身份锁、差分垫 neutral；同名素材已有则直接跳过 |
+| `generate_asset` | 生图后端 | **一键**：出图 +（立绘）自动抠底 + 登记，一次完成，回执给最终素材路径。参数与 `import_asset` 的落位一致（`kind` + `name` / `spriteId` / `variant` / `framing` / `stature`），立绘另收 `keyColor`（色键底色，见下）。**只有这条路**由引擎自动做色键底、身份锁、差分垫 neutral；同名素材已有则直接跳过 |
 | `generate_bgm` | 音乐后端 | 生成一首 BGM 落 `assets/bgm/`；**同步等待**（约 84 秒），`name` 就是剧本里 `<scene bgm="…">` 引用的 id |
 | `list_voices` | `tts.keys` | 查 Fish 音色库挑音色：按语言 / 标签 / 标题关键词取窗口，本地按 `gender` 筛，按热度排序出前 25 条。挑好的 id 填进角色卡的 `voice` |
 | `web_search` | `search.keys` | 联网检索：一次调用同时拿回结果与正文。只查剧目之外的事实——设定、角色、剧情都在工作区文件里 |
@@ -530,6 +535,11 @@ play/
   它是所有差分的垫图基准，一条 closeup 不该把整个主体的摆位带跑。
 - **体量 `stature`**（`small` / `normal` / `large` / `huge`）只管台上站多大，与取景是两件事：
   机甲是「全身取景 + 巨大」，猫是「方形取景 + 小」。
+- **色键底色 `keyColor`**（`green` / `magenta`，默认 `green`）是引擎拼进定妆照提示词的那个色值：
+  `green` 纯绿 `#00FF00`、`magenta` 纯品红 `#FF00FF`。**颜色是显式传的，不由生图模型自己挑**——
+  抠底是全局色键（离底色够近的像素一律算背景），所以底色一旦与角色配色撞上，角色身上那片颜色会被一起抠掉：
+  **主体自己是绿色系（绿发 / 绿衣 / 绿瞳）时必须给 `magenta`**，别的情况不用给，也不要在 prompt 里自己写底色。
+  这一项只决定定妆照（`neutral`）的底色；差分跟着垫图的底色走。
 - **抠底**：立绘必须是透明 PNG。走 `generate_asset` 时引擎自动抠（色键底 + 全局色键 + 边缘覆盖率
   反解，`src/media/cutout.ts`）；走原子路径时在 `generate_image` 出候选后调 `cut`。抠不干净时**不要重新出图**——
   重画出来是另一张画：对**同一张源图**重调 `cut` 的参数再跑（源图在 `media-cache/sprite-sources/<主体id>/`，

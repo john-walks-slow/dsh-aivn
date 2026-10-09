@@ -20,8 +20,9 @@ import {
 	type SpriteStature,
 } from '@aivn/core';
 import { characterNames, readManifest, resolveInPlay } from '../play/assets';
+import { KEY_BACKGROUND_COLORS, isKeyBackgroundColor } from './prompts';
 import { sniffImageMime } from './image';
-import type { AssetSpec, AssetTarget, ResolvedReference } from './types';
+import type { AssetSpec, AssetTarget, KeyBackgroundColor, ResolvedReference } from './types';
 import { fetchWebImage } from './web-image';
 
 /** 立绘的身份基准差分名：其它差分的垫图恒为它。 */
@@ -55,6 +56,7 @@ export async function resolve(dir: string, target: AssetTarget): Promise<AssetSp
 		const declared = { ...level, ...manifest[`${stem}/${variant}`] };
 		const framing = pickFraming(target.framing, declared.framing, `${stem} 的立绘取景`);
 		const stature = pickStature(target.stature, declared.stature, `${stem} 的立绘体量`);
+		const keyColor = pickKeyColor(target.keyColor, `${stem} 的色键底色`);
 		return {
 			kind: 'sprite',
 			kindPath: `sprites/${stem}`,
@@ -65,6 +67,7 @@ export async function resolve(dir: string, target: AssetTarget): Promise<AssetSp
 			framing,
 			baseFraming: framingOf(level.framing) ?? DEFAULT_SPRITE_FRAMING,
 			stature,
+			...(keyColor ? { keyColor } : {}),
 			...(target.title?.trim() ? { title: target.title.trim() } : {}),
 		};
 	}
@@ -187,6 +190,15 @@ function pickStature(value: unknown, declared: unknown, label: string): SpriteSt
 	if (value !== undefined && !isSpriteStature(value)) throw new Error(`${label}「${String(value)}」非法`);
 	const fromDeclared = statureOf(declared);
 	return (value as SpriteStature | undefined) ?? fromDeclared ?? DEFAULT_SPRITE_STATURE;
+}
+
+/** 色键底色没有素材表声明这一层（它只影响这一次出图的排版）：不给就是不指定，由 `prompts.ts` 取默认纯绿。 */
+function pickKeyColor(value: unknown, label: string): KeyBackgroundColor | undefined {
+	if (value === undefined) return undefined;
+	if (!isKeyBackgroundColor(value)) {
+		throw new Error(`${label}「${String(value)}」非法：只有 ${KEY_BACKGROUND_COLORS.join(' / ')}`);
+	}
+	return value;
 }
 
 function mimeOf(path: string): string {

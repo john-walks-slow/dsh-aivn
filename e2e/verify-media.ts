@@ -371,6 +371,39 @@ check(
 	'差分带身份锁 + 景别 + 与定妆照一字不差的画风要求',
 );
 
+/* ── 11b. 色键底：颜色是显式传进来的，不是让模型在提示词里自己挑 ── */
+
+const magentaPrompt = await promptOf(() =>
+	assets.draft(
+		{ kind: 'sprite', spriteId: 'probe_maple', framing: 'full', keyColor: 'magenta' },
+		'a girl with green twin tails',
+	),
+);
+check(
+	'M42',
+	magentaPrompt.includes('#FF00FF') && !magentaPrompt.includes('#00FF00'),
+	'keyColor=magenta 出纯品红底（绿色系主体的口子）',
+);
+
+let badKeyColor = '';
+try {
+	await assets.draft({ kind: 'sprite', spriteId: 'probe_maple', keyColor: 'blue' as never }, 'a girl');
+} catch (error) {
+	badKeyColor = error instanceof Error ? error.message : String(error);
+}
+check('M43', badKeyColor.includes('色键底色'), `非法 keyColor 当场被拒（${badKeyColor.slice(0, 40)}…）`);
+
+// 差分路径上顺手补的定妆照是**所有差分的垫图基准**：底色不跟着传，补出来就是另一套底色。
+await promptOf(() =>
+	assets.generate({ kind: 'sprite', spriteId: 'probe_autoneutral', variant: 'smile', keyColor: 'magenta' }, 'a smile'),
+);
+const autoNeutralPrompt = seen.find((req) => req.prompt.includes('calm neutral-expression'))?.prompt ?? '';
+check(
+	'M44',
+	autoNeutralPrompt.includes('#FF00FF'),
+	'差分点名品红底时，顺手补的定妆照用同一个底色',
+);
+
 /* ── 12. 垫图的编号锚点（多人同框时「第几张是谁」）── */
 
 await mkdir(join(dir, 'characters'), { recursive: true });

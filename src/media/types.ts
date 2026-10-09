@@ -17,6 +17,14 @@ export type AssetKind = 'background' | 'cg' | 'sprite';
 /** 台账的键（`assets/generated.json`）按类目加一位音乐。 */
 export type LedgerKind = AssetKind | 'bgm';
 
+/**
+ * 立绘的色键底色：纯绿（默认）或纯品红（主体自己就是绿色系时）。
+ *
+ * **由调用方显式给**，不由引擎猜：底色与角色配色撞上，色键抠底会把角色身上那种颜色一起抠掉，
+ * 而「算不算绿色系」是个判断，不该藏在提示词的措辞里让生图模型自己决定。
+ */
+export type KeyBackgroundColor = 'green' | 'magenta';
+
 /** 一张要出的图：类目 + 身份（背景/插图给 id，立绘给主体与差分）+ 这次的参数。 */
 export interface AssetTarget {
 	kind: AssetKind;
@@ -32,6 +40,8 @@ export interface AssetTarget {
 	stature?: SpriteStature;
 	/** 立绘级标题（无卡主体靠它出名牌）。 */
 	title?: string;
+	/** 立绘的色键底色：不给按纯绿。只影响定妆照（`neutral`）那条后缀，差分跟着垫图的底色走。 */
+	keyColor?: KeyBackgroundColor;
 	/** 垫图：主体 id（自动用它的 neutral 立绘）、剧目内相对路径，或 http(s) 网址。 */
 	references?: string[];
 	/** 本次出图的模型 / 尺寸：不给跟剧目 `play.json` 的 `image` 段，再不给跟部署配置。 */
@@ -95,6 +105,8 @@ export interface AssetSpec {
 	baseFraming?: SpriteFraming;
 	stature?: SpriteStature;
 	title?: string;
+	/** 这次的色键底色（解析结果，出提示词后缀用）。 */
+	keyColor?: KeyBackgroundColor;
 }
 
 /** 一张解析好的垫图：字节 + 它的**显示名**（主体 id 才有；路径与网址是 `null`）。 */

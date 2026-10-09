@@ -5,10 +5,15 @@
  * 同一套写法，只是写在代码里。**绝对不要在本预设里再列一行 `dsh-aivn`**：宿主已经装了本插件，
  * 预设里再来一行会重复装一遍路由与事件订阅（它不在行的清单里，靠的是 profile 的 bundle patch）。
  *
- * 行集：指令文件发现 + persona + 文件工具；**两个预设都装技能库（自带的 `skills/`）与一行
- * 默认关的 shell**——剧作家单飞时也要会备料（画风、图单、选源），技能库是它按需查的做法速查。
+ * 行集：persona + 文件工具 + 一行默认关的 shell + 一份**私有**技能库。两个预设的行集同构——
+ * 剧作家单飞时也要会备料（画风、图单、选源），技能库是它按需查的做法速查。
+ *
+ * **这两个预设不看宿主的 skill 与指令**：
+ * - 故意不装 `@deepseek-ai/dsh-agent-instructions`：剧目上下文全由 A 区注入，
+ *   `$DSH_HOME/AGENTS.md`（整台机器的运维通例）与工作区的 `AGENTS.md` 都是噪音，
+ *   而剧目目录常常就落在某个仓库里，装了这一行就一定会把宿主的开发指引塞给剧作家。
+ * - 技能库挂在 `isolate` realm 里（见 {@link skillRows}）：不隔离就一定会漏进全局层的技能。
  */
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Context } from '@deepseek-ai/cordis';
@@ -17,18 +22,11 @@ import { PLAYWRITER_PRESET, STAGEHAND_PRESET } from '../session';
 import { stagehandStatic } from '../stagehand/prompt';
 import { PLAYWRITER_PROMPT } from './prompt';
 
-/** 与 dev 预设同一个预算：一次注入的指令文本上限。 */
-const INSTRUCTION_BYTES = 65_536;
-
-/** 用户级指令所在的家目录（与 `@deepseek-ai/dsh-agent-instructions` 的默认值同一个口径）。 */
-const DSH_HOME = process.env.DSH_HOME ?? join(homedir(), '.dsh');
-
 /**
  * 插件自带的技能库目录（`<package>/skills`）。
  *
- * 宿主半边是构建产物 `lib/index.js`，所以从它往上退一层就是包根。`includeDefaultRoots: false`
- * 是刻意的：技能清单直接进 system prompt，把宿主上那几十个本机运维技能一起塞给 Agent
- * 只会淹掉这两份剧目做法（AIVN 的工坊 likewise 只看得到随包的这几份）。
+ * 宿主半边是构建产物 `lib/index.js`，所以从它往上退一层就是包根。技能清单直接进 system prompt，
+ * 把宿主上那几十个本机运维技能一起塞给 Agent 只会淹掉随包的这几份剧目做法。
  */
 const SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'skills');
 
@@ -44,15 +42,6 @@ type PresetPlugin = PresetDefinition['plugins'][number];
 
 function rows(prompt: string, opts: { bash?: boolean; skills?: boolean } = {}): PresetDefinition['plugins'] {
 	const plugins: PresetPlugin[] = [
-		{
-			id: 'instructions',
-			name: '@deepseek-ai/dsh-agent-instructions',
-			config: {
-				dshHome: DSH_HOME,
-				maxBytes: INSTRUCTION_BYTES,
-				instructionFileCandidates: ['AGENTS.md'],
-			},
-		},
 		{ id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: prompt } },
 	];
 	if (opts.bash === true) plugins.push({ id: 'tool-bash', name: '@deepseek-ai/dsh-tool-bash' });
@@ -66,18 +55,39 @@ function rows(prompt: string, opts: { bash?: boolean; skills?: boolean } = {}): 
 			config: { sampleOverCapGlobResults: false },
 		},
 	);
-	if (opts.skills === true) {
-		plugins.push(
+	if (opts.skills === true) plugins.push(skillRows());
+	return plugins;
+}
+
+/**
+ * 私有技能库：注册表 + 文件系统 provider + `skill` 工具，三者同处一个 `isolate` realm。
+ *
+ * 为什么非隔离不可：公开的技能注册表会把**全局层**并进每个 agent 的目录——宿主行与
+ * 第三方插件（`ctx.skills.registerProvider`）注册的 runtime skill 都落在那里，预设层只能
+ * 同名覆盖、删不掉。不隔离时 `includeDefaultRoots: false` 只挡住了「根」，挡不住那些
+ * 代码里注册进来的技能。把 `dsh-skill` 挂进 realm 后预设拿到一份私有注册表，
+ * `skill` 工具与浏览器侧（`serviceForAgent`）都按 realm 找到它，目录里只剩随包的做法。
+ *
+ * `includeDefaultRoots: false` 是这一层里的第二道：排掉私有注册表的项目/用户/bundled 根，
+ * 只留随包的 `skills/`。
+ */
+function skillRows(): PresetPlugin {
+	return {
+		id: 'skills',
+		name: 'cordis:group',
+		group: true,
+		isolate: { skills: true },
+		config: [
 			// 提供者在前、工具行在后：工具要往已知的技能源里查。
+			{ id: 'skill', name: '@deepseek-ai/dsh-skill' },
 			{
 				id: 'skill-filesystem',
 				name: '@deepseek-ai/dsh-skill-filesystem',
 				config: { includeDefaultRoots: false, customSkillDirs: [SKILLS_DIR] },
 			},
 			{ id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
-		);
-	}
-	return plugins;
+		],
+	};
 }
 
 function playwriterDefinition(shell: boolean): PresetDefinition {

@@ -69,6 +69,13 @@ agent 提示词分三层，**每一类知识只有一个家**。改任何提示�
 - **数据渲染模板**（读盘→文本）→ `src/play/play-context.ts` / `src/stagehand/context.ts` / `src/play/craft.ts`。
 - persona 里出现工具名时只描述「何时用」，参数细节归 DESCRIPTION。
 
+**预设行集**：两个预设共用一份 `rows()`（`src/playwriter/preset.ts`），其中两条隔离是刻意的，
+别顺手「简化」——技能库那三行（`dsh-skill` / `skill-filesystem` / `tool-skill`）必须留在
+`isolate: { skills: true }` 的组里：`dsh-skill` 每次读取都无条件并入自身注册表的 global layer，
+脱离 realm 就会把宿主全局技能（宿主行、第三方插件用 `ctx.skills.registerProvider` 注册的
+runtime skill）漏进这两个预设的清单；`dsh-agent-instructions` 一行**不装**，所以宿主与工作区的
+`AGENTS.md` 都不进剧作家/搭台助手的上下文。e2e 的 `verify-injection.mjs` A15 / A16 盯着这两条。
+
 **代码里的提示词位置**：
 
 | 提示词 | 文件 | 注入点 | 门控 |
