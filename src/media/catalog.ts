@@ -6,53 +6,49 @@
  * 长什么样），两个宿主共用一份；这里只剩插件的 IO：原子写 + 按文件路径的串行锁。
  * 它不认识「草稿」「候选」，只认一个已经决定好的落位规格 + 字节。
  */
-import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readdir, rm } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import {
-	assetRel,
 	declareBgmSource as declareBgmIn,
 	declareDescription as declareDescriptionIn,
 	declareSprite as declareSpriteIn,
+	keepSpriteSource,
 	ledgerEntryOf,
-	spriteSourceRel,
-	staleSiblings,
+	persistAsset,
+	type AssetIo,
 	type AssetManifest,
 	type LedgerEntry,
 } from '@aivn/agent';
 import { readManifest } from '../play/assets';
-import { existingAsset } from './target';
-import { readJson, writeJsonLocked } from './storage';
+import { readJson, writeAtomic, writeJsonLocked } from './storage';
 import type { AssetSpec, GeneratedAsset } from './types';
 
 /** 写进 `assets/`：同名旧扩展名的文件先删（换后端后 jpg/png 会互相残留）。 */
 export async function persist(dir: string, spec: AssetSpec, bytes: Buffer, ext: string): Promise<GeneratedAsset> {
-	const kindDir = join(dir, 'assets', spec.kindPath);
-	await mkdir(kindDir, { recursive: true });
-	const file = `${spec.stem}${ext}`;
-	const replaced = await existingAsset(dir, spec.kindPath, spec.stem);
-	const entries = await readdir(kindDir).catch(() => [] as string[]);
-	for (const stale of staleSiblings(entries, spec.stem, file)) {
-		await rm(join(kindDir, stale), { force: true });
-	}
-	const abs = join(kindDir, file);
-	const tmp = `${abs}.${randomUUID().slice(0, 8)}.tmp`;
-	await writeFile(tmp, bytes);
-	await rename(tmp, abs);
-	return { kind: spec.kind, path: assetRel(spec, ext), absPath: abs, replaced };
+	const { rel, replaced } = await persistAsset(assetIo(dir), spec, bytes, ext);
+	return { kind: spec.kind, path: rel, absPath: join(dir, rel), replaced };
 }
 
 /** 抠底前原片留一份：重抠时从 `media-cache/sprite-sources/<主体>/` 取原图。 */
 export async function keepSource(dir: string, spec: AssetSpec, data: Buffer, ext: string): Promise<void> {
-	const rel = spriteSourceRel(spec, ext);
-	if (!rel) return;
-	const sourceDir = join(dir, 'media-cache', 'sprite-sources', spec.spriteId!);
-	await mkdir(sourceDir, { recursive: true });
-	const entries = await readdir(sourceDir).catch(() => [] as string[]);
-	for (const stale of staleSiblings(entries, spec.stem, `${spec.stem}${ext}`)) {
-		await rm(join(sourceDir, stale), { force: true });
-	}
-	await writeFile(join(sourceDir, `${spec.stem}${ext}`), data);
+	await keepSpriteSource(dir, spec, data, ext);
+}
+
+/**
+ * 素材写口：包只按 `list / write / remove` 三步编排落位，权限与原子写落在这里。
+ *
+ * 插件的 `assets/` 没有服务端那层白名单（引擎自己写，不接 agent 的路径），
+ * 但**原子写**必须有：同批里两张图写同一个 stem 时，留下完整的那个而不是半张。
+ */
+export function assetIo(dir: string): AssetIo {
+	return {
+		list: (kindPath) => readdir(join(dir, 'assets', kindPath)).catch(() => [] as string[]),
+		write: async (rel, data) => {
+			await mkdir(dirname(join(dir, rel)), { recursive: true });
+			await writeAtomic(join(dir, rel), data);
+		},
+		remove: (rel) => rm(join(dir, rel), { force: true }),
+	};
 }
 
 /** 素材表里的呈现声明：立绘级（framing/stature/title）+ 差分级的画幅覆盖。 */
