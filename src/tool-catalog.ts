@@ -95,6 +95,13 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
 		gate: 'image',
 	},
 	{
+		id: 'annotate_asset',
+		job: '标注：给已入库的素材补 / 改元数据（标题、描述、情绪、场景…；BGM 唯一的元数据出口）',
+		sideEffects: '写素材表 assets/manifest.json',
+		concurrent: true,
+		gate: 'none',
+	},
+	{
 		id: 'generate_bgm',
 		job: '生成一首 BGM 并落库',
 		sideEffects: '调音乐后端、写 assets/bgm/ + 素材表 + 台账',

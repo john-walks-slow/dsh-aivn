@@ -57,6 +57,7 @@ import { registerStagehandContext } from './stagehand/context';
 import type { Exa } from './exa';
 import { stagehandGuide } from './stagehand/prompt';
 import { createCutTool } from './tools/cut';
+import { createAnnotateAssetTool } from './tools/annotate-asset';
 import { createGenerateAssetTool } from './tools/generate-asset';
 import { createGenerateBgmTool } from './tools/generate-bgm';
 import { createGenerateImageTool } from './tools/generate-image';
@@ -94,6 +95,8 @@ function buildTool(spec: ToolSpec, play: PlayContext, deps: ToolDeps): ToolDefin
 			return createCutTool(play, deps.media);
 		case 'import_asset':
 			return createImportAssetTool(play, deps.media);
+		case 'annotate_asset':
+			return createAnnotateAssetTool(play, deps.media);
 		case 'generate_asset':
 			return createGenerateAssetTool(play, deps.media);
 		case 'generate_bgm':

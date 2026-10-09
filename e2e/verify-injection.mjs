@@ -199,18 +199,19 @@ try {
 			? `宿主全局 provider 在位，清单仍只有随包的 aivn-*（实际：${listed.join(', ') || '空'}）`
 			: `技能清单只有随包的 aivn-*（实际：${listed.join(', ') || '空'}）——本实例没有宿主全局 provider，本条本次无区分度，要它咬人就用 \`dsh-e2e start --extra @aiwayds/dsh-subagent-registry:<path>\` 起实例`,
 	);
-	// 生图：generate_image / generate_asset 跟着生图能力位；cut / import_asset 不门控，始终在。
+	// 生图：generate_image / generate_asset 跟着生图能力位；cut / import_asset / annotate_asset 不门控，始终在。
 	const hasImage = tools.includes('generate_image');
 	const hasChapter = headings.includes('# 缺图怎么办（generate_asset / generate_image）');
 	check(
 		'A14',
 		tools.includes('cut') &&
 			tools.includes('import_asset') &&
+			tools.includes('annotate_asset') &&
 			tools.includes('generate_asset') === hasImage &&
 			hasImage === hasChapter,
 		hasImage
-			? '配了生图后端：剧作家有 generate_image / generate_asset；cut / import_asset 不门控、始终在'
-			: '没配生图后端：剧作家没有 generate_image / generate_asset，但 cut / import_asset 仍在',
+			? '配了生图后端：剧作家有 generate_image / generate_asset；cut / import_asset / annotate_asset 不门控、始终在'
+			: '没配生图后端：剧作家没有 generate_image / generate_asset，但 cut / import_asset / annotate_asset 仍在',
 	);
 	// 缺图章已下沉成技能的「门控指针」：指针正文随生图能力位出现 / 消失，
 	// 做法正文在恒列的 skill 里（见 AGENTS.md「提示词地图」）。用「演出中缺图」这个只在指针里

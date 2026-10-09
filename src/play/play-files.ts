@@ -75,5 +75,5 @@ voice: <音色 id>
 整个主体共用的字段（\`framing\` / \`stature\` / \`title\`）挂在**主体 id** 上，
 某一条差分的取景与主体不同时才另写一条 \`<主体id>/<差分名>\`。
 
-\`description\` / \`tags\` / \`mood\` / \`scene\` 可以手写（新素材补一句适用场景就是写它）；
+\`description\` / \`tags\` / \`mood\` / \`scene\` 用 \`annotate_asset\` 标（也可以手写；出图 / 出曲那些工具**不带**元数据）；
 \`framing\` / \`stature\` 决定画幅与台上站位，交给出图工具写，别手改。`;

@@ -477,7 +477,8 @@ DSH 把它们放进同一个并行池，等待不叠加。`set_stage_style` 是�
 | `cut` | — | **抠底**：纯色底的图 → 透明 PNG（只写输出，**不改源图**）。`source` 给剧目内相对路径，`output` 不给就写到候选区。五档调参见下（`tolerance` / `spill` / `edgeBand` / `keySmooth` / `solidResidual`）。立绘登记前先跑它；抠脏了就对着**同一张**源图重调再跑。**不依赖生图后端** |
 | `import_asset` | — | 把一张**图登记**成剧目素材：写 `assets/`、补素材表（呈现声明 + 描述）、记台账，**不抠底**。`source` 给剧目内相对路径或 http(s) 网址；落位**显式给**——`kind`（background / cg / sprite）必填，立绘再给 `spriteId` / `variant` / `framing` / `stature` / `title`。立绘要传**已抠好的透明 PNG**（外部来源先 `cut`）；`original` 可留抠底前原片以便重抠。**不依赖生图后端** |
 | `generate_asset` | 生图后端 | **一键**：出图 +（立绘）自动抠底 + 登记，一次完成，回执给最终素材路径。参数与 `import_asset` 的落位一致（`kind` + `name` / `spriteId` / `variant` / `framing` / `stature`），立绘另收 `keyColor`（色键底色，见下）。**只有这条路**由引擎自动做色键底、身份锁、差分垫 neutral；同名素材已有则直接跳过 |
-| `generate_bgm` | 音乐后端 | 生成一首 BGM 落 `assets/bgm/`；**同步等待**（约 84 秒），`name` 就是剧本里 `<scene bgm="…">` 引用的 id |
+| `generate_bgm` | 音乐后端 | 生成一首 BGM 落 `assets/bgm/`；**同步等待**（约 84 秒），`name` 就是剧本里 `<scene bgm="…">` 引用的 id。**只出曲子、不带元数据**：标题 / 描述 / mood / scene / loop 出完用 `annotate_asset` 标（见下一行） |
+| `annotate_asset` | — | 给**已入库**的素材补 / 改元数据：`title` / `description` / `tags` / `mood` / `scene` / `loop` / `volume`，主体用 `kind`（background / cg / sprite / bgm）+ `name`（立绘给 `spriteId`，可带 `variant`）。只改给出的那几格，其余原样保留；描述是剧作家挑素材的依据、mood / scene 是它选曲的依据。**不依赖任何后端** |
 | `list_voices` | `tts.keys` | 查 Fish 音色库挑音色：按语言 / 标签 / 标题关键词取窗口，本地按 `gender` 筛，按热度排序，一页 25 条（`page` 从 1 起，结果末尾会提示下一页）。挑好的 id 填进角色卡的 `voice` |
 | `web_search` | `search.keys` | 联网检索：一次调用同时拿回结果与正文。只查剧目之外的事实——设定、角色、剧情都在工作区文件里 |
 

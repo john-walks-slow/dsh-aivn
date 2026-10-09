@@ -173,7 +173,7 @@ try {
 	check('S15', !has('list_voices') && !has('web_search'), '没配 key 时 list_voices / web_search 不注册');
 	// cut / import_asset 不门控（只读写文件与抠底），始终在；generate_image / generate_asset / generate_bgm
 	// 配了后端才有——生图那两个同开同关。这一条不假设实例配没配后端，配了桩后端也一样跑得过。
-	const alwaysTools = ['cut', 'import_asset'];
+	const alwaysTools = ['cut', 'import_asset', 'annotate_asset'];
 	const gatedTools = ['generate_image', 'generate_asset', 'generate_bgm'];
 	const gatedOn = gatedTools.filter(has);
 	const allImageOn = has('generate_image') && has('generate_asset');
@@ -181,7 +181,7 @@ try {
 	check(
 		'S16',
 		alwaysTools.every(has) && (gatedOn.length === 0 || allOn) && has('generate_image') === has('generate_asset'),
-		`cut / import_asset 始终在；generate_image / generate_asset 同开同关（实际：${tools.join(', ')}）`,
+		`cut / import_asset / annotate_asset 始终在；generate_image / generate_asset 同开同关（实际：${tools.join(', ')}）`,
 	);
 	const namedOneStep = prompt.includes('generate_asset');
 	const musicChapter = headings.includes('# 配乐（generate_bgm）');

@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import { SPRITE_FRAMING_SHOT } from '@aivn/core';
 import { PlayAssets } from '../src/media/assets';
+import { annotateAsset } from '../src/media/annotate';
 import { resolveTuning } from '../src/media/cutout';
 import { PLAYWRITER_PROMPT, playwriterTail } from '../src/playwriter/prompt';
 import { readPlayReadiness } from '../src/play/readiness';
@@ -577,6 +578,41 @@ check(
 		withConcurrency({ name: 'probe' } as never, false).isConcurrencySafe === undefined,
 	'装配把 concurrent 落成 isConcurrencySafe（true 挂上、false 原样交回）',
 );
+
+/* ── 20. 素材标注：元数据出生成工具 ── */
+
+// 生成工具不承载元数据（P5-d）：标注是独立一步，BGM 更是只有这一条出口。
+await mkdir(join(dir, 'assets', 'bgm'), { recursive: true });
+await writeFile(join(dir, 'assets', 'bgm', 'bgm_rain.m4a'), 'x');
+await writeFile(
+	join(dir, 'assets', 'manifest.json'),
+	JSON.stringify({ bgm_rain: { source: 'AI 生成（本插件）', description: '用户手写的说明' } }, null, 2),
+);
+const annotated = await annotateAsset(
+	dir,
+	{ kind: 'bgm', name: 'bgm_rain' },
+	{ title: '雨', mood: ['温柔'], loop: true },
+);
+const afterAnnotate = JSON.parse(await readFile(join(dir, 'assets', 'manifest.json'), 'utf8')) as Record<
+	string,
+	Record<string, unknown>
+>;
+check('M50', annotated.path === 'assets/bgm/bgm_rain.m4a', `标注回执给素材路径（实际：${annotated.path}）`);
+check(
+	'M51',
+	afterAnnotate.bgm_rain!.title === '雨' &&
+		JSON.stringify(afterAnnotate.bgm_rain!.mood) === '["温柔"]' &&
+		afterAnnotate.bgm_rain!.loop === true &&
+		// 只并给出的那几格：既有描述与来源标记一个字不动
+		afterAnnotate.bgm_rain!.description === '用户手写的说明' &&
+		afterAnnotate.bgm_rain!.source === 'AI 生成（本插件）',
+	'标注只并给出的那几格，其余原样保留',
+);
+const missing = await annotateAsset(dir, { kind: 'cg', name: 'cg_ghost' }, { title: 'x' }).then(
+	() => '',
+	(error: Error) => error.message,
+);
+check('M52', missing.includes('没有这份素材'), `标注不存在的素材当场报错（实际：${missing}）`);
 
 await rm(dir, { recursive: true, force: true });
 const passed = results.filter((r) => r.ok).length;
