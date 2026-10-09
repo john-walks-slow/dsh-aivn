@@ -70,7 +70,7 @@ type StageFrame =
 	/** 剧目皮肤：全量快照（最后一条就是当前该用的那套），幂等。 */
 	| { seq: number; kind: 'style'; theme: Record<string, string> }
 	/** 前面推的一切作废，紧接着的帧才是这条会话现在的样子（回退 / 重写 / 分支 / 重启）。 */
-	| { seq: number; kind: 'reset' }
+	| { seq: number; kind: 'reset'; running: boolean }
 	/** 提示队列：全量快照，幂等。 */
 	| { seq: number; kind: 'guide'; items: readonly GuideItem[] };
 
@@ -144,6 +144,22 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 	const [theme, setTheme] = useState<Record<string, string>>({});
 	const [failed, setFailed] = useState<string | null>(null);
 	const [resetToken, setResetToken] = useState(0);
+	/**
+	 * 换代之后播放头要不要停在新内容的**末尾那一句**上（`usePlayback` 的 `resumeAfterReset`）。
+	 *
+	 * 重投影（回退 / 重写 / 分支 / 冷开）之后播放层一定快进到新内容的末尾，但末尾那句摆不摆上
+	 * 台词条是另一回事：**空闲时摆**——重投影出来的就是这条分支现在的样子，玩家该看见它（不摆的话
+	 * 台词条落在「（点击开始）」上，而停止点面板照常摆着，正是 2026-10-09 那个 bug）；**还有一轮
+	 * 在写时不摆**——要停在「剧作家正在落笔…」。判据只有重建方知道（`reset` 帧的 `running`）。
+	 */
+	const [resumeAfterReset, setResumeAfterReset] = useState(false);
+	/**
+	 * 上面那个判据的读数版（见 `rebase`）：重建摆出来的那一句还在屏上吗。
+	 *
+	 * 新一轮开笔时据此决定要不要再换一次代——留着上一版的末句，`shouldAutoStart` 就不成立
+	 * （它要求「此刻没有台词在显示」），新一轮的第一句要玩家点一下才上来。
+	 */
+	const rebasedTail = useRef(false);
 	/** 提示队列（导演排的话）。全量快照，最后一条就是现值。 */
 	const [guide, setGuide] = useState<readonly GuideItem[]>([]);
 	/** 正在重投影：这期间画面暂时是空的，别把它当成「还没开演」。 */
@@ -244,6 +260,17 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 		};
 	}, [sessionId]);
 
+	/**
+	 * 一次缓冲换代：播放层整段归零，并按「这条分支还在不在写」决定末尾那句摆不摆。
+	 *
+	 * 两样一起改，是因为播放层只在 `resetToken` 变化的那一帧读后者（见 `usePlayback` 的换代
+	 * effect）——分两次 setState 会先落一次带旧判据的换代。
+	 */
+	const rebase = useCallback((running: boolean): void => {
+		setResumeAfterReset(!running);
+		setResetToken((n) => n + 1);
+	}, []);
+
 	/* 舞台帧流。EventSource 自带重连，这里只负责把帧翻译成两样东西：
 	   IR 喂给 ScriptBuilder（`beat` 帧不是 IR，只动轮边界）。 */
 	useEffect(() => {
@@ -264,7 +291,9 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 		setGuide([]);
 		rebuildingRef.current = false;
 		setRebuilding(false);
-		setResetToken((n) => n + 1);
+		// 首挂 / 换会话：重建帧还没到，这一代按「空闲」算——分支与冷开的末句本来就该摆出来。
+		rebasedTail.current = false;
+		rebase(false);
 		requestRender();
 
 		const source = new EventSource(`/aivn/stream?session=${encodeURIComponent(sessionId)}`);
@@ -280,9 +309,11 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 			if (frame.seq > lastSeq.current + 1) {
 				// 断档：断线期间滚出缓冲的帧（上限 4000）已经拿不回来，只能整段重放。
 				// 把 lastSeq 压到 `seq - 1` 而不是 0，否则这一帧自己又会被判成断档，绕不出来。
+				// 这一代按「空闲」算：重放完就是这条会话现在的样子，末句该摆出来。
 				builder.reset();
 				director.reset();
-				setResetToken((n) => n + 1);
+				rebase(false);
+				rebasedTail.current = false;
 				sawStop.current = false;
 				setStop(null);
 				setIsNoStop(false);
@@ -307,7 +338,9 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 				// 重建帧紧跟着就来；这中间的空白不是「还没开演」，先别把「开演」摆出来。
 				rebuildingRef.current = true;
 				setRebuilding(true);
-				setResetToken((n) => n + 1);
+				// 重建完的那一幕该不该把末句摆上台词条，只有推 reset 的这边知道（`running`）。
+				rebase(frame.running);
+				rebasedTail.current = !frame.running;
 				requestRender();
 				return;
 			}
@@ -333,6 +366,14 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 
 			if (frame.kind === 'beat') {
 				if (frame.state === 'start') {
+					// 新一轮开笔。若画面还停在重建摆出来的那一句上，再换一次代把它撤下来：
+					// 播放层只在换代时归零，留着旧末句的话 `shouldAutoStart` 不成立（它要求此刻
+					// 没有台词在显示），新一轮的第一句要玩家点一下才上来。
+					// 换代本身对正在演的戏是无害的——重建摆出的就是当前内容，快进回去当场原样。
+					if (rebasedTail.current) {
+						rebasedTail.current = false;
+						rebase(true);
+					}
 					// 新的一轮：上一轮迟到的音频一律丢弃（语音导演按这个门槛清台账）。
 					director.beatStarted();
 					sawStop.current = false;
@@ -512,6 +553,9 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 		transcript,
 		turbo,
 		resetToken,
+		// 换代之后末尾那句摆不摆：空闲时摆（重投影出来的就是这条分支现在的样子），
+		// 还有一轮在写时不摆（停在「剧作家正在落笔…」）。见上面 `resumeAfterReset`。
+		resumeAfterReset,
 		hold: holdForVoice(),
 		onLineStart: (line) => director.lineStarted(line?.seq, line?.type === 'say'),
 		onFastForward: () => director.fastForward(),

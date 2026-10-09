@@ -212,7 +212,7 @@ function describeCapabilities(capabilities: Capabilities): string {
 
 export async function apply(ctx: Context, config: Config): Promise<() => void> {
 	const hub = new StageHub();
-	/** 「引擎自己投的消息」的登记，开局指令与收束指令（`stage-tap`）、导演指令（`director`）共用一份。 */
+	/** 「引擎自己投的消息」的登记，开局指令（`stage-tap`）、导演指令（`director`）共用一份。 */
 	const injected = new InjectedMessages();
 	/** 结局账本（工作区根 `endings.json`）：引擎在实时 IR 上落账，重建只重推终局标记。 */
 	const ledger = new EndingsLedger((message) => ctx.logger.warn(message));
@@ -241,7 +241,7 @@ export async function apply(ctx: Context, config: Config): Promise<() => void> {
 		voice,
 		// 重建会把这条会话的流式解析器与语音管线作废（它们手里是上一版内容的半成品）。
 		onRebuilt: (sessionId) => tap.forgetParser(sessionId),
-		// 重放之前先清掉上一遍推出来的终局 / 收束标记（回退掉结局那一拍后终局正确退出）。
+		// 重放之前先清掉上一遍推出来的终局标记（回退掉结局那一拍后终局正确退出）。
 		onRebuildStart: (sessionId) => tap.resetTerminal(sessionId),
 		// 重放的每一帧转给 tap：重建也要重推出「已结局」的终局态（回退掉结局那一拍则退出终局）。
 		onEvent: (sessionId, event) => tap.noteEvent(sessionId, event),

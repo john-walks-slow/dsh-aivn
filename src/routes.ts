@@ -255,8 +255,7 @@ async function acceptInput(
 		return;
 	}
 
-	// 终局态不接受继续：出口交给 DSH 的「在新对话中分支」或新会话。引擎自己的收束指令
-	// 走 `followup` 且已登记，不经过这条路由，所以不会被这里挡住。
+	// 终局态不接受继续：出口交给 DSH 的「在新对话中分支」或新会话。
 	if (hasEnded(sessionId)) {
 		sendJson(res, 409, { error: 'this session has ended; branch before the ending or start a new playthrough' });
 		return;

@@ -29,6 +29,9 @@ export type BeatState = 'start' | 'end';
  * - `reset`：**前面推的一切作废**，紧接着的帧才是这条会话现在的样子（`stage-log` 重建、
  *   回退/重写之后用）。它自己也是帧、也有 seq，于是客户端可以在**去重之前**认出它——
  *   重建帧的 seq 一律更大，去重不会把新的一幕丢掉。seq 因此**不回退**。
+ *   带上 `running`：重投影出来的这一幕是**写完了的分支**（false）还是**马上有新一轮接上**
+ *   （true）。播放层据此决定换代后要不要把末尾那句摆上台词条——空闲时不摆，玩家看到的
+ *   就是「（点击开始）」而不是重投影出来的正文。
  * - `guide`：提示队列的**全量快照**（与 `style` 同一个口径，幂等）。导演排了一句提示、
  *   或那句提示真的进了会话时各推一次，舞台的 pending 面板据此显示「排队中 / 已送出」。
  */
@@ -40,7 +43,8 @@ type StageFrameBody =
 	| { kind: 'beat'; state: BeatState }
 	| { kind: 'voice'; lineSeq: number; phrase: number; state: 'started' | 'ready'; url?: string }
 	| { kind: 'style'; theme: Record<string, string> }
-	| { kind: 'reset' }
+	/** `running` = 重建这一刻 Agent 在不在跑（见 `StageHub.reset`）。 */
+	| { kind: 'reset'; running: boolean }
 	| { kind: 'guide'; items: readonly GuideFrameItem[] };
 
 /** `guide` 帧里的一条：面板只读它（id 用来配对，text 是玩家写的那句原文）。 */
@@ -95,10 +99,15 @@ export class StageHub {
 	 * **seq 不归零**：seq 归零之后重建帧的序号会小于客户端已经应用到的最大值，被去重整批丢掉
 	 * ——客户端那次「断档重放」的判断恰恰是靠 seq 往前跳（见 `stage-view.tsx`）。所以重置帧
 	 * 自己占一个新号，重建帧跟着往后排。
+	 *
+	 * `running` 说的是「重建出来的这一幕之后还有没有新一轮」：播放层换代后一律快进到新内容
+	 * 的末尾，而**只有空闲时**才该把末尾那一句摆上台词条（还有内容在来的时候要停在
+	 * 「剧作家正在落笔…」，露出旧台词会让玩家以为这就是重来的结果）。这条判据只有重建方知道
+	 * （见 `stage-log.ts` 的 `running`），所以跟着帧一起发。
 	 */
-	reset(sessionId: string): StageFrame {
+	reset(sessionId: string, running: boolean): StageFrame {
 		this.buffers.set(sessionId, []);
-		return this.push(sessionId, { kind: 'reset' });
+		return this.push(sessionId, { kind: 'reset', running });
 	}
 
 	/** 这条会话推过帧没有。SSE 新连接据此决定要不要先把舞台重建一遍。 */

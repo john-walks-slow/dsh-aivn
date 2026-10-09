@@ -108,6 +108,14 @@ const check = (id: string, ok: boolean, note: string): void => {
 };
 
 check('R1', frames[0]?.kind === 'reset', `重建的第一帧是 reset（实际 ${frames[0]?.kind ?? '无'}）`);
+// 重置帧要带上「这条分支还在不在写」：客户端据此决定换代后要不要把末尾那句摆上台词条
+// （空闲时摆，否则台词条落在「（点击开始）」上——2026-10-09 那个分叉 bug）。
+const firstReset = frames[0];
+check(
+	'R1b',
+	firstReset?.kind === 'reset' && firstReset.running === false,
+	`重置帧带上了 running（这里是空闲重建，实际 ${firstReset?.kind === 'reset' ? String(firstReset.running) : '无'}）`,
+);
 check('R2', frames.at(-1)?.kind === 'beat', `末帧是轮边界（实际 ${frames.at(-1)?.kind ?? '无'}）`);
 check('R3', stops.length === 2, `四拍共两帧 stop（选项 + 自由输入），实际 ${stops.length}`);
 

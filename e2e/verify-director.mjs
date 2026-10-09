@@ -48,8 +48,14 @@ const BEAT_TIMEOUT = 480_000;
 
 const KNOWN_IDS = [
 	'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D6b', 'D7', 'D8',
-	'D9', 'D10', 'D11', 'D12', 'D13', 'D14', 'D15', 'D16', 'D17',
+	'D9', 'D10', 'D11', 'D12', 'D13', 'D14', 'D15', 'D16', 'D17', 'D18',
 ];
+
+/**
+ * 台词条上的三句占位（`@aivn/stage` 的 `emptyDialogHint`）：
+ * 还没开演 / 空闲等玩家 / 剧作家正在落笔。它们都不是台词。
+ */
+const PLACEHOLDERS = ['（点击开始）', '剧作家正在落笔…', '还没开演——按画面上的「开演」开始。'];
 
 const results = [];
 const check = (id, ok, note = '') => {
@@ -178,6 +184,18 @@ const CHOICES = () => {
 		.map((el) => (el.textContent ?? '').trim())
 		.filter((text) => text !== '' && text !== '开演');
 	return real.length > 0 ? real.join(' / ') : false;
+};
+
+/**
+ * 台词条上的正文 + 它是不是一句**占位**（`placeholders` 由 Node 侧传进来。
+ * `page.evaluate` 的函数体在页面里执行，外部常量在那里够不着）。
+ *
+ * 空态那三句不是台词：分叉出来的会话若把播放头停在「没有当前行」上，停止点面板照常摆着、
+ * 台词条却落在占位上——2026-10-09 用户报的就是这个（选项正常，背后写着「（点击开始）」）。
+ */
+const DIALOG = (placeholders) => {
+	const text = (document.querySelector('.theater-dialog .dialog-text')?.textContent ?? '').trim();
+	return { text, placeholder: placeholders.includes(text) };
 };
 
 /**
@@ -504,6 +522,30 @@ try {
 			Boolean(childId) && childFrames > 3,
 			`分支出来的会话也演到同一个点（收到 ${childFrames} 帧：整段重投影）`,
 		);
+
+		/*
+		 * 分支会话的**舞台**：重投影出来的内容得真摆上台词条。
+		 *
+		 * 只数帧数是不够的——帧到了、停止点也摆出来了，台词条仍可能落在「（点击开始）」上：
+		 * 播放层换代后快进到新内容的末尾，但「末尾那一句摆不摆上屏」要重建方告诉它
+		 * （`reset` 帧的 `running`）。分叉出来的会话是空闲的，末句必须摆出来。
+		 */
+		if (childId) {
+			await openViewTabWhenReady(page, 'AIVN', 60_000);
+			const childChoices = await waitFor(page, CHOICES, {
+				timeout: 30_000,
+				interval: 500,
+				label: '分支会话的停止点',
+			});
+			const childDialog = await page.evaluate(DIALOG, PLACEHOLDERS);
+			check(
+				'D18',
+				Boolean(childChoices) && childDialog.text !== '' && !childDialog.placeholder,
+				`分支会话的台词条上是重投影出来的正文（「${childDialog.text.slice(0, 28)}」` +
+					`${childDialog.placeholder ? '——这是占位，不是台词' : ''}；选项 ${String(childChoices).slice(0, 40) || '无'}）`,
+			);
+			await tryShot(page, join(ARTIFACTS, 'director-branch.png'));
+		}
 	}
 
 	check('D17', errors.length === 0, `全程无页面报错（${errors.length}）`);

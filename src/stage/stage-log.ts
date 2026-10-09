@@ -68,14 +68,14 @@ export interface RebuildDeps {
 	/** 重建完叫一声，让实时那一路把流式解析器丢掉（它的半行文本已经作废）。 */
 	onRebuilt?: ((sessionId: string) => void) | undefined;
 	/**
-	 * 重放之前叫一声：把上一轮重推导出的终局 / 收束标记清掉，好让这一遍重放从头推。
+	 * 重放之前叫一声：把上一轮重推导出的终局标记清掉，好让这一遍重放从头推。
 	 *
 	 * 顺序是「先清、后重放、末尾再 `onRebuilt`」——回退掉结局那一拍时，清掉之后再没有 ending
 	 * 事件，终局就正确退出了；分支 / 冷开带着结局前缀时，重放会把标记重新推回来。
 	 */
 	onRebuildStart?: ((sessionId: string) => void) | undefined;
 	/**
-	 * 重放的每一帧都转交一份（`stage-tap` 的终局 / 收束跟踪）。
+	 * 重放的每一帧都转交一份（`stage-tap` 的终局跟踪）。
 	 *
 	 * 重建只重放、不落账——它是给「冷开 / 分支 / 回看后重推出终局态」用的，重复记账在这里被挡掉。
 	 */
@@ -87,8 +87,9 @@ export interface RebuildDeps {
 /**
  * 把一条会话重投影成一条新帧流。
  *
- * `running` 是重建这一刻 Agent 在不在跑：末尾补的那一帧轮边界据此选 `start`/`end`，
- * 否则「剧作家正在落笔」与「写完了，等你」会停在重建前的那个状态上。
+ * `running` 是重建这一刻 Agent 在不在跑，两处都要用：末尾补的那一帧轮边界据此选
+ * `start`/`end`（否则「剧作家正在落笔」与「写完了，等你」会停在重建前的那个状态上），
+ * 重置帧也带着它（客户端据此决定换代后要不要把末尾那句摆上台词条，见 `hub.reset`）。
  */
 export function rebuildStage(
 	sessionId: string,
@@ -97,8 +98,8 @@ export function rebuildStage(
 	deps: RebuildDeps,
 ): void {
 	const { hub, injected, voice } = deps;
-	hub.reset(sessionId);
-	// 上一遍重推导出的终局 / 收束标记先清掉，这一遍重放从头推（见 `RebuildDeps.onRebuildStart`）。
+	hub.reset(sessionId, running);
+	// 上一遍重推导出的终局标记先清掉，这一遍重放从头推（见 `RebuildDeps.onRebuildStart`）。
 	deps.onRebuildStart?.(sessionId);
 	// 重置帧会让客户端把提示队列一并清掉（那是上一版内容的一部分）；队列在导演手里，
 	// 与舞台内容无关，所以紧接着补一帧现值回去。
