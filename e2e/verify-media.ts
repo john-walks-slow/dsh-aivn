@@ -362,13 +362,23 @@ check(
 const variantPrompt = await promptOf(() =>
 	assets.draft({ kind: 'sprite', spriteId: 'probe_girl', variant: 'smile' }, 'a gentle smile'),
 );
+/**
+ * 定妆照与差分**共享**的那几条约束（画风、色键底、不留杂物）按句子取出来。
+ *
+ * 措辞归 `@aivn/agent`，这里只钉住真正的判据：两条分支拿到的是同一串字。
+ * 它们曾经分居两处，绿幕改造只改了定妆照那条，差分带着白底出图、被色键打成镂空。
+ */
+const sharedConstraints = (prompt: string): string[] =>
+	prompt.split('. ').filter((sentence) => /chroma key|3D render|No gradient/.test(sentence));
+
 check(
 	'M27',
 	variantPrompt.includes('Same character as the reference image') &&
 		variantPrompt.includes('Change only the facial expression') &&
 		variantPrompt.includes(SPRITE_FRAMING_SHOT.full) &&
-		variantPrompt.includes('Same 2D flat cel-shaded anime illustration style'),
-	'差分带身份锁 + 景别 + 与定妆照一字不差的画风要求',
+		sharedConstraints(variantPrompt).length === 3 &&
+		sharedConstraints(variantPrompt).join('|') === sharedConstraints(neutralPrompt).join('|'),
+	'差分带身份锁 + 景别，画风 / 色键底 / 不留杂物与定妆照一字不差',
 );
 
 /* ── 11b. 色键底：颜色是显式传进来的，不是让模型在提示词里自己挑 ── */
