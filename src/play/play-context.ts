@@ -22,14 +22,19 @@ import { join, relative, sep } from 'node:path';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-system-prompt';
 import {
-	describeAsset,
 	languageLabel,
 	parseCharacterCard,
 	spriteIdOf,
 	type AssetMeta,
 	type CharacterDocument,
 } from '@aivn/core';
-import { AUDIO_RULES, renderAssetSections, renderMemoryIndex } from '@aivn/agent';
+import {
+	AUDIO_RULES,
+	renderAssetSections,
+	renderBareSprites,
+	renderCastCard,
+	renderMemoryIndex,
+} from '@aivn/agent';
 import { listAssets, readManifest } from './assets';
 import { loadPlaySync } from './play';
 import { assetCapabilitiesOf, renderCraftParams, resolveCraft } from './craft';
@@ -193,31 +198,15 @@ function renderCast(
 
 	const variantsOf = (spriteDir: string): string[] =>
 		(index[`sprites/${spriteDir}`] ?? []).map((file) => file.replace(/\.\w+$/, ''));
-	const label = (name: string, charId: string): string => {
-		const detail = describeAsset(notes(name, charId));
-		return detail ? `${name}（${detail}）` : name;
-	};
 
 	const bound = new Set<string>();
 	const blocks = cards.map((card) => {
 		const spriteDir = spriteIdOf(card.id, card);
 		bound.add(spriteDir);
-		const title = `${card.name ?? card.id}（id: ${card.id}，卡片 characters/${card.id}.md${
-			card.id === 'protagonist' ? '，玩家扮演' : ''
-		}）`;
-		const variants = variantsOf(spriteDir);
-		return [
-			`### ${title}`,
-			card.body.trim(),
-			card.voice ? `音色：${card.voice}` : '',
-			variants.length > 0
-				? `立绘${spriteDir === card.id ? '' : `（目录 ${spriteDir}）`}差分 variant：${variants
-						.map((v) => label(v, spriteDir))
-						.join(' | ')}`
-				: '',
-		]
-			.filter((part) => part !== '')
-			.join('\n');
+		return renderCastCard(
+			{ id: card.id, name: card.name, body: card.body, voice: card.voice, spriteDir, variants: variantsOf(spriteDir) },
+			notes,
+		);
 	});
 
 	const bare = Object.keys(index)
@@ -226,17 +215,7 @@ function renderCast(
 		.filter((spriteDir) => !bound.has(spriteDir))
 		.sort((a, b) => a.localeCompare(b));
 
-	const bareSection =
-		bare.length > 0
-			? `\n\n# 台上其它主体（有立绘，没有角色卡）\n\n${bare
-					.map((spriteDir) => {
-						const title = notes(spriteDir).title;
-						return `- ${title ? `${spriteDir}（${title}）` : spriteDir}：variant ${variantsOf(spriteDir)
-							.map((v) => label(v, spriteDir))
-							.join(' | ')}`;
-					})
-					.join('\n')}\n\n它们与角色同权：\`<actor id="…" variant="…">\` 直接上台，不用建档。`
-			: '';
+	const bareSection = renderBareSprites(bare, variantsOf, notes);
 
 	return `# 角色表\n\n${blocks.join('\n\n')}\n\n卡是 frontmatter + 正文两段，头部只写 name / sprite / voice；\n差分与取景体量不写在卡上（差分就是立绘目录里的文件名，取景/体量/名牌落在 \`assets/manifest.json\`）。${bareSection}`;
 }
