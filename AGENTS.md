@@ -119,6 +119,27 @@ dsh-e2e stop
 - **必须先 `dsh-e2e start`**：`dsh-e2e run` 自己不起实例，实例不在时套件会以
   `missing DSH_E2E_PORT` 直接失败。
 - **改过 `lib/` 之后要 `dsh-e2e stop` 再 `start`**，否则跑的还是旧模块。
+
+#### 只跑必要的那几条（本机内存紧张，真 LLM 的拍尤其贵）
+
+**每次只跑与本次改动相关的判据，禁止整组无差别跑。** 这条套件的开销几乎全在真 LLM 那几拍上
+（一次全量 = 三拍 + 一次原生分叉），而其中常常只有一拍与本次改动有关。挑选机制：
+
+```bash
+E2E_PHASES=first,branch dsh-e2e run e2e/verify-director.mjs   # 只跑这两段（一拍 LLM）
+E2E_ONLY=D16           dsh-e2e run e2e/verify-director.mjs   # 按判据 id 挑报告（不省前面的拍）
+```
+
+- `E2E_PHASES` 按**阶段**筛，段外的判据**连跑都不跑**——省的是真 LLM 的钱，这是首选。
+  可选段见 `verify-director.mjs` 的 `PHASES`（`boot` / `first` / `guide` / `rewrite` / `branch` / `tail`）。
+  `boot` 零成本；`first,branch` 只要一拍（分叉分的是当前这一轮，不必等引导与重写）。
+- `E2E_ONLY` 只筛**报告**，省不掉被挑中那条前面的拍——它和 `E2E_PHASES` 配合用。
+- **单点跑不给验收结论**：结尾会列出没跑的判据并明说「本次结果不能当作整条套件通过」。
+  验收一律去掉这两个环境变量跑全量。
+- 挑错了阶段名会以 exit 2 当场报错，不会静默变成「什么都没跑 = 通过」。
+- **判据要分层，别让一条 flaky 判据逼人重跑全量**：能看「舞台上的实际内容」就不要数帧数、
+  不要数网络事件（`verify-director` 的 D16 从前数页面自挂 SSE 探针的帧数，同一份代码收到过
+  0 / 62 / 67 / 71 帧——0 帧那次舞台其实好着，人却为此重跑了一遍全量）。
 - 套件分组都在 `e2e/run.mjs` 的 `MODULES` 里（`dsh-e2e run e2e/run.mjs --list` 看全），例如
   `stage`（演出闭环，`verify-stage.mjs` + `verify-opening.mjs`）、
   `injection`（A 区注入，`verify-injection.mjs`，从**会话日志**取系统提示词断言——日志是多帧 zstd，
