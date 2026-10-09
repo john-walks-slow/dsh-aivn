@@ -16,7 +16,7 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import type { VoiceCatalog, VoiceEntry } from '../voice/voice-catalog';
 
-/** 一页列多少条：够挑就行，音色库动辄上千条。别与 `voice-catalog` 的 `PAGE_SIZE`（上游抓取页）混用。 */
+/** 一页列多少条：够挑就行，音色库动辄上千条。别与上游抓取页 `VOICE_PAGE_SIZE`（在包里）混用。 */
 const VOICES_PER_PAGE = 25;
 const DESC_MAX = 90;
 
