@@ -159,7 +159,8 @@ Ultra-fine whisper-light colored outlines, clean translucent coloring, no thick 
   立绘要透明底就先 `cut`。
 - **定妆照先定**：neutral 是这个主体所有差分的身份基准（差分自动垫它）。还没有入库的 neutral 就出不了别的差分
   （`generate_asset` 会自动先补一张）。
-- **一张一张来**：一次调用只出一张图。要 3 张候选就在同一批里调 3 次（并行）。
+- **一张一张来，一批发出去**：一次调用只出一张图（`generate_asset` 的 `variant` 也一样，要几个差分就分几次调用）。
+  要 3 张候选就在**同一批**里调 3 次——同一批会并发跑，分几轮串着调等于把 70–140 秒的等待乘上份数。
 - **立绘取景与体量走参数**：`framing`（full / half / square）决定画幅与台上站位，同一主体保持同一档；
   `stature`（small / normal / large / huge）只管台上多大。人物 full 或 half，猫与道具 square，机甲 huge。
 - **出完贴给用户看**（回执里那行 markdown 图片）；抠脏了用 `cut` 调参重抠（画面不变、不烧配额），别重新出图。

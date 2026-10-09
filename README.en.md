@@ -417,6 +417,13 @@ see "Endings and new game plus").
 To disable tools per preset, use the plugin config `playwriterDisabledTools` / `stagehandDisabledTools`
 (comma-separated tool names; empty by default = the two presets are identical).
 
+**Tool calls issued in one batch run concurrently**: put several independent calls in a single assistant
+message (read a few files, generate a few images, cut a few backgrounds) and DSH schedules them in one
+parallel pool — the waits do not add up. `set_stage_style` is the one exception: it does a
+read-modify-write of `theme.json` without a lock, so it stays one at a time. The switch is the
+`concurrent` flag on each tool in `src/tool-catalog.ts` (omitted = exclusive); the assembly turns it
+into `isConcurrencySafe` on the tool definition.
+
 | Tool | Gate | What it does |
 | --- | --- | --- |
 | `validate_play` | — | Play self-check: whether `play.json` can be read (with the reason when a field is missing or the JSON is broken), whether `craft` holds values the engine does not recognise, whether the state files are sound, story premise, character card count, sprites, backgrounds, asset count, and whether the generation ledger holds entries pointing at missing files. Call it right after writing play files. **No hard gate** — you can start with anything missing |
@@ -455,7 +462,8 @@ are split as well:
 | Commit | in one go | step by step: `cut` then `import_asset` |
 
 Generation **waits synchronously** (70–140 s per image). "Generate a few candidates and let the user
-pick" = call `generate_image` several times and paste the previews; the chosen one is then placed
+pick" = call `generate_image` several times **in one batch** (they run concurrently, so the waits do
+not add up) and paste the previews; the chosen one is then placed
 (backgrounds / CGs straight into `import_asset`, sprites through `cut` first). **Unpicked candidates
 leave no trace in the asset sheet.**
 

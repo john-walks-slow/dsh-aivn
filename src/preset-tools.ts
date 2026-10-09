@@ -107,6 +107,17 @@ function buildTool(spec: ToolSpec, play: PlayContext, deps: ToolDeps): ToolDefin
 	}
 }
 
+/**
+ * 把 catalog 的并发声明落成工具定义上的 `isConcurrencySafe`。
+ *
+ * DSH 只把声明了它的工具放进并行池；不声明即独占（`dsh-tools` 的 `executionMode` 对没有这个字段的
+ * 定义一律返回 `exclusive`）。所以「同一批里并发跑」这一步是**装配**在做，声明与理由在
+ * `ToolSpec.concurrent`（`tool-catalog.ts`）。独占的工具原样交回——不必写一个恒 false 的分类器。
+ */
+function withConcurrency(tool: ToolDefinition, concurrent: boolean): ToolDefinition {
+	return concurrent ? { ...tool, isConcurrencySafe: () => true } : tool;
+}
+
 /** 装配要用的外部面：能力位与「配了才有」的几个客户端，以及按预设的禁用集。 */
 export interface ToolDeps {
 	capabilities: Capabilities;
@@ -240,8 +251,8 @@ function install(
 		tts: deps.capabilities.voice,
 		search: deps.capabilities.search,
 	};
-	const tools = TOOL_CATALOG.filter((spec) => gateSatisfied(spec, gateCaps) && !disabled.has(spec.id)).map(
-		(spec) => buildTool(spec, play, deps),
+	const tools = TOOL_CATALOG.filter((spec) => gateSatisfied(spec, gateCaps) && !disabled.has(spec.id)).map((spec) =>
+		withConcurrency(buildTool(spec, play, deps), spec.concurrent),
 	);
 	const offs: Array<() => void> = [];
 

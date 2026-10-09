@@ -14,7 +14,7 @@
 | `src/media/` | 生图 / 音乐 / 抠底的后端实现与素材落库（无角色分叉） |
 | `src/playwriter/` | 剧作家预设与提示词（停止点是剧本里的 `<stop …/>`，不是工具） |
 | `src/stagehand/` | 搭台助手专属：`prompt`（persona/guide）、`context`（《当前状态》注入） |
-| `src/tool-catalog.ts` | AIVN 工具面的单一真相源（工具名、职责、开启门控）；装配与提示词工具表都从它派生 |
+| `src/tool-catalog.ts` | AIVN 工具面的单一真相源（工具名、职责、开启门控、能不能同批并发）；装配与提示词工具表都从它派生 |
 | `src/tools/` | 两个预设共用的**全部** AIVN 工具（9 个）+ 工具上下文（`PlayContext`） |
 | `src/client/` | 浏览器半边（React），挂在 `conversation.view` 槽 |
 | `lib/` | **跟踪的构建产物**（`lib/index.js` / `lib/client.js`）——DSH 直接加载它 |

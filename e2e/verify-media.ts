@@ -17,9 +17,10 @@ import sharp from 'sharp';
 import { SPRITE_FRAMING_SHOT } from '@aivn/core';
 import { PlayAssets } from '../src/media/assets';
 import { cutout } from '../src/media/cutout';
-import { playwriterTail } from '../src/playwriter/prompt';
+import { PLAYWRITER_PROMPT, playwriterTail } from '../src/playwriter/prompt';
 import { readPlayReadiness } from '../src/play/readiness';
 import { stagehandPrompt } from '../src/stagehand/prompt';
+import { TOOL_CATALOG } from '../src/tool-catalog';
 import type { GeneratedImage, ImageBackend, ImageRequest } from '../src/media/image';
 import type { GeneratedMusic, MusicBackend } from '../src/media/music';
 
@@ -655,6 +656,33 @@ check(
 	'M41',
 	readiness.danglingAssets.includes('ghost'),
 	`台账对账报出指向不存在文件的登记（${readiness.danglingAssets.join('、') || '无'}）`,
+);
+
+/* ── 18. 并发：catalog 里谁声明了可重叠，提示词里怎么教 ── */
+
+// 并发的开关是工具定义上的 `isConcurrencySafe`，声明在 catalog 的 `concurrent`（缺省即独占）。
+// 这里锁住「谁独占」这件事：set_stage_style 读-改-写 theme.json 且没有锁，只有它不能并发。
+const exclusive = TOOL_CATALOG.filter((spec) => !spec.concurrent).map((spec) => spec.id);
+check(
+	'M45',
+	exclusive.length === 1 && exclusive[0] === 'set_stage_style',
+	`只有 set_stage_style 声明独占（实际：${exclusive.join('、') || '无'}）`,
+);
+
+// 教学：persona 教「独立的调用放同一批」（每轮契约），素材那层的食谱（一批几张、候选取几张）在技能里。
+const stageOn = stagehandPrompt({ shell: false, voice: false, search: false, image: true, music: true });
+check('M46', stageOn.includes('独立的工具调用放同一批'), '搭台助手 persona 教「独立的工具调用放同一批」');
+const writerOn = playwriterTail({ image: true });
+check(
+	'M47',
+	// 《你怎么工作》在 persona 前缀里，《缺图怎么办》在尾段里——两段都要教到。
+	PLAYWRITER_PROMPT.includes('同一批发出的工具调用会并发跑') && writerOn.includes('放进同一批发出去'),
+	'剧作家：读回一次拿、缺图多张同批发',
+);
+check(
+	'M48',
+	['aivn-visual-craft', 'aivn-audio', 'aivn-play-setup'].every((name) => (skillFiles[name] ?? '').includes('同一批')),
+	'三份技能的素材食谱都写明「同一批」并发',
 );
 
 await rm(dir, { recursive: true, force: true });

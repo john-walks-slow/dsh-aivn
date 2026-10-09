@@ -17,10 +17,10 @@ description: 起一座新剧目、或改现有剧目的设定时用的四步做�
    一次性摆给用户看，等一句「可以 / 就这样」再落盘。开着命令行的话，`grep` / `jq` 这类比整篇读快得多。
 3. **列图单、出候选、拿到点头再入库**：先说清「接下来要出这几张图：背景 A（什么场景）、
    立绘 `<主体id>/neutral`、…，各是什么画面、为什么要」。
-   - 配了生图工具：先 `generate_image` 出候选（同一目标多调几次），把预览贴给用户挑，**用户点头之后**
+   - 配了生图工具：先 `generate_image` 出候选（同一目标多调几次、**放进同一批**，并发跑），把预览贴给用户挑，**用户点头之后**
      才落位——背景/插图 `import_asset(name=…, kind=…)`、立绘 `cut` 后 `import_asset(kind="sprite", …)`；
      或者干脆用 `generate_asset(kind=…, …)` 一键出图入库（常规补素材走这条）。出图要钱也要时间，
-     别一口气出一堆；定妆照（neutral）一次出 3 张候选让用户挑。
+     别一口气出一堆；定妆照（neutral）一次出 3 张候选让用户挑（3 张同批并发，与出 1 张的等待差不多）。
    - 没有生图工具：把图单交给用户，让他自己放进 `assets/`；放进来之后你用 `import_asset` 登记（立绘先 `cut` 抠底）。
 4. **落盘后同步记忆**：premise 写进 `memory/always/premise.md`，**创作口径写进 `memory/always/craft.md`**、
    **写作参数用 edit 写进 `play.json` 的 `craft` 段**，素材的描述补进 `assets/manifest.json`。
