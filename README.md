@@ -75,11 +75,13 @@ dsh plugin --profile web add github:john-walks-slow/dsh-aivn
     musicModel: flow-music-lyria-3.5
     musicApiKey: ""
     musicTimeoutMs: 240000
+    nsfwModel: ""                           # 限制级通道的专用模型（provider/model 最稳）；逐剧目可用 play.json 覆盖
+    nsfwPrompt: ""                          # 限制级创作指引后面的补充口径；逐剧目可用 play.json 覆盖
     playwriterDisabledTools: ""             # 按预设禁用工具（逗号分隔的工具名），默认空 = 两预设一致
     stagehandDisabledTools: ""
 ```
 
-**配置面是扁平的 19 个字段**（DSH 设置界面的控件只认顶层字段，嵌套写法它寻址不到）：
+**配置面是扁平的 21 个字段**（DSH 设置界面的控件只认顶层字段，嵌套写法它寻址不到）：
 
 | 配置项 | 默认 | 给了会怎样 | 环境变量兜底 |
 |---|---|---|---|
@@ -93,6 +95,8 @@ dsh plugin --profile web add github:john-walks-slow/dsh-aivn
 | `imageApiKey` / `imageTimeoutMs` | 空 / `180000` | 本机网关不校验就把 key 留空（不带鉴权头）；出图慢就把超时调大 | — |
 | `musicBaseUrl` / `musicModel` | — | 都给齐才有 `generate_bgm`（只有 Gemini 形状，没有 `format`） | — |
 | `musicApiKey` / `musicTimeoutMs` | 空 / `240000` | 同上；一首曲子实测约 84 秒 | — |
+| `nsfwModel` | 空 | 限制级通道的**专用模型**：写 `provider/model` 最稳（如 `cpa/某模型`），只写模型 id 会在已注册的 provider 里找；留空 = 进通道不换模型（提示词照旧切）。逐剧目可用 `play.json` 的 `agents.playwriter.nsfwModel` 覆盖 | — |
+| `nsfwPrompt` | 空 | 限制级创作指引后面的**补充口径**；逐剧目可用 `play.json` 的 `agents.playwriter.nsfwPrompt` 覆盖 | — |
 | `playwriterDisabledTools` / `stagehandDisabledTools` | 空 | 按预设禁用工具（逗号分隔的工具名，取值为「Agent 工具」清单里的工具名）。默认空 = 两预设工具面完全一致 | — |
 | 抠底调参 | 见「素材生成」 | `DSH_AIVN_CUTOUT_TOLERANCE` / `_KEY_SMOOTH` / `_EDGE_BAND` / `_SPILL` / `_SOLID_RESIDUAL` 五个环境变量 | 同名环境变量 |
 
@@ -168,6 +172,20 @@ key 两处都没有 = 那项能力停用：工具**不注册**、提示词里也
 
 导演说的话带自己一支来源（`dsh-aivn-director`），**不会变成一行玩家台词**：舞台的时间线上
 只有玩家真正说过的话。剧作家那边由系统提示词的《演出契约》第 7 条交代「（导演…」是片场喊话。
+
+### 限制级（NSFW）通道
+
+剧情推进到亲密 / 成人内容时，剧作家调 `enter_nsfw` 把这一段交给**限制级专用模型**（插件配置
+`nsfwModel`，逐剧目可用 `play.json` 的 `agents.playwriter.nsfwModel` 覆盖；留空 = 不换模型）。
+进通道后：
+
+- 提示词换成《限制级（NSFW）创作指引》（含剧目的 `memory/always/nsfw.md` 与补充提示词），
+  并先投一条合规声明；舞台左上角亮起「限制级」角标；
+- 退出走 `exit_nsfw`：引擎用**主模型**把这一段改写成 1-3 句全年龄摘要，再把这一段从
+  **模型可见面**上折掉——此后主模型只看得到那句摘要，而**日志与舞台照旧留着原文**；
+- 中途进出、冷开、分支、回退都从会话日志重推：段内重建角标照样亮，退出之后不再亮。
+
+对模型来说这一段读作「已收束为一句摘要」；对人类这边什么都不藏。
 
 ### 回退与分支：舞台跟着会话走
 
@@ -431,6 +449,7 @@ realm 里，宿主行与第三方插件注册的全局技能都不会漏进清�
 | 《写作参数》 | 每轮多长、给几条选项、素材来源，外加创作口径散文 | `play.json` 的 `craft` + `memory/always/craft.md` |
 | 《记忆索引》 | 每张设定卡一行（分类 / 标题 / 路径 / 摘要） | `memory/index/**` |
 | 静态后半 | 剧本格式（Stage DSL）、结局与多周目、记忆卡与世界状态、演出契约；外加两句指针——引入新角色（指向 `aivn-play-setup`）、缺图怎么办（指向 `aivn-visual-craft`，配了生图才在） | 插件注册的尾段（`playwriterTail`） |
+| 《限制级创作指引》 | 进通道后给创作指引（含剧目自己的 `memory/always/nsfw.md` 与补充提示词）；没进通道时只有一句**入口指针**（教它什么时候调 `enter_nsfw`） | 插件注册的段 `aivn:play-nsfw`，按通道现值逐轮切 |
 | 【状态】 | 场景、好感度、旗标、活跃剧情线（每轮变化的 user 角色快照） | `memory/always/state/*` |
 
 这些段**只挂给剧作家的会话**（注册在 Agent scope 上），搭台助手看不到舞台契约。
@@ -464,8 +483,8 @@ DSH 的「在新对话中分支」与舞台重建（只重放助手文本）都�
 
 **独立的事放同一批**：一条 assistant 消息里发几个互不依赖的调用（读几个文件、出几张图、抠几张底），
 一轮往返就能办完几件事；其中 `read` 与素材类工具（出图 / 抠底 / 登记 / 配乐 / 检索）声明了**可重叠**，
-DSH 把它们放进同一个并行池，等待不叠加。`set_stage_style` 是唯一不能重叠的 AIVN 工具——它读-改-写
-`theme.json` 且没有锁；宿主自带的 `glob` / `grep` / `write` / `edit` / `bash` 也独占
+DSH 把它们放进同一个并行池，等待不叠加。`set_stage_style`（读-改-写 `theme.json` 且没有锁）与 `enter_nsfw` / `exit_nsfw`
+（翻会话态并广播，一拍才调一次）是那几只不能重叠的 AIVN 工具；宿主自带的 `glob` / `grep` / `write` / `edit` / `bash` 也独占
 （同批只省往返，等待照样逐个来）。开关是 `src/tool-catalog.ts` 里每个工具的 `concurrent` 声明
 （缺省即独占），装配时由 `withConcurrency` 落成工具定义上的 `isConcurrencySafe`。
 
@@ -481,6 +500,8 @@ DSH 把它们放进同一个并行池，等待不叠加。`set_stage_style` 是�
 | `annotate_asset` | — | 给**已入库**的素材补 / 改元数据：`title` / `description` / `tags` / `mood` / `scene` / `loop` / `volume`，主体用 `kind`（background / cg / sprite / bgm）+ `name`（立绘给 `spriteId`，可带 `variant`）。只改给出的那几格，其余原样保留；描述是剧作家挑素材的依据、mood / scene 是它选曲的依据。**不依赖任何后端** |
 | `list_voices` | `tts.keys` | 查 Fish 音色库挑音色：按语言 / 标签 / 标题关键词取窗口，本地按 `gender` 筛，按热度排序，一页 25 条（`page` 从 1 起，结果末尾会提示下一页）。挑好的 id 填进角色卡的 `voice` |
 | `web_search` | `search.keys` | 联网检索：一次调用同时拿回结果与正文。只查剧目之外的事实——设定、角色、剧情都在工作区文件里 |
+| `enter_nsfw` | — | 进限制级通道：这一段交给限制级专用模型（配置 `nsfwModel`），提示词换成创作指引并投一条合规声明，舞台亮起角标。**只在剧作家的工具面上**（搭台助手不写剧情） |
+| `exit_nsfw` | — | 出限制级通道：引擎用主模型把这一段改写成全年龄摘要，再把这一段从模型可见面上折掉；舞台角标熄灭 |
 
 `list_voices` / `web_search` / `generate_image` / `generate_asset` / `generate_bgm` 在没配对应 key / 后端时
 **不注册**，提示词里也不提它们。**`validate_play` / `set_stage_style` / `cut` / `import_asset` 不门控**：

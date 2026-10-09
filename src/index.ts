@@ -107,6 +107,16 @@ export interface Config {
 	musicApiKey: Volatile<string>;
 	musicModel: Volatile<string>;
 	musicTimeoutMs: Volatile<number>;
+	/**
+	 * 限制级（NSFW）通道的专用模型 id（插件级默认值）。
+	 *
+	 * 逐剧目配在 `play.json` 的 `agents.playwriter.nsfwModel` 上，它优先；这一格是整台机器的
+	 * 缺省值（与服务端 `nsfwModelId` 同一个位置）。两种写法都收：`provider/model` 直接拆，
+	 * 光一个模型 id 就去已注册的 provider 目录里找。留空 = 进通道不换模型（提示词照旧切）。
+	 */
+	nsfwModel: Volatile<string>;
+	/** 限制级通道的补充提示词（插件级默认值）；`play.json` 的 `agents.playwriter.nsfwPrompt` 优先。 */
+	nsfwPrompt: Volatile<string>;
 	/** 按预设禁用的工具 id（逗号分隔，见 `src/tool-catalog.ts`）；默认空 = 两预设完全一致。 */
 	playwriterDisabledTools: Volatile<string>;
 	stagehandDisabledTools: Volatile<string>;
@@ -134,6 +144,8 @@ export const Config = z.object({
 	musicApiKey: z.string().role('secret').volatile(),
 	musicModel: z.string().default('').volatile(),
 	musicTimeoutMs: z.natural().default(240_000).volatile(),
+	nsfwModel: z.string().default('').volatile(),
+	nsfwPrompt: z.string().default('').volatile(),
 	playwriterDisabledTools: z.string().default('').volatile(),
 	stagehandDisabledTools: z.string().default('').volatile(),
 });
@@ -154,6 +166,8 @@ interface Runtime {
 	media: MediaBackends;
 	/** 按预设禁用的工具 id（从配置的逗号分隔串现算）。 */
 	disabled: DisabledTools;
+	/** 限制级通道的补充提示词（插件级缺省；逐剧目那份 `play.json` 优先，见 `play-context`）。 */
+	nsfwPrompt: string;
 }
 
 /** 从逗号分隔串现算禁用集；空串 → 空集。 */
@@ -198,6 +212,7 @@ function buildRuntime(config: Config): Runtime {
 			playwriter: parseToolList(config.playwriterDisabledTools.get()),
 			stagehand: parseToolList(config.stagehandDisabledTools.get()),
 		},
+		nsfwPrompt: config.nsfwPrompt.get() ?? '',
 	};
 }
 
@@ -231,7 +246,10 @@ export async function apply(ctx: Context, config: Config): Promise<() => void> {
 		ctx.logger,
 	);
 
-	const tap = installStageTap(ctx, hub, injected, voice, ledger);
+	const tap = installStageTap(ctx, hub, injected, voice, ledger, {
+		// 插件级缺省值（逐剧目那份 `play.json` 优先）。给的是 getter：配置是 volatile，读一次才算数。
+		nsfwModel: () => config.nsfwModel.get() ?? '',
+	});
 	// 导演的动作全是**会话层**的：提示投进下一轮，改写/重写往会话里加一条替换标记。
 	const director = new Director(hub, injected);
 	// 帧流的真相源是会话面：这条把「会话现在长什么样」重投影成一条帧流（回退、重写、分支、重启）。

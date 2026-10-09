@@ -88,7 +88,12 @@ export interface PlaySnapshot {
  * `canImage` 取的是**函数**而不是值：生图后端可以在会话开着的时候配好（设置界面里填
  * 地址与模型），这一格决定《写作参数》里那几行素材来源说不说得出「可以出图」。
  */
-export function readPlaySnapshot(dir: string, canImage: () => boolean = () => false): PlaySnapshot {
+export function readPlaySnapshot(
+	dir: string,
+	canImage: () => boolean = () => false,
+	/** 补充提示词的插件级缺省（逐剧目那份 `play.json` 优先）。 */
+	nsfwPromptDefault: string = '',
+): PlaySnapshot {
 	const play = loadPlaySync(dir);
 	if (!play) return EMPTY;
 
@@ -105,7 +110,8 @@ export function readPlaySnapshot(dir: string, canImage: () => boolean = () => fa
 		: '';
 
 	const nsfwMemory = readText(join(dir, 'memory', 'always', 'nsfw.md')).trim();
-	const nsfwPrompt = (play.config.agents?.playwriter?.nsfwPrompt ?? '').trim();
+	// 逐剧目那份优先，插件配置兜底（与服务端「play 覆盖实例配置」同一个次序）。
+	const nsfwPrompt = (play.config.agents?.playwriter?.nsfwPrompt ?? '').trim() || nsfwPromptDefault.trim();
 
 	const premise = play.config
 		? `# 剧目设定\n\n${
@@ -143,13 +149,13 @@ export function registerPlayContext(
 	agentCtx: Context,
 	playDir: () => string,
 	canImage: () => boolean,
-	nsfw: { channel: () => boolean; available: () => boolean },
+	nsfw: { channel: () => boolean; available: () => boolean; prompt: () => string },
 ): () => void {
 	let cache: { at: number; snapshot: PlaySnapshot } | null = null;
 	const snapshot = (): PlaySnapshot => {
 		const now = Date.now();
 		if (cache && now - cache.at < TTL_MS) return cache.snapshot;
-		const fresh = readPlaySnapshot(playDir(), canImage);
+		const fresh = readPlaySnapshot(playDir(), canImage, nsfw.prompt());
 		cache = { at: now, snapshot: fresh };
 		return fresh;
 	};

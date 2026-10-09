@@ -66,11 +66,13 @@ all out and everything still runs (those capabilities are simply absent):
     musicModel: flow-music-lyria-3.5
     musicApiKey: ""
     musicTimeoutMs: 240000
+    nsfwModel: ""                           # dedicated model for the mature channel (provider/model is safest); a play can override it
+    nsfwPrompt: ""                          # extra guidance for the mature writing guide; a play can override it
     playwriterDisabledTools: ""             # per-preset tool disable (comma-separated); empty = identical presets
     stagehandDisabledTools: ""
 ```
 
-**The config surface is 19 flat fields** (DSH's settings UI widgets only address top-level fields, so
+**The config surface is 21 flat fields** (DSH's settings UI widgets only address top-level fields, so
 a nested shape cannot be found):
 
 | Option | Default | What it enables | Env fallback |
@@ -85,6 +87,8 @@ a nested shape cannot be found):
 | `imageApiKey` / `imageTimeoutMs` | empty / `180000` | Leave the key empty for gateways that don't check it (no auth header is sent); raise the timeout if generation is slow | — |
 | `musicBaseUrl` / `musicModel` | — | Both must be set for `generate_bgm` (Gemini shape only, no `format`) | — |
 | `musicApiKey` / `musicTimeoutMs` | empty / `240000` | Same as above; one track measured at ~84 s | — |
+| `nsfwModel` | empty | The channel's **dedicated model**: `provider/model` is safest (e.g. `cpa/some-model`); a bare model id is looked up across registered providers. Empty = keep the current model (the prompt still switches). A play may override it with `agents.playwriter.nsfwModel` in `play.json` | — |
+| `nsfwPrompt` | empty | Extra guidance appended to the mature writing guide; a play may override it with `agents.playwriter.nsfwPrompt` | — |
 | `playwriterDisabledTools` / `stagehandDisabledTools` | empty | Disable tools per preset (comma-separated tool names from the "Agent tools" list). Empty by default = the two presets are tool-for-tool identical | — |
 | Cutout tuning | see "Asset generation" | `DSH_AIVN_CUTOUT_TOLERANCE` / `_KEY_SMOOTH` / `_EDGE_BAND` / `_SPILL` / `_SOLID_RESIDUAL`, five environment variables | same names |
 
@@ -162,6 +166,22 @@ play**; there is no generator. The fields and the layout live in both presets' p
 the character cards are already written, they are skipped and listed as "kept" in the receipt. The
 skeleton it leaves behind is the first few rows of the directory table below — fill in whatever is
 missing as you go. To check what you wrote, have the stage-hand assistant call `validate_play`.
+
+### The mature (NSFW) channel
+
+When the story reaches intimate / adult content the playwright calls `enter_nsfw`, handing that segment
+to the **dedicated mature model** (plugin config `nsfwModel`; a play may override it with
+`agents.playwriter.nsfwModel` in `play.json`; empty = keep the current model). Once inside:
+
+- the prompt switches to the mature writing guide (including the play's `memory/always/nsfw.md` and the
+  extra guidance), a compliance statement is injected first, and a badge lights up on the stage;
+- leaving goes through `exit_nsfw`: the engine rewrites the segment into a 1-3 sentence all-ages summary
+  with the **main model**, then folds the segment out of the **model-visible surface** — from then on the
+  main model only ever sees that summary, while the log and the stage keep the original text;
+- entering, leaving, cold starts, branches and rewinds all re-derive from the session log: a rebuild
+  inside the segment still lights the badge, and after leaving it stays off.
+
+To the model the segment reads as "folded into a summary"; nothing is hidden from humans.
 
 ## Anatomy of a play
 
@@ -385,6 +405,7 @@ document. The names below are translations of those headers.
 | "Writing parameters" | How long each beat is, how many options, asset sources, plus the creative-guidelines prose | `craft` in `play.json` + `memory/always/craft.md` |
 | "Memory index" | One line per setting card (category / title / path / summary) | `memory/index/**` |
 | Static suffix | Script format (Stage DSL), endings & new game plus, memory cards & world state, the performance contract, plus two pointers — introducing new characters (to `aivn-play-setup`) and missing images (to `aivn-visual-craft`, only with an image backend) | the trailing block the plugin registers (`playwriterTail`) |
+| "Mature writing guide" | Inside the channel: the mature writing guide (plus the play's own `memory/always/nsfw.md` and extra guidance); outside it: a single **entry pointer** teaching when to call `enter_nsfw` | the plugin's `aivn:play-nsfw` section, switched every beat from the channel state |
 | [State] | Scene, affinity, flags, active threads (a user-role snapshot that changes every beat) | `memory/always/state/*` |
 
 These sections **mount only for playwright sessions** (registered on the Agent scope), so the
@@ -428,8 +449,9 @@ To disable tools per preset, use the plugin config `playwriterDisabledTools` / `
 **Independent jobs go in one batch**: put several independent calls in a single assistant message
 (read a few files, generate a few images, cut a few backgrounds) and one round trip settles them all.
 `read` and the asset tools (generate / cut / register / BGM / search) are declared **overlappable**, so
-DSH schedules them in one parallel pool and the waits do not add up. `set_stage_style` is the one AIVN
-tool that is not — it does a read-modify-write of `theme.json` without a lock; the host's own `glob` /
+DSH schedules them in one parallel pool and the waits do not add up. `set_stage_style` (a lockless
+read-modify-write of `theme.json`) and `enter_nsfw` / `exit_nsfw` (they flip session state and
+broadcast; they are called at most once per beat) are the AIVN tools that are not — the host's own `glob` /
 `grep` / `write` / `edit` / `bash` are exclusive too (batching them saves round trips, not waits). The
 switch is the `concurrent` flag on each tool in `src/tool-catalog.ts` (omitted = exclusive); the
 assembly stamps it onto the tool definition with `withConcurrency`.
@@ -446,6 +468,8 @@ assembly stamps it onto the tool definition with `withConcurrency`.
 | `annotate_asset` | — | Annotates an **already registered** asset: `title` / `description` / `tags` / `mood` / `scene` / `loop` / `volume`, addressed by `kind` (background / cg / sprite / bgm) + `name` (sprites use `spriteId`, optionally `variant`). Only the fields you pass change. Needs no backend |
 | `list_voices` | `tts.keys` | Searches the Fish voice catalog: builds a window from language / tags / title keywords, filters `gender` locally, sorts by likes, 25 per page (`page` is 1-based; the tail of each result points at the next page). The id you pick goes into the card's `voice` |
 | `web_search` | `search.keys` | Web search: one call returns results and page text together. For facts **outside** the play — the setting, cast and plot all live in the workspace files |
+| `enter_nsfw` | — | Enters the mature channel: this segment is handed to the dedicated mature model (config `nsfwModel`), the prompt switches to the writing guide and one compliance statement is injected, and the stage badge lights up. **Playwright only** (the stage-hand assistant does not write the story) |
+| `exit_nsfw` | — | Leaves the mature channel: the engine rewrites the segment into an all-ages summary with the main model and folds it out of the model-visible surface; the badge goes out |
 
 `list_voices` / `web_search` / `generate_image` / `generate_asset` / `generate_bgm` are **not registered**
 when their keys / backends are absent, and the prompt never mentions them.

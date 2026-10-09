@@ -120,6 +120,8 @@ function buildTool(spec: ToolSpec, play: PlayContext, deps: ToolDeps): ToolDefin
 /** 装配要用的外部面：能力位与「配了才有」的几个客户端，以及按预设的禁用集。 */
 export interface ToolDeps {
 	capabilities: Capabilities;
+	/** 限制级通道的补充提示词（插件级缺省；逐剧目那份 `play.json` 优先）。 */
+	nsfwPrompt: string;
 	voices: VoiceCatalog | null;
 	exa: Exa | null;
 	media: MediaBackends;
@@ -284,6 +286,8 @@ function install(
 						channel: () => nsfw.active(sessionId),
 						// 这两位被用户在配置里禁掉时，连入口指针也不提——不能让提示词教一个不存在的工具。
 						available: () => !disabled.has('enter_nsfw'),
+						// 补充提示词的插件级缺省（逐剧目那份 `play.json` 优先，见 `play-context`）。
+						prompt: () => runtime.current.nsfwPrompt,
 					}),
 				'dsh-aivn:play-context',
 			),

@@ -68,6 +68,11 @@ export function installStageTap(
 	injected: InjectedMessages,
 	voice: VoiceHost,
 	ledger: EndingsLedger,
+	/**
+	 * 限制级模型那一格的现值（getter，配置是可改的）：逐剧目那份 `play.json` 优先，这里只是缺省值。
+	 * 补充提示词那一格归提示词这边（`play-context`），不经这里。
+	 */
+	config: { nsfwModel: () => string },
 ): StageTap {
 	const parsers = new Map<string, StageDslParser>();
 	/** 每会话的语音管线（懒建：这一行的角色没有音色时它什么都不做）。 */
@@ -138,7 +143,8 @@ export function installStageTap(
 	 */
 	const resolveNsfwPlan = async (sessionId: string): Promise<ModelSelection | null> => {
 		const configured = loadPlaySync(sessionWorkspace(ctx, sessionId))?.config.agents?.playwriter;
-		const model = (configured?.nsfwModel ?? '').trim();
+		// 逐剧目那份优先，插件配置兜底（服务端也是「play 覆盖实例配置」这个次序）。
+		const model = (configured?.nsfwModel ?? '').trim() || config.nsfwModel().trim();
 		if (model === '') return null;
 		const thinking: ThinkingLevel | undefined = configured?.nsfwThinking;
 		// `default` 等于不指定：清掉继承来的档位，跟着这个模型自己的默认走（见 installModelSelection）。
@@ -303,8 +309,12 @@ export function installStageTap(
 		enter: async (sessionId) => {
 			const state = nsfwOf(sessionId);
 			// 解析放在这里而不是轮间：`listModels` 要问各 provider 的目录，早一步问掉，
-			// 两拍之间那次切换就只剩「读现值 + 写新值」。
-			if (state.plan === undefined) state.plan = await resolveNsfwPlan(sessionId);
+			// 两拍之间那次切换就只剩「读现值 + 写新值」。解析不出来不留在状态里：下次进来重试一遍，
+			// 「先把模型配好再进通道」和「进过一次再配好」都能生效。
+			if (state.plan === undefined) {
+				const plan = await resolveNsfwPlan(sessionId);
+				if (plan) state.plan = plan;
+			}
 			state.pendingEnter = true;
 			signalNsfw(sessionId, state);
 		},

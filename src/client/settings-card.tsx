@@ -148,6 +148,18 @@ const GROUPS: readonly Group[] = [
 			},
 			{ field: 'imageTimeoutMs', label: '生图超时（毫秒）', hint: '出图慢就调大', kind: 'number' },
 			{ field: 'musicTimeoutMs', label: '配乐超时（毫秒）', hint: '一首曲子实测约 84 秒', kind: 'number' },
+			{
+				field: 'nsfwModel',
+				label: '限制级专用模型',
+				hint: '剧作家进限制级通道后接手写成人细节的模型。写 provider/model 最稳（如 cpa/某模型），只写模型 id 会在已注册的 provider 里找；留空 = 不换模型（只切提示词）。逐剧目可用 play.json 的 agents.playwriter.nsfwModel 覆盖',
+				kind: 'text',
+			},
+			{
+				field: 'nsfwPrompt',
+				label: '限制级补充提示词',
+				hint: '拼在限制级创作指引后面的补充口径。逐剧目可用 play.json 的 agents.playwriter.nsfwPrompt 覆盖',
+				kind: 'text',
+			},
 		],
 	},
 ];
