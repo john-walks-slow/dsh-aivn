@@ -19,11 +19,12 @@
  */
 import { StageDslParser, type StageEvent } from '@aivn/core';
 import type { Context } from '@deepseek-ai/cordis';
-import { isReplacementSurfaceEvent, type SessionEvent, type SessionId } from '@deepseek-ai/dsh-session';
+import { isReplacementSurfaceEvent, type SessionEvent, type SessionId, type SessionSeq } from '@deepseek-ai/dsh-session';
 import type { Message } from '@deepseek-ai/dsh-llm';
 import type { ModelSelection } from '@deepseek-ai/dsh-api-session-controller';
 import type { GuideFrameItem, StageHub } from '../hub';
 import type { InjectedMessages } from '../injected';
+import { NSFW_FOLD_KIND } from './nsfw';
 import { loadPlaySync } from '../play/play';
 import {
 	attachedAgent,
@@ -131,6 +132,14 @@ export function rebuildStage(
 	let lastSelected: ModelSelection | null = null;
 	const callNames = new Map<string, string>();
 	const onSurface = new Set(session.surface.nodes);
+	/**
+	 * 限制级折叠区间（`[startSeq, endSeq]` 一条）。
+	 *
+	 * 折叠是**只挡模型那一侧**的面替换（见 `stage-tap` 的 `foldSegment`）：模型此后只看得到那句
+	 * 摘要，日志与人类这边照旧留着原文——所以重建帧流时要把这一段**照渲回去**。判据是标记消息的
+	 * 来源种类（`source.kind`），不是「有没有发生替换」：导演重写同样是面替换，那一段是真该藏。
+	 */
+	const foldedRanges: Array<[SessionSeq, SessionSeq]> = [];
 	for (const event of snapshot) {
 		if (event.type === 'tool/call') {
 			callNames.set(event.data.callId, event.data.name);
@@ -138,6 +147,13 @@ export function rebuildStage(
 		}
 		if (event.type === 'model/selection') {
 			lastSelected = event.data;
+			continue;
+		}
+		if (event.type === 'user/message' && event.sourceEventSeqs !== undefined) {
+			const message = (event.data as { source?: { kind?: string } }).source;
+			if (message?.kind === NSFW_FOLD_KIND && typeof event.surfaceOp === 'object') {
+				foldedRanges.push([event.surfaceOp.startSeq, event.surfaceOp.endSeq]);
+			}
 			continue;
 		}
 		if (event.type !== 'tool/result' || !onSurface.has(event.seq)) continue;
@@ -162,8 +178,20 @@ export function rebuildStage(
 		deps.onEvent?.(sessionId, event);
 	});
 
-	for (const seq of session.surface.nodes) {
-		const event = events.get(seq);
+	/**
+	 * 重建要铺的事件序列：**会话面**（权威）+ 限制级折叠区间里被挡掉的那些。
+	 *
+	 * 顺序按 seq——折叠标记自己也在面上，它照常被跳过（来源不是 `user`，不是玩家说的话）。
+	 */
+	const displaySeqs = new Set<number>(session.surface.nodes);
+	for (const event of snapshot) {
+		if (!foldedRanges.some(([from, to]) => event.seq >= from && event.seq <= to)) continue;
+		if (event.type === 'assistant/message' || event.type === 'user/message') displaySeqs.add(event.seq);
+	}
+	const displayNodes = [...displaySeqs].sort((a, b) => a - b);
+
+	for (const seq of displayNodes) {
+		const event = events.get(seq as never);
 		if (!event) continue;
 		// `session.deriveEventMessage` 而不是裸的 `deriveEventMessage`：前者把插件登记的消息投影
 		// （别的插件改过内容的那种）也应用上，重建出来的才是模型真正看到的那份。

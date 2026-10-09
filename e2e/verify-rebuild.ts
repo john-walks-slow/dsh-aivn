@@ -68,6 +68,8 @@ function buildTranscript(options?: {
 	tools?: readonly { afterBeat: number; name: 'enter_nsfw' | 'exit_nsfw'; resultOnSurface: boolean }[];
 	/** 宿主建会话时记下的那条模型选择（`model/selection`，日志里一条 log-only 事件）。 */
 	selection?: { provider: string; model: string };
+	/** 限制级折叠：把第 from..to 拍的助手消息从**会话面**上换成一条摘要标记（日志里照旧留着）。 */
+	fold?: { fromBeat: number; toBeat: number; summary: string };
 }): { events: FakeEvent[]; nodes: number[] } {
 	const beats = options?.beats ?? BEATS;
 	const tools = options?.tools ?? [];
@@ -104,8 +106,53 @@ function buildTranscript(options?: {
 			}
 		}
 	}
+	if (options?.fold) {
+		// 折叠：那几拍的助手消息被一条替换标记盖掉（`surfaceOp: replace`，与导演重写同一个机制）。
+		// 面上因此不再有它们——这正是「模型只看得到摘要」那一侧；日志（events）照旧全都在。
+		const { fromBeat, toBeat, summary } = options.fold;
+		const foldedSeqs = surface.filter((seq) => {
+			const event = events.find((item) => item.seq === seq);
+			if (event?.type !== 'assistant/message') return false;
+			const index = assistantBeatIndex(events, seq);
+			return index >= fromBeat && index <= toBeat;
+		});
+		const startSeq = foldedSeqs[0] ?? 0;
+		const endSeq = foldedSeqs[foldedSeqs.length - 1] ?? 0;
+		const marker = {
+			id: `fold-${startSeq}`,
+			role: 'user',
+			content: [{ type: 'text', text: `（限制级段落已收束为剧情摘要——${summary}）` }],
+			source: { kind: 'dsh-aivn-nsfw-fold' },
+		};
+		const seq = events.length + 1;
+		events.push({
+			seq,
+			type: 'user/message',
+			message: marker,
+			data: marker,
+			// 真事件的形状：面替换的意图挂在事件上（`surfaceOp` + 引用被挡掉的那些 seq）。
+			surfaceOp: { op: 'replace', startSeq, endSeq },
+			sourceEventSeqs: foldedSeqs,
+		} as unknown as FakeEvent);
+		// 替换标记进面；被盖掉的那几条出去。
+		const kept = surface.filter((item) => !foldedSeqs.includes(item));
+		kept.push(seq);
+		kept.sort((a, b) => a - b);
+		return { events, nodes: kept };
+	}
 	return { events, nodes: surface };
 }
+
+/** 第几条助手消息（从 1 数起）：折叠范围按「拍」给，这里换算成事件。 */
+function assistantBeatIndex(events: FakeEvent[], seq: number): number {
+	let beat = 0;
+	for (const event of events) {
+		if (event.type === 'assistant/message') beat += 1;
+		if (event.seq === seq) return beat;
+	}
+	return beat;
+}
+
 
 /** 把假转写包成一个 `LiveSession`：只实现重建真正用到的那四个口子。 */
 function fakeSession(transcript: { events: FakeEvent[]; nodes: number[] }): LiveSession {
@@ -267,6 +314,48 @@ check(
 	'R17',
 	rebuiltInSegment.active && rebuiltInSegment.main?.provider === 'cpa' && rebuiltInSegment.main.model === 'main-model',
 	`段内重建记住进段前的主模型（实际 ${JSON.stringify(rebuiltInSegment.main ?? null)}）`,
+);
+
+/* ── 限制级折叠：模型那一侧折掉，人类这一侧照渲 ─────────────────────── */
+
+/**
+ * 折叠（退出限制级时把这一段换成一句摘要）是**只挡模型那一侧**的面替换：日志里原文都在。
+ * 重建帧流时若只认会话面，冷开 / 分支之后这一段就会从舞台上消失——而玩家应当照旧看得到它。
+ * 判据就是「折叠标记的来源种类」（`src/stage/nsfw.ts` 的 `NSFW_FOLD_KIND`），与导演重写区分开。
+ */
+const foldBeats = [
+	{ id: 'beat1', text: `${SAY('第一拍。')}\n<stop options="去天台 | 回家"/>` },
+	{ id: 'beat2', text: `${SAY('第二拍：这一段是限制级原文。')}\n<stop/>` },
+	{ id: 'beat3', text: `${SAY('第三拍。')}\n<stop/>` },
+];
+const foldHub = new StageHub();
+const foldTranscript = buildTranscript({
+	beats: foldBeats,
+	fold: { fromBeat: 2, toBeat: 2, summary: '两人互诉心意，关系有了突破。' },
+});
+rebuildStage('fixture-fold', fakeSession(foldTranscript), false, {
+	hub: foldHub,
+	injected: new InjectedMessages(),
+	voice: { replayCached: () => {} } as unknown as VoiceHost,
+});
+const foldFrames = foldHub.history('fixture-fold');
+const foldTexts = foldFrames
+	.filter((frame) => frame.kind === 'ir')
+	.map((frame) => (frame as { event?: { kind?: string; delta?: string } }).event)
+	.filter((event) => event?.kind === 'say_text' || event?.kind === 'narrate_text')
+	.map((event) => event?.delta ?? '');
+const foldInputs = foldFrames
+	.filter((frame) => frame.kind === 'player_input')
+	.map((frame) => (frame as { text?: string }).text ?? '');
+check(
+	'R18',
+	foldTexts.some((text) => text.includes('限制级原文')),
+	'折叠之后重建：被折叠的那一拍照旧演出来（模型那一侧才折）',
+);
+check(
+	'R19',
+	!foldInputs.some((text) => text.includes('已收束为剧情摘要')),
+	'折叠标记不会被念成玩家台词（来源种类不是 user）',
 );
 
 let failed = 0;

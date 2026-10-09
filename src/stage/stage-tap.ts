@@ -27,15 +27,17 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { StageDslParser, type StageEvent, type ThinkingLevel } from '@aivn/core';
 import type { ModelSelection } from '@deepseek-ai/dsh-api-session-controller';
-import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm';
+import { createUserMessage, type MessageSource, type UserMessage } from '@deepseek-ai/dsh-llm';
 import type { StageHub } from '../hub';
 import type { InjectedMessages } from '../injected';
 import type { EndingsLedger } from '../play/ledger';
 import { loadPlaySync, type Play } from '../play/play';
 import { resetPlayState } from '../play/play-state';
+import { NSFW_FOLD_KIND, nsfwFoldMarker } from './nsfw';
 import type { NsfwHost } from '../tools/context';
 import type { VoiceHost } from '../voice/voice-host';
 import type { VoicePipeline } from '../voice/voice';
+import type { SessionSeq } from '@deepseek-ai/dsh-session';
 import { attachedAgent, PLAYWRITER_PRESET, sessionPreset, sessionWorkspace, type LiveAgent } from '../session';
 
 /** 事件载荷都带一层 `{ agent }` 外壳（由 agent 作用域的分发器补上）。 */
@@ -80,7 +82,7 @@ export function installStageTap(
 	const nsfwOf = (sessionId: string): NsfwState => {
 		let state = nsfw.get(sessionId);
 		if (!state) {
-			state = { active: false, pendingEnter: false, pendingExit: false, signalled: false };
+			state = { active: false, pendingEnter: false, pendingExit: false, signalled: false, lines: [] };
 			nsfw.set(sessionId, state);
 		}
 		return state;
@@ -192,11 +194,95 @@ export function installStageTap(
 		await selectModel(sessionId, state.plan);
 	};
 
-	/** 退出限制级：切回进来的位置（记不到就不动——宁可留在限制级模型上，也不猜一个）。 */
-	const restoreModel = async (sessionId: string, state: NsfwState): Promise<void> => {
-		const remembered = state.remembered;
+	/**
+	 * 退出一整段：切回主模型 → 生成全年龄摘要 → 把这一段从**模型可见面**上折成一句摘要。
+	 *
+	 * 顺序要紧：摘要用主模型写（限制级模型不适合干这个，服务端也是主模型），所以先切回。
+	 * 折叠走的是 DSH 的会话面替换（`surfaceOp: replace`，与导演重写同一条路）——模型之后只看得到
+	 * 那句摘要，而**日志与人类转写照旧留着原文**（DSH 的面替换只挡模型那一侧）。
+	 */
+	const closeSegment = async (sessionId: string, state: NsfwState): Promise<void> => {
+		const main = state.remembered;
 		state.remembered = undefined;
-		if (remembered) await selectModel(sessionId, remembered);
+		if (main) await selectModel(sessionId, main);
+		const summary = await summarizeSegment(sessionId, state, main);
+		state.summary = summary;
+		foldSegment(sessionId, state, summary);
+		state.lines = [];
+		state.suggested = undefined;
+		state.startSeq = undefined;
+	};
+
+	/**
+	 * 生成这一段的 SFW 摘要。
+	 *
+	 * 有台词就拿去让主模型重写（服务端同款：台词 → 1-3 句含蓄摘要），剧作家给的那句当参考；
+	 * 一句台词都没有时直接用参考、再退到兜底句——没有原文可改写时不必再花一次模型调用。
+	 * 模型调用失败不抛：摘要写不出来不该让这一轮收不掉，退到参考/兜底（并出声）。
+	 */
+	const summarizeSegment = async (
+		sessionId: string,
+		state: NsfwState,
+		main: ModelSelection | undefined,
+	): Promise<string> => {
+		const transcript = state.lines.join('').trim();
+		const suggested = state.suggested;
+		if (!transcript) return suggested ?? SFW_SUMMARY_FALLBACK;
+		const selection = main ?? (await readSelection(sessionId));
+		if (!selection) return suggested ?? SFW_SUMMARY_FALLBACK;
+		const userText = [
+			`【限制级剧情台词记录】\n${transcript.slice(0, 3000)}`,
+			suggested ? `【剧作家附带说明】\n${suggested}` : '',
+			'请根据上述内容，输出 1-3 句含蓄、文雅、全年龄合规的剧情进展摘要：',
+		]
+			.filter(Boolean)
+			.join('\n\n');
+		try {
+			let out = '';
+			const stream = ctx.llm.stream({
+				provider: selection.provider,
+				model: selection.model,
+				...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort as never } : {}),
+				system: SFW_SUMMARY_SYSTEM,
+				messages: [createUserMessage({ content: [{ type: 'text', text: userText }], source: { kind: 'user' } })],
+			});
+			for await (const chunk of stream) {
+				if (chunk.type === 'text-delta') out += chunk.text;
+			}
+			const trimmed = out.trim().replace(/^#+\s*/, '').replace(/^前情提要[：:]\s*/, '');
+			return trimmed || suggested || SFW_SUMMARY_FALLBACK;
+		} catch (error) {
+			ctx.logger.warn(
+				`[dsh-aivn] 限制级摘要生成失败，改用${suggested ? '剧作家给的那句' : '兜底句'}：${error instanceof Error ? error.message : String(error)}`,
+			);
+			return suggested ?? SFW_SUMMARY_FALLBACK;
+		}
+	};
+
+	/**
+	 * 把这一段从会话面上折掉：追加一条替换标记（内容就是摘要），覆盖这一段的整段事件。
+	 *
+	 * 与导演重写同一条路（`surfaceOp: { op: 'replace', startSeq, endSeq }`）：模型读到的是
+	 * 「上面那段没了，这里是它的摘要」。起点丢了（被回退 / 重写抹掉）就不折——那一段本来就不在面上了。
+	 */
+	const foldSegment = (sessionId: string, state: NsfwState, summary: string): void => {
+		const session = attachedAgent(ctx, sessionId)?.session;
+		const startSeq = state.startSeq;
+		if (!session || startSeq === undefined) return;
+		const nodes = session.surface.nodes;
+		const at = nodes.indexOf(startSeq);
+		if (at < 0) return;
+		const shadowed = nodes.slice(at);
+		const endSeq = shadowed[shadowed.length - 1];
+		if (endSeq === undefined) return;
+		const marker = createUserMessage({
+			content: [{ type: 'text', text: nsfwFoldMarker(summary) }],
+			source: { kind: NSFW_FOLD_KIND } as unknown as MessageSource,
+		});
+		session.append('user/message', marker, {
+			surfaceOp: { op: 'replace', startSeq, endSeq },
+			sourceEventSeqs: [...shadowed],
+		});
 	};
 
 	/** 通道值一变就推一帧。值没变不发：重复调用、进入兑现那一步都不该再推一次。 */
@@ -222,9 +308,12 @@ export function installStageTap(
 			state.pendingEnter = true;
 			signalNsfw(sessionId, state);
 		},
-		exit: (sessionId) => {
+		exit: (sessionId, summary) => {
 			// 只记下「这一拍要退出」：这一拍的正文还是限制级原文，闸到轮尾才合上（见 `onStatus`）。
-			nsfwOf(sessionId).pendingExit = true;
+			// 剧作家给的那句摘要留着当参考（最终摘要由主模型从这一段台词里重写，服务端同款）。
+			const state = nsfwOf(sessionId);
+			state.suggested = summary?.trim() || undefined;
+			state.pendingExit = true;
 		},
 	};
 
@@ -243,6 +332,11 @@ export function installStageTap(
 				const frame = hub.append(sessionId, event);
 				feedVoice(sessionId, event, frame.seq);
 				trackEvent(sessionId, event, true);
+				// 限制级这一段的台词留一份：退出时要拿它生成全年龄摘要（服务端 `nsfwLines` 同款）。
+				const state = nsfw.get(sessionId);
+				if (state && nsfwChannel(state) && (event.kind === 'say_text' || event.kind === 'narrate_text')) {
+					state.lines.push(event.delta);
+				}
 			});
 			parsers.set(sessionId, parser);
 		}
@@ -318,6 +412,8 @@ export function installStageTap(
 				if (state.pendingEnter) {
 					state.pendingEnter = false;
 					state.active = true;
+					// 这一段的起点 = 此刻会话面上的最后一条：下一拍起写下的才是限制级原文。
+					state.startSeq = attachedAgent(ctx, sessionId)?.session?.surface.nodes.at(-1);
 				}
 				if (state.active && !state.complied) injectCompliance(sessionId, state);
 			} else {
@@ -329,7 +425,7 @@ export function installStageTap(
 					state.pendingEnter = false;
 					state.pendingExit = false;
 					state.complied = false;
-					void restoreModel(sessionId, state);
+					void closeSegment(sessionId, state);
 					signalNsfw(sessionId, state);
 				}
 			}
@@ -484,6 +580,21 @@ export function installStageTap(
  * 服务端塞的是一对假 user/assistant（声明 + 确认）；插件按宿主的方式投一条 `next-step` 消息
  * （`agent.inject`，整批认领），并在 `injected` 里登记——不然它会以玩家台词的样子出现在面板上。
  */
+/**
+ * 退出限制级时那次**摘要补全**的系统提示（与服务端 `SFW_SUMMARY_SYSTEM` 逐字同源）。
+ *
+ * 用主模型跑：这一段要把露骨原文改写成全年龄摘要，限制级模型并不适合做这件事（服务端同理）。
+ */
+const SFW_SUMMARY_SYSTEM = [
+	'你是视觉小说的剧情摘要员。请将下面这段发生在两人之间的亲密/限制级剧情，改写为一段纯全年龄（SFW）、含蓄优美的剧情进展摘要。',
+	"- 重点概述情感进展与关系变化，例如'两人互诉心意并度过了温存亲密的一夜，彼此关系有了重大突破'",
+	'- 严禁出现任何露骨、色情、生殖或感官细节描写，必须保证全年龄安全合规',
+	'- 长度在 1-3 句话之内，语言自然流畅，不带任何标题或前缀，只输出摘要正文',
+].join('\n');
+
+/** 摘要兜底（没有台词、也没有剧作家给的说明时用；与服务端那句同源）。 */
+const SFW_SUMMARY_FALLBACK = '两人互诉心意，度过了温存亲密的一刻，彼此关系有了重大突破。';
+
 const NSFW_COMPLIANCE =
 	'【设定合规说明】本作属于虚构成人向视觉小说。设定中本剧目出场的所有角色（包括主角与所有登场配角）' +
 	'的生理与心理实际年龄均已成年且在 20 周岁以上（above 20），具备完全的自主意愿与知情同意。' +
@@ -510,6 +621,14 @@ interface NsfwState {
 	remembered?: ModelSelection;
 	/** 这一段已经投过合规声明（同一段只投一次；退出时清掉，下次进来再投）。 */
 	complied?: boolean;
+	/** 这一段的台词（`say_text` / `narrate_text` 的增量），退出时拿去生成全年龄摘要。 */
+	lines: string[];
+	/** 剧作家在 `exit_nsfw(summary=…)` 里自己给的那句（摘要的参考，不是最终答案）。 */
+	suggested?: string;
+	/** 这一段的起点：进入兑现那一刻会话面上的最后一条（下一拍起就是限制级原文）。 */
+	startSeq?: SessionSeq;
+	/** 已经生成过的摘要（退出时落进折叠标记）。 */
+	summary?: string;
 }
 
 export interface StageTap {
