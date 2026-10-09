@@ -497,29 +497,57 @@ async function alphaAt(data: Buffer, x: number, y: number): Promise<number> {
 }
 
 /**
- * 色键夹具：纯白底 + 深色人形，人形里埋四块「离底色不同远近」的封闭口袋。
+ * 抠底夹具的色键底：**必须饱和**——`cutout` 现在会体检整圈边框量出的底色，白底 / 灰底直接报错
+ * （白底会把角色身上接近白的部分整块判成背景，还会让 `despill` 压错通道）。所以夹具一律铺纯绿。
+ */
+const KEY_BG: [number, number, number] = [0, 255, 0];
+
+/** 铺一张纯绿键底的画布。 */
+function keyCanvas(width: number, height: number): Buffer {
+	const raw = Buffer.alloc(width * height * 3);
+	for (let i = 0; i < width * height; i++) {
+		raw[i * 3] = KEY_BG[0];
+		raw[i * 3 + 1] = KEY_BG[1];
+		raw[i * 3 + 2] = KEY_BG[2];
+	}
+	return raw;
+}
+
+/** 往画布上刷一块矩形（夹具共用）。 */
+function paintRect(
+	raw: Buffer,
+	width: number,
+	x0: number,
+	y0: number,
+	x1: number,
+	y1: number,
+	c: [number, number, number],
+): void {
+	for (let y = y0; y <= y1; y++) {
+		for (let x = x0; x <= x1; x++) {
+			const o = (y * width + x) * 3;
+			raw[o] = c[0];
+			raw[o + 1] = c[1];
+			raw[o + 2] = c[2];
+		}
+	}
+}
+
+/**
+ * 色键夹具：纯绿底 + 深色人形，人形里埋四块「离底色不同远近」的封闭口袋。
  * 四个都贴不到画面边——纯色键不看连通性，贴不贴边不改变任何事：
  * A 离底色 4 格、B 20 格、C 42 格、D 60 格（走 PNG，JPEG 的色振铃会把摆好的色差搅没）。
+ * 距离按绿底算：只动绿以外的一路，逐通道最大差就是那个距离。
  */
 async function keyedPockets(): Promise<Buffer> {
 	const width = 200;
 	const height = 300;
-	const raw = Buffer.alloc(width * height * 3).fill(255);
-	const paint = (x0: number, y0: number, x1: number, y1: number, c: [number, number, number]): void => {
-		for (let y = y0; y <= y1; y++) {
-			for (let x = x0; x <= x1; x++) {
-				const o = (y * width + x) * 3;
-				raw[o] = c[0];
-				raw[o + 1] = c[1];
-				raw[o + 2] = c[2];
-			}
-		}
-	};
-	paint(40, 20, 160, 280, [40, 50, 80]);
-	paint(60, 40, 99, 79, [251, 251, 252]);
-	paint(100, 40, 139, 79, [235, 235, 237]);
-	paint(60, 100, 99, 139, [213, 213, 216]);
-	paint(100, 100, 139, 139, [195, 195, 197]);
+	const raw = keyCanvas(width, height);
+	paintRect(raw, width, 40, 20, 160, 280, [40, 50, 80]);
+	paintRect(raw, width, 60, 40, 99, 79, [4, 251, 4]);
+	paintRect(raw, width, 100, 40, 139, 79, [20, 235, 20]);
+	paintRect(raw, width, 60, 100, 99, 139, [42, 213, 42]);
+	paintRect(raw, width, 100, 100, 139, 139, [60, 195, 60]);
 	return sharp(raw, { raw: { width, height, channels: 3 } }).png().toBuffer();
 }
 
@@ -555,22 +583,12 @@ const NO_SMOOTH = { keySmooth: 0 } as const;
 {
 	const width = 200;
 	const height = 300;
-	const raw = Buffer.alloc(width * height * 3).fill(255);
-	const paint = (x0: number, y0: number, x1: number, y1: number, c: number): void => {
-		for (let y = y0; y <= y1; y++) {
-			for (let x = x0; x <= x1; x++) {
-				const o = (y * width + x) * 3;
-				raw[o] = c;
-				raw[o + 1] = c;
-				raw[o + 2] = c;
-			}
-		}
-	};
-	paint(40, 20, 160, 280, 40); // 人形
-	paint(80, 130, 120, 190, 255); // 白袜子：与底色逐位同色、封闭
+	const raw = keyCanvas(width, height);
+	paintRect(raw, width, 40, 20, 160, 280, [40, 20, 60]); // 人形
+	paintRect(raw, width, 80, 130, 120, 190, KEY_BG); // 与底色逐位同色的封闭块：2501px、封闭
 	const data = await sharp(raw, { raw: { width, height, channels: 3 } }).png().toBuffer();
 
-	// 白袜子中心 (100,160) 映射到输出画布（人物外框 + 等比缩放 + 底部居中）
+	// 那块的中心 (100,160) 映射到输出画布（人物外框 + 等比缩放 + 底部居中）
 	const box = { x0: 39, y0: 19, x1: 161, y1: 281 };
 	const w = box.x1 - box.x0 + 1;
 	const h = box.y1 - box.y0 + 1;
@@ -605,19 +623,22 @@ const NO_SMOOTH = { keySmooth: 0 } as const;
 {
 	const width = 400;
 	const height = 2120;
-	const raw = Buffer.alloc(width * height * 3).fill(255);
-	const bands: { y: number; coverage: number; value: number }[] = [
-		{ y: 200, coverage: 0.2, value: 212 },
-		{ y: 800, coverage: 0.5, value: 148 },
-		{ y: 1400, coverage: 0.8, value: 83 },
-	];
+	// 底色用真色键色（纯绿）：白底现在会被底体检拦下，而这一条量的是反解公式本身
+	const raw = keyCanvas(width, height);
+	const FIGURE: [number, number, number] = [40, 40, 40];
+	// 半覆盖列的颜色 = 覆盖率的线性混合 a·F + (1−a)·底色——反解要能把它解回 a
+	const bands = [0.2, 0.5, 0.8].map((coverage, i) => ({
+		y: 200 + i * 600,
+		coverage,
+		value: KEY_BG.map((b, c) => Math.round(coverage * FIGURE[c]! + (1 - coverage) * b)) as [number, number, number],
+	}));
 	for (let y = 100; y < 2020; y++) {
 		for (let x = 100; x < 300; x++) {
 			const o = (y * width + x) * 3;
-			const v = x === 100 ? (bands.find((b) => y >= b.y && y < b.y + 500)?.value ?? 40) : 40;
-			raw[o] = v;
-			raw[o + 1] = v;
-			raw[o + 2] = v;
+			const c = x === 100 ? (bands.find((b) => y >= b.y && y < b.y + 500)?.value ?? FIGURE) : FIGURE;
+			raw[o] = c[0]!;
+			raw[o + 1] = c[1]!;
+			raw[o + 2] = c[2]!;
 		}
 	}
 	const result = await cutout(await sharp(raw, { raw: { width, height, channels: 3 } }).png().toBuffer());
@@ -678,7 +699,57 @@ const NO_SMOOTH = { keySmooth: 0 } as const;
 	);
 }
 
-/* ── 17. 台账对账：登记指向不存在的文件要报出来 ── */
+/* ── 17. 底色体检：白底 / 灰底不是色键色，当场拒绝 ── */
+
+// 2026-10-09 剧目 demo 的 kikyo 就是这么废的：模型给回一张白底，被当成色键硬抠——浅色处抠成洞，
+// despill 又把「白底的峰值通道 = 红」压掉，画面整片发灰。旧代码覆盖率落在区间内，全程静默。
+{
+	const width = 400;
+	const height = 1200;
+	const sheet = async (bg: [number, number, number], figure: [number, number, number]) => {
+		const raw = Buffer.alloc(width * height * 3);
+		for (let y = 0; y < height; y++) {
+			for (let x = 0; x < width; x++) {
+				const o = (y * width + x) * 3;
+				const inside = x >= 150 && x < 250 && y >= 100 && y < 1100;
+				const c = inside ? figure : bg;
+				raw[o] = c[0]!;
+				raw[o + 1] = c[1]!;
+				raw[o + 2] = c[2]!;
+			}
+		}
+		return sharp(raw, { raw: { width, height, channels: 3 } }).png().toBuffer();
+	};
+	const reject = async (bg: [number, number, number]) => {
+		try {
+			await cutout(await sheet(bg, [40, 40, 40]));
+			return '';
+		} catch (error) {
+			return error instanceof Error ? error.message : String(error);
+		}
+	};
+	const white = await reject([255, 255, 255]);
+	const grey = await reject([240, 240, 240]);
+	// 反面：浅色但仍是**饱和**的色键色（浅蓝，极差 135）不该被门槛误拦。
+	let paleKeyCoverage = -1;
+	try {
+		paleKeyCoverage = (await cutout(await sheet([120, 200, 255], [40, 40, 40]))).coverage;
+	} catch {
+		paleKeyCoverage = -1;
+	}
+	check(
+		'M50',
+		white.includes('色键色') && white.includes('255') && grey.includes('色键色'),
+		`白底 / 浅灰底被底体检拒绝（${white.slice(0, 44)}…）`,
+	);
+	check(
+		'M51',
+		paleKeyCoverage > 0.02 && paleKeyCoverage < 0.97,
+		`浅色但饱和的色键底不被误拦（浅蓝，前景 ${(paleKeyCoverage * 100).toFixed(1)}%）`,
+	);
+}
+
+/* ── 18. 台账对账：登记指向不存在的文件要报出来 ── */
 
 await writeFile(
 	join(dir, 'assets', 'generated.json'),
@@ -691,7 +762,7 @@ check(
 	`台账对账报出指向不存在文件的登记（${readiness.danglingAssets.join('、') || '无'}）`,
 );
 
-/* ── 18. 并发：catalog 里谁声明了可重叠，提示词里怎么教 ── */
+/* ── 19. 并发：catalog 里谁声明了可重叠，提示词里怎么教 ── */
 
 // 并发的开关是工具定义上的 `isConcurrencySafe`，声明在 catalog 的 `concurrent`（缺省即独占）。
 // 这里锁住「谁独占」这件事：set_stage_style 读-改-写 theme.json 且没有锁，只有它不能并发。

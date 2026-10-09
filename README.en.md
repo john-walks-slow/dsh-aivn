@@ -522,7 +522,11 @@ candidates and let the user pick" only works if the user can actually see them.
   in the prompt. It only decides the neutral take's background; variants follow their reference image.
 - **Cutout**: a sprite must be a transparent PNG. Through `generate_asset` the engine cuts it
   automatically (flat key colour, global key, per-pixel edge coverage solve — `src/media/cutout.ts`);
-  on the atomic path, call `cut` after `generate_image` produces a candidate. When the edges are
+  on the atomic path, call `cut` after `generate_image` produces a candidate. **The background must be
+  a saturated key colour**: if the border-median background has a channel spread below 96 (white,
+  light grey, photographic), the cut fails immediately and tells you to regenerate — a white key
+  punches holes where the character is pale, and `despill` then clamps the wrong channel and washes
+  the whole picture out. When the edges are
   dirty, **do not regenerate** — a new generation is a different picture: re-run `cut` with different
   knobs **on the same source** (the source lives under `media-cache/sprite-sources/<spriteId>/`, or
   keep one via `import_asset`'s `original`). Its five knobs map to five environment variables:

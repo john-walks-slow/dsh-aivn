@@ -148,6 +148,8 @@ Ultra-fine whisper-light colored outlines, clean translucent coloring, no thick 
       不做色键底、不抠底——**通用出图，画幅用 `aspectRatio`（默认 16:9）**。要立绘就在这里自己把纯色底
       （默认纯绿 `#00FF00`；绿色系主体换纯品红 `#FF00FF`）、平涂、景别写进 prompt。
     - `cut`：把纯色底候选抠成透明 PNG（`source` + 可选调参）；抠脏了对**同一张**重调再跑，别重新出图。
+      **底色必须是饱和的色键色**（纯绿 / 纯品红）：白底、浅灰底会被当场拒绝——生图模型偶尔不照 prompt 走，
+      **挑候选时先看底色**，不是色键色的那张不能抠（抠出来是镂空 + 发灰），换一张或让它重出。
     - `import_asset`：把一张图登记成素材（`source` 给剧目内路径 / 网址，`kind` 必填；立绘登记**已抠好的透明 PNG**，
       再给 `spriteId` / `variant` / `framing` / `stature` / `description`；`original` 留抠底前原片以便重抠）。
 - **没配生图后端**：把图单交给用户（或从免费源找来），用 `import_asset` 登记——它写 `assets/`、补素材表描述、
