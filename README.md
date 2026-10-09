@@ -473,7 +473,7 @@ DSH 把它们放进同一个并行池，等待不叠加。`set_stage_style` 是�
 | --- | --- | --- |
 | `validate_play` | — | 剧目自查：`play.json` 读不读得出来（缺字段、坏 JSON 会给原因）、`craft` 里有没有引擎不认的取值、状态文件好不好、故事前提、角色卡张数、立绘、背景、素材条数、出图台账里有没有指向不存在文件的登记。刚写过剧目文件之后调它。**没有硬门槛**，缺什么都能开演 |
 | `set_stage_style` | — | 写剧目根的 `theme.json`（舞台皮肤：台词条、选项卡、衬底、圆角、字体、主色），写完把全量皮肤推给同剧目已打开的舞台。三态：省略 = 不动、给值 = 改、`null` = 回默认；不带参数调用 = 看当前值。值格式与可设置的键见上 |
-| `generate_image` | 生图后端 | **纯生成**：一段画面描述 → 一张**候选图**（回执给文件路径与预览），返回时**不绑定**任何剧目目标、不抠底、不登记。画幅用 `aspectRatio`（默认 16:9）；`references` 可垫主体 id / 剧目内路径 / http(s) 网址。落成素材另走 `cut` / `import_asset`（或直接 `generate_asset`） |
+| `generate_image` | 生图后端 | **只出候选**：一段画面描述 → 一张**候选图**（回执给文件路径与预览），**不抠底、不登记**。给了 `kind`（background / cg / sprite）就走剧目感知的那条路——按落位拼提示词后缀、落草稿区、画幅跟着 `framing` 走；不给 `kind` 就是不绑剧目的通用候选，画幅用 `aspectRatio`（默认 16:9）。`references` 可垫主体 id / 剧目内路径 / http(s) 网址。落成素材另走 `cut` / `import_asset`（或直接 `generate_asset`） |
 | `cut` | — | **抠底**：纯色底的图 → 透明 PNG（只写输出，**不改源图**）。`source` 给剧目内相对路径，`output` 不给就写到候选区。五档调参见下（`tolerance` / `spill` / `edgeBand` / `keySmooth` / `solidResidual`）。立绘登记前先跑它；抠脏了就对着**同一张**源图重调再跑。**不依赖生图后端** |
 | `import_asset` | — | 把一张**图登记**成剧目素材：写 `assets/`、补素材表（呈现声明 + 描述）、记台账，**不抠底**。`source` 给剧目内相对路径或 http(s) 网址；落位**显式给**——`kind`（background / cg / sprite）必填，立绘再给 `spriteId` / `variant` / `framing` / `stature` / `title`。立绘要传**已抠好的透明 PNG**（外部来源先 `cut`）；`original` 可留抠底前原片以便重抠。**不依赖生图后端** |
 | `generate_asset` | 生图后端 | **一键**：出图 +（立绘）自动抠底 + 登记，一次完成，回执给最终素材路径。参数与 `import_asset` 的落位一致（`kind` + `name` / `spriteId` / `variant` / `framing` / `stature`），立绘另收 `keyColor`（色键底色，见下）。**只有这条路**由引擎自动做色键底、身份锁、差分垫 neutral；同名素材已有则直接跳过 |
