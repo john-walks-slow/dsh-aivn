@@ -7,7 +7,6 @@
 export {
 	aspectMatches,
 	extOf,
-	higherTier,
 	IMAGE_ASPECTS,
 	IMAGE_SIZES,
 	imageSizeText,
