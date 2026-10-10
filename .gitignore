@@ -23,3 +23,10 @@ docs/research/
 *.tgz
 # 素材链路离线套件的临时打包产物（e2e:media 跑完自己删）
 e2e/.media-check.mjs
+
+# 本机工具链与运行期的临时产物，不进仓库：
+# .mnemon 是 mnemon 的记忆库；.pi 是 pi-mcp-adapter 读的 MCP 配置（指向本机 kandev 与
+# api-vault，对 clone 的人只是两个跑不起来的服务）；.tmp 是临时脚本的落点。
+.mnemon/
+.pi/
+.tmp/
