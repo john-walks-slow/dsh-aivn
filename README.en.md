@@ -222,7 +222,7 @@ The remaining fields (all optional):
 | `newGamePlus` | New-game-plus switch (default `false`). When on, a session newly opened in the same workspace (a new playthrough) gets the previously reached endings injected into the prompt — see "Endings and new game plus" |
 | `scriptLanguage` | Script language (ISO 639-1). Defaults to following whatever language the player speaks |
 | `voiceLanguage` / `defaultVoiceId` / `cover` | Voice and cover: they belong to the AIVN app; this plugin doesn't read them yet |
-| `image` | `{"model": "…", "size": "2K"}`: **this play's own image model and size tier**, overriding the deployment settings (each field overrides only itself; leave it out to follow the deployment). One play may want 2K sprites for cutout while another is fine with 1K CGs |
+| `image` | `{"model": "…", "size": "2K"}`: **this play's own image model and size tier**, overriding the deployment settings (each field overrides only itself; leave it out to follow the deployment). One play may want higher-resolution art while another is fine with 1K CGs |
 | `agents` | Agent runtime settings: they belong to the AIVN app; this plugin doesn't read them yet |
 
 ### Endings and new game plus
@@ -575,8 +575,10 @@ candidates and let the user pick" only works if the user can actually see them.
 **Reference images are the only reliable way to keep a character consistent**: a non-`neutral`
 sprite automatically gets that subject's committed `neutral` as its reference (prompt wording
 cannot lock a face). So the order per subject is: generate the neutral, commit one, then derive the
-other variants. And no format but `gemini` can reach 2K — cutout jaggies are only softened by
-resolution, so use `gemini` for high-quality sprites.
+other variants. **Resolution is a configuration matter** (`imageSize`; a play can override it with
+`image.size` in `play.json`): the plugin never raises the tier on its own, sprites included. Do note
+the per-format caps — `modelslab` is capped at 1024 per side, `openai` takes literal sizes, and only
+`gemini` understands the `1K`/`2K`/`4K` tiers.
 
 `references` accepts three forms: a **subject id** (uses that subject's committed `neutral`), a
 **play-relative path**, or an **http(s) URL** (downloaded into memory, never to disk: private,

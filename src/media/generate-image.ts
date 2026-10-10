@@ -63,8 +63,6 @@ export async function draft(opts: PlayAssetsOptions, target: AssetTarget, prompt
 		prompt: full,
 		aspectRatio: spec.aspect,
 		...(refs.length > 0 ? { references: refs.map(({ mimeType, data }) => ({ mimeType, data })) } : {}),
-		// 立绘要抠底，源图分辨率是唯一能压住轮廓锯齿的手段；背景与 CG 不挑这个。
-		...(spec.kind === 'sprite' ? { minTier: '2K' as const } : {}),
 		...(model ? { model } : {}),
 		...(size ? { size } : {}),
 	});
