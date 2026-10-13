@@ -794,3 +794,7 @@ Suites:
   beat, so it is cheaper than `stage`.
 
 Screenshots land in `e2e-artifacts/` (not tracked by git).
+
+## Community
+
+- Thanks to the [LINUX DO](https://linux.do/) community for providing the discussion environment.

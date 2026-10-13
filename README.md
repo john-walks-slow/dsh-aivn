@@ -792,3 +792,7 @@ dsh-e2e stop
   字面翻成「退出全屏」，再按还原。只花那一拍的 LLM，比 `stage` 便宜。
 
 截图落在 `e2e-artifacts/`（不进 git）。
+
+## 社区
+
+- 感谢 [LINUX DO](https://linux.do/) 社区提供的交流环境。
