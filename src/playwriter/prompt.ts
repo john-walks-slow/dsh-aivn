@@ -13,7 +13,7 @@
  * 限制级通道 / 记忆详情与归档检索还没实现，对应的整章一律删掉，不留悬空承诺。
  */
 
-import { ACTOR_RULES, COMMENT_HEAD, CONTRACT_INTRO, DIALOGUE_TAGS, STOP_TAG_RULES } from '@aivn/agent';
+import { ACTOR_RULES, COMMENT_HEAD, CONTRACT_INTRO, DIALOGUE_TAGS, STOP_TAG_RULES, TONE_RULES } from '@aivn/agent';
 import { PLAY_FILES } from '../play/play-files';
 
 /** 开场：这份提示词服务的角色，以及玩家发来的消息的两种含义。 */
@@ -63,6 +63,8 @@ ${ACTOR_RULES}
 ## 台词（三类，正文为原生文本，不要转义）
 
 ${DIALOGUE_TAGS}
+
+${TONE_RULES}
 
 ${COMMENT_HEAD}它不上舞台、不产出任何事件。
 

@@ -1,22 +1,22 @@
 /**
- * 语音预取管线：`say` 行的文本流 → 分句 → 并发合成 → 音频就绪。
+ * 语音预取管线：`say` 行的文本流 → 攒成整句 → 并发合成 → 音频就绪。
  *
- * 从 AIVN `apps/server/src/voice.ts` 搬。那边的注释把设计说清楚了，照抄在这里：
+ * 从 AIVN `apps/server/src/voice.ts` 搬，那边把设计写得最细。要点：
  *
- * - **边写边合成**：剧作家还在流式吐这一行的字，短语一到就送去合成——等整行写完再合成，
- *   玩家要盯着静音的字幕等好几秒。
+ * - **一行 `<say>` = 一次请求 = 一个文件**：文字在行内攒着，`say_end` 时整句送出去。
+ *   早先是边写边切成短语、每个短语一个文件、客户端按短语序号拼接——那样任何一处丢帧
+ *   都表现成「只响前半句」，所以两条线一起改成整句（代价：这一行的声音要等整句合成完）。
  * - **并发 2**：够摊掉单次请求的往返，也不会把免费额度一次打空。
- * - **两道门**：`enabled` 是玩家按的语音总开关；`paused` 是客户端背压（未消费的短语积压了
+ * - **两道门**：`enabled` 是玩家按的语音总开关；`paused` 是客户端背压（已到货未播的行积压了
  *   或玩家在快进）——后者省的是配额。
- * - **失败不阻塞演出**：合成挂了只打一行告警、丢掉那一句，台词照常演。
+ * - **失败不阻塞演出**：合成挂了告警、明说一帧 `failed`（客户端据此把「合成中」摘掉），台词照常演。
  */
-import { PhraseChunker } from '@aivn/core';
+import { normalizeForTts, stripToneTags } from '@aivn/core';
 
 export interface VoiceReadyEvent {
 	/** 所属 `say` 行的帧号（就是 `say_start` 那一帧的 seq，客户端按它关联行）。 */
 	lineSeq: number;
-	phrase: number;
-	state: 'started' | 'ready';
+	state: 'started' | 'ready' | 'failed';
 	url?: string;
 }
 
@@ -31,16 +31,22 @@ export interface VoicePipelineOptions {
 	onError?: (message: string) => void;
 }
 
+interface VoiceJob {
+	text: string;
+	voiceId: string;
+	lineSeq: number;
+}
+
 export class VoicePipeline {
 	private enabled = true;
 	private paused = false;
-	private chunker: PhraseChunker | null = null;
 	private voiceId: string | null = null;
 	private lineSeq = 0;
-	private phraseNo = 0;
+	/** 正在攒的这一行台词：等 `say_end` 了整句一起送。 */
+	private text = '';
 	private inFlight = 0;
 	private disposed = false;
-	private readonly queue: Array<{ text: string; voiceId: string; lineSeq: number; phrase: number }> = [];
+	private readonly queue: VoiceJob[] = [];
 
 	constructor(private readonly opts: VoicePipelineOptions) {}
 
@@ -61,26 +67,25 @@ export class VoicePipeline {
 		if (!paused) this.pump();
 	}
 
-	/** `say_start`：开新行的分句器。没有音色的角色不开。 */
+	/** `say_start`：认领这一行的帧号与音色（没有音色的角色不攒文字）。 */
 	lineStart(lineSeq: number, charId: string): void {
 		this.closeLine();
 		if (!this.enabled) return;
-		const voiceId = this.opts.voiceOf(charId);
-		if (!voiceId) return;
-		this.voiceId = voiceId;
+		this.voiceId = this.opts.voiceOf(charId) ?? null;
 		this.lineSeq = lineSeq;
-		this.phraseNo = 0;
-		this.chunker = new PhraseChunker({ onPhrase: (text) => this.enqueue(text) });
 	}
 
 	/** `say_text` 的文本增量。 */
 	feedText(delta: string): void {
-		this.chunker?.push(delta);
+		if (this.voiceId) this.text += delta;
 	}
 
-	/** `say_end`：冲刷残余短语。 */
+	/** `say_end`：台词写完，整句一次送出去。 */
 	lineEnd(): void {
-		this.chunker?.flush();
+		const voiceId = this.voiceId;
+		const lineSeq = this.lineSeq;
+		const text = this.takeText();
+		if (voiceId && text) this.enqueue({ text, voiceId, lineSeq });
 		this.closeLine();
 	}
 
@@ -91,17 +96,22 @@ export class VoicePipeline {
 	}
 
 	private closeLine(): void {
-		this.chunker?.reset();
-		this.chunker = null;
 		this.voiceId = null;
+		this.text = '';
 	}
 
-	private enqueue(text: string): void {
-		if (!this.voiceId || !this.enabled) return;
-		const job = { text, voiceId: this.voiceId, lineSeq: this.lineSeq, phrase: this.phraseNo++ };
+	/** 取走攒下的台词并整理成可送 TTS 的样子；没有可读的字就返回 null（纯标点/省略号不合成）。 */
+	private takeText(): string | null {
+		const text = speakable(this.text);
+		this.text = '';
+		return text;
+	}
+
+	private enqueue(job: VoiceJob): void {
+		if (!this.enabled) return;
 		this.queue.push(job);
 		// 先报「开始合成」再排队：客户端要在这条消息到达时就亮起喇叭，而不是等第一个字节回来。
-		this.opts.emit({ lineSeq: job.lineSeq, phrase: job.phrase, state: 'started' });
+		this.opts.emit({ lineSeq: job.lineSeq, state: 'started' });
 		this.pump();
 	}
 
@@ -116,13 +126,14 @@ export class VoicePipeline {
 				.synth(job.text, job.voiceId)
 				.then(({ url }) => {
 					if (!this.disposed && this.enabled) {
-						this.opts.emit({ lineSeq: job.lineSeq, phrase: job.phrase, state: 'ready', url });
+						this.opts.emit({ lineSeq: job.lineSeq, state: 'ready', url });
 					}
 				})
 				.catch((error: unknown) => {
-					// 音频失败不阻塞演出：告警后丢弃该句（客户端的喇叭就此熄灭）。
+					// 音频失败不阻塞演出：告警、明说一帧 failed（客户端据此摘掉「合成中」），台词照常演。
 					const why = error instanceof Error ? error.message : String(error);
 					(this.opts.onError ?? ((message: string) => console.warn(message)))(`[dsh-aivn] TTS 失败（跳过）: ${why}`);
+					if (!this.disposed) this.opts.emit({ lineSeq: job.lineSeq, state: 'failed' });
 				})
 				.finally(() => {
 					this.inFlight -= 1;
@@ -133,19 +144,13 @@ export class VoicePipeline {
 }
 
 /**
- * 一整段台词的分句。
+ * 送去合成的文本：整理过、且至少有字可读（纯标点、纯省略号不合成）。
  *
- * 流式那一路是边写边分的（`VoicePipeline`），这里给的是**已经写完的整行**——
- * 舞台重建时要靠它拼出缓存文件名，去盘上找同一句话的那份音频。`idleFlushMs: 0` 关掉空闲冲刷：
- * 那个超时是给流式预取用的（半句话先送去合成），整段在手时它只会把一句话切成两半。
- *
- * 注意分句**可能**与流式那一遍不同：流式的行若中途停过 700ms 以上，那半句已经被单独合成过。
- * 缓存按「分出来的短语」寻址，所以这种行重建之后找不到音频——那一版就当没有配音，画面照演。
+ * 语气标记原样留着（`[whispering]` 要对 Fish 生效），但判有没有字可读看剥掉标记之后的那份——
+ * 只有 `[sigh]` 的一行本来就没什么好念的。与 `apps/server/src/voice.ts` 同一口径。
  */
-export function chunkLine(text: string): string[] {
-	const phrases: string[] = [];
-	const chunker = new PhraseChunker({ idleFlushMs: 0, onPhrase: (phrase) => phrases.push(phrase) });
-	chunker.push(text);
-	chunker.flush();
-	return phrases;
+export function speakable(text: string): string | null {
+	const piece = normalizeForTts(text.trim());
+	if (piece === '' || !/[\p{L}\p{N}]/u.test(stripToneTags(piece))) return null;
+	return piece;
 }

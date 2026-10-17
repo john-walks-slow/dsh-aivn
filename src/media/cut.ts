@@ -32,7 +32,7 @@ export interface CutRequest {
 export interface CutResult {
 	path: string;
 	absPath: string;
-	cutout: { coverage: number; figureHeight: number };
+	cutout: { coverage: number; figureTop: number; figureHeight: number };
 }
 
 /** 立绘留底原片（抠底前那一张）的剧目内相对路径，没有则 null。 */
@@ -64,7 +64,7 @@ export async function cutFile(opts: PlayAssetsOptions, request: CutRequest): Pro
 
 	let srcRel: string;
 	if (request.target) {
-		if (request.target.kind !== 'sprite') throw new Error('只有立绘需要抠底（素材引用请给 sprite:<主体id>）');
+		if (request.target.kind !== 'sprite') throw new Error('只有立绘需要抠底（请给 assets/sprites/<主体id>/<差分>.png）');
 		const kept = spriteSourceRel(dir, request.target);
 		if (!kept) {
 			const id = request.target.spriteId ?? request.target.name ?? '';
@@ -77,7 +77,7 @@ export async function cutFile(opts: PlayAssetsOptions, request: CutRequest): Pro
 		srcRel = kept;
 	} else {
 		srcRel = (request.source ?? '').trim();
-		if (srcRel === '') throw new Error('cut 要 source（一张纯色底图的路径，或 sprite:<主体id> 这样的素材引用）');
+		if (srcRel === '') throw new Error('cut 要 source（一张纯色底图或已入库立绘的剧目内相对路径）');
 	}
 
 	const srcAbs = resolveInPlay(dir, srcRel);
@@ -95,6 +95,6 @@ export async function cutFile(opts: PlayAssetsOptions, request: CutRequest): Pro
 	return {
 		path: relative(dir, outAbs).split(/[\\/]/).join('/'),
 		absPath: outAbs,
-		cutout: { coverage: cut.coverage, figureHeight: cut.figureHeight },
+		cutout: { coverage: cut.coverage, figureTop: cut.figureTop, figureHeight: cut.figureHeight },
 	};
 }

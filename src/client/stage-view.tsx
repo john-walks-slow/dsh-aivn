@@ -68,7 +68,7 @@ type StageFrame =
 	| { seq: number; kind: 'ir'; event: StageEvent }
 	| { seq: number; kind: 'beat'; state: 'start' | 'end' }
 	/** `lineSeq` 是那一行 `say_start` 帧的 seq，不是本帧的 seq。 */
-	| { seq: number; kind: 'voice'; lineSeq: number; phrase: number; state: 'started' | 'ready'; url?: string }
+	| { seq: number; kind: 'voice'; lineSeq: number; state: 'started' | 'ready' | 'failed'; url?: string }
 	/** 剧目皮肤：全量快照（最后一条就是当前该用的那套），幂等。 */
 	| { seq: number; kind: 'style'; theme: Record<string, string> }
 	/** 前面推的一切作废，紧接着的帧才是这条会话现在的样子（回退 / 重写 / 分支 / 重启）。 */
@@ -378,8 +378,9 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 
 			if (frame.kind === 'voice') {
 				// `lineSeq` 是那一行 `say_start` 帧的 seq——语音挂在台词行上，不是挂在流的位置上。
-				if (frame.state === 'ready' && frame.url) director.handleAudio({ seq: frame.lineSeq, phrase: frame.phrase, url: frame.url });
-				else if (frame.state === 'started') director.markPending(frame.lineSeq, frame.phrase);
+				if (frame.state === 'ready' && frame.url) director.handleAudio({ seq: frame.lineSeq, url: frame.url });
+				else if (frame.state === 'started') director.markPending(frame.lineSeq);
+				else if (frame.state === 'failed') director.audioFailed(frame.lineSeq);
 				requestRender();
 				return;
 			}
@@ -595,9 +596,6 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 		ready: panelReady,
 		stopType: stop?.stopType ?? null,
 		isNoStop,
-		// 「继续卡片」是 AIVN 的一个开局设置，插件这边还没有写它的界面，
-		// 读那个 flag 恒为 false（等于一段永远进不去的分支），所以先按关着算。
-		continueCardOn: false,
 		// 终局：不给任何出口。结局那一轮没有 `<stop>`，不显式挡掉就会摆出「点舞台继续」。
 		ended,
 	});
@@ -701,7 +699,7 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 				voiceState={(seq) => director.voiceState(seq)}
 				onUnlock={unlockVoice}
 				onTurbo={setTurbo}
-				canContinue={affordance.clickToContinue}
+				canContinue={affordance}
 				onContinue={continueOn}
 				ended={ended}
 				overlay={
@@ -718,11 +716,9 @@ export const StageView: FC<StageViewProps> = ({ sessionId }) => {
 						<StopPanel
 							stop={stop}
 							isNoStop={isNoStop}
-							showContinue={affordance.showContinueCard}
 							disabled={busy}
 							onChoice={(choice) => void send(stop?.options?.[choice]?.text ?? '')}
 							onFree={(text) => void send(text)}
-							onContinue={continueOn}
 						/>
 					) : null
 				}

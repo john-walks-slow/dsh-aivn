@@ -51,7 +51,7 @@ export function createCutTool(ctx: PlayContext, media: MediaBackends) {
 			}
 			lines.push(
 				'下一步：把这张透明 PNG 交给 `import_asset`（kind=sprite）登记。' +
-					'**要重抠一张已入库的立绘**：`source` 给 `sprite:<主体id>[/<差分名>]`，不给 `output` 就是原地重抠' +
+					'**要重抠一张已入库的立绘**：`source` 给 `assets/sprites/<主体id>/<差分名>.png`，不给 `output` 就是原地重抠' +
 					'（拿它的抠底前原片重跑，画面不变、只改透明边缘）。',
 			);
 			return lines.join('\n');

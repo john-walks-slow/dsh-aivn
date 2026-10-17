@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import type { StageHub } from '../hub';
 import { readVoiceMap } from '../play/play-context';
 import type { FishTts } from './tts';
-import { chunkLine, VoicePipeline } from './voice';
+import { speakable, VoicePipeline } from './voice';
 import type { VoicedLine } from '../stage/stage-log';
 
 /** 音频缓存目录（相对剧目根）。 */
@@ -76,8 +76,9 @@ export class VoiceHost {
 	 * 舞台重建时补发语音：**只补盘上已经有的那几句**。
 	 *
 	 * 重建会把台词行重新编号，旧的语音帧（挂着旧行号）随之作废；音频本身是内容寻址的，
-	 * 于是按同一套算法（分句 + `sha1(模型, 音色, 短语)`）找回文件名，命中就补一帧 `ready`，
-	 * 客户端的「重听」按钮照常可用。没命中就什么都不发——重放旧台词不该再打一次 TTS。
+	 * 于是按同一套算法（`normalizeForTts` + `sha1(模型, 音色, 文本)`）找回文件名，命中就补一帧
+	 * `ready`，客户端的「重听」按钮照常可用。没命中就什么都不发——重放旧台词不该再打一次 TTS。
+	 * 一行一条请求之后这里也不再分句：整行算一个文件名，分句那一层连着一起没了。
 	 */
 	replayCached(sessionId: string, playDir: string, lines: readonly VoicedLine[]): void {
 		const tts = this.ttsOf();
@@ -86,15 +87,14 @@ export class VoiceHost {
 		for (const line of lines) {
 			const voiceId = voices.get(line.charId);
 			if (!voiceId) continue;
-			chunkLine(line.text).forEach((phrase, index) => {
-				const file = tts.fileNameOf(phrase, voiceId);
-				if (!existsSync(join(playDir, TTS_CACHE_DIR, file))) return;
-				this.hub.appendVoice(sessionId, {
-					lineSeq: line.lineSeq,
-					phrase: index,
-					state: 'ready',
-					url: `/aivn/audio?session=${encodeURIComponent(sessionId)}&file=${encodeURIComponent(file)}`,
-				});
+			const text = speakable(line.text);
+			if (!text) continue;
+			const file = tts.fileNameOf(text, voiceId);
+			if (!existsSync(join(playDir, TTS_CACHE_DIR, file))) continue;
+			this.hub.appendVoice(sessionId, {
+				lineSeq: line.lineSeq,
+				state: 'ready',
+				url: `/aivn/audio?session=${encodeURIComponent(sessionId)}&file=${encodeURIComponent(file)}`,
 			});
 		}
 	}

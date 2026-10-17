@@ -43,7 +43,7 @@ export type StageFrame = StageFrameBody & { seq: number };
 type StageFrameBody =
 	| { kind: 'ir'; event: StageEvent }
 	| { kind: 'beat'; state: BeatState }
-	| { kind: 'voice'; lineSeq: number; phrase: number; state: 'started' | 'ready'; url?: string }
+	| { kind: 'voice'; lineSeq: number; state: 'started' | 'ready' | 'failed'; url?: string }
 	| { kind: 'style'; theme: Record<string, string> }
 	/** `running` = 重建这一刻 Agent 在不在跑（见 `StageHub.reset`）。 */
 	| { kind: 'reset'; running: boolean }
@@ -79,10 +79,10 @@ export class StageHub {
 		return this.push(sessionId, { kind: 'beat', state });
 	}
 
-	/** 收下一帧语音状态（哪一行、第几个短语、合成中还是好了）。 */
+	/** 收下一帧语音状态（哪一行、合成中／好了／合成不出来）。 */
 	appendVoice(
 		sessionId: string,
-		voice: { lineSeq: number; phrase: number; state: 'started' | 'ready'; url?: string },
+		voice: { lineSeq: number; state: 'started' | 'ready' | 'failed'; url?: string },
 	): StageFrame {
 		return this.push(sessionId, { kind: 'voice', ...voice });
 	}
